@@ -1,4 +1,4 @@
-    "use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
@@ -133,6 +133,14 @@ function classifyUnmatched(email: string, subject?: string | null, snippet?: str
   return { label, confidence };
 }
 
+function fmtWhen(iso: string) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
 export default function UnmatchedPage() {
   const [ready, setReady] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -161,7 +169,7 @@ export default function UnmatchedPage() {
     setUid(user.id);
 
     const res = await fetch(`/api/unmatched/list?uid=${user.id}`);
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       setErr(j?.error || "Failed to load unmatched list");
       setReady(true);
@@ -184,7 +192,7 @@ export default function UnmatchedPage() {
       body: JSON.stringify({ uid, email }),
     });
 
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     setBusy(false);
 
     if (!res.ok) {
@@ -208,7 +216,7 @@ export default function UnmatchedPage() {
       body: JSON.stringify({ uid, email }),
     });
 
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     setBusy(false);
 
     if (!res.ok) {
@@ -216,19 +224,20 @@ export default function UnmatchedPage() {
       return;
     }
 
-    setMsg(`Created contact: ${j.display_name}`);
+    setMsg(`Created contact: ${j.display_name || email}`);
     await load();
   }
 
   async function searchContacts(q: string) {
     if (!uid) return;
-    if (!q.trim()) {
+    const query = q.trim();
+    if (!query) {
       setContactResults([]);
       return;
     }
 
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json();
+    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(query)}`);
+    const j = await res.json().catch(() => ({}));
     if (!res.ok) {
       setContactResults([]);
       return;
@@ -253,7 +262,7 @@ export default function UnmatchedPage() {
       body: JSON.stringify({ uid, email, contact_id: contactId }),
     });
 
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
     setBusy(false);
 
     if (!res.ok) {
@@ -274,115 +283,51 @@ export default function UnmatchedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visible = useMemo(() => {
-    // Hide ignored by default
-    return rows.filter((r) => r.status !== "ignored");
-  }, [rows]);
+  const visible = useMemo(() => rows.filter((r) => r.status !== "ignored"), [rows]);
+  const total = visible.length;
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (!ready) return <div className="page">Loading…</div>;
 
   return (
-    <div style={{ padding: 40, maxWidth: 1100 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12 }}>
+    <div>
+      {/* Header */}
+      <div className="row" style={{ alignItems: "flex-end", justifyContent: "space-between" }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>/unmatched</h1>
-          <div style={{ marginTop: 6, color: "#666" }}>
-            Review emails found in Sent that aren’t tied to your CRM yet.{" "}
-            <strong>{visible.length}</strong> items.
+          <h1 className="h1">Unmatched</h1>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Outbound emails in <span className="bold">Sent</span> that aren’t tied to a contact yet.{" "}
+            <span className="badge">{total} to review</span>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <a
-            href="/morning"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              textDecoration: "none",
-              color: "#111",
-            }}
-          >
-            Morning
-          </a>
-          <a
-            href="/contacts"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              textDecoration: "none",
-              color: "#111",
-            }}
-          >
-            Contacts
-          </a>
-          <button
-            onClick={load}
-            disabled={busy}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-          >
+        <div className="row">
+          <button className="btn" onClick={load} disabled={busy}>
             Refresh
           </button>
         </div>
       </div>
 
+      {/* Status */}
       {(err || msg) && (
-        <div style={{ marginTop: 14, color: err ? "crimson" : "green", fontWeight: 800, whiteSpace: "pre-wrap" }}>
-          {err || msg}
+        <div className="card cardPad" style={{ marginTop: 14, borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+            {err || msg}
+          </div>
         </div>
       )}
 
+      {/* Link drawer */}
       {selectedEmail && (
-        <div style={{ marginTop: 16, border: "1px solid #ddd", borderRadius: 14, padding: 14, background: "#fafafa" }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Link email → contact</div>
-          <div style={{ color: "#666", marginTop: 6 }}>
-            Email: <strong>{selectedEmail}</strong>
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <input
-              value={contactQuery}
-              onChange={(e) => {
-                const v = e.target.value;
-                setContactQuery(v);
-                setSelectedContactId("");
-                searchContacts(v);
-              }}
-              placeholder="Search contacts by name (e.g., 'Brad' or 'Ray')"
-              style={{ padding: 10, width: 420, borderRadius: 10, border: "1px solid #ddd" }}
-            />
-
-            <select
-              value={selectedContactId}
-              onChange={(e) => setSelectedContactId(e.target.value)}
-              style={{ padding: 10, minWidth: 360 }}
-            >
-              <option value="">Select a contact…</option>
-              {contactResults.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.display_name} • {c.category}
-                  {c.tier ? ` • ${c.tier}` : ""}
-                  {c.email ? ` • ${c.email}` : ""}
-                </option>
-              ))}
-            </select>
-
+        <div className="cardSoft cardPad" style={{ marginTop: 16 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div>
+              <div className="h2">Link email to contact</div>
+              <div className="muted" style={{ marginTop: 6, wordBreak: "break-word" }}>
+                Email: <span className="bold">{selectedEmail}</span>
+              </div>
+            </div>
             <button
-              onClick={() => linkEmail(selectedEmail, selectedContactId)}
-              disabled={busy || !selectedContactId}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                cursor: "pointer",
-                fontWeight: 900,
-              }}
-            >
-              Link
-            </button>
-
-            <button
+              className="btn"
               onClick={() => {
                 setSelectedEmail(null);
                 setSelectedContactId("");
@@ -390,93 +335,119 @@ export default function UnmatchedPage() {
                 setContactResults([]);
               }}
               disabled={busy}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
             >
-              Cancel
+              Close
             </button>
           </div>
 
-          <div style={{ marginTop: 10, color: "#777", fontSize: 12 }}>
-            Linking will: (1) add this email to <code>contact_emails</code>, (2) mark unmatched as <code>linked</code>.
+          <hr className="hr" />
+
+          <div className="row">
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div className="small muted" style={{ fontWeight: 900, marginBottom: 6, letterSpacing: 0.2 }}>
+                Search
+              </div>
+              <input
+                className="input"
+                value={contactQuery}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setContactQuery(v);
+                  setSelectedContactId("");
+                  searchContacts(v);
+                }}
+                placeholder="Search contacts by name (e.g., Ray, Brad, Jenna)…"
+              />
+            </div>
+
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div className="small muted" style={{ fontWeight: 900, marginBottom: 6, letterSpacing: 0.2 }}>
+                Select contact
+              </div>
+              <select className="select" value={selectedContactId} onChange={(e) => setSelectedContactId(e.target.value)}>
+                <option value="">Select a contact…</option>
+                {contactResults.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.display_name} • {c.category}
+                    {c.tier ? ` • ${c.tier}` : ""}
+                    {c.email ? ` • ${c.email}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+              <button
+                className="btn btnPrimary"
+                onClick={() => linkEmail(selectedEmail, selectedContactId)}
+                disabled={busy || !selectedContactId}
+              >
+                Link
+              </button>
+            </div>
+          </div>
+
+          <div className="muted small" style={{ marginTop: 10 }}>
+            Linking will add this email to <span className="bold">contact_emails</span> and mark this record as{" "}
+            <span className="bold">linked</span>.
           </div>
         </div>
       )}
 
-      <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+      {/* List */}
+      <div className="stack" style={{ marginTop: 18 }}>
         {visible.map((r) => {
           const rec = classifyUnmatched(r.email, r.last_subject, r.last_snippet);
+          const guess = `${rec.label} • ${Math.round(rec.confidence * 100)}%`;
+
           return (
-            <div
-              key={r.id}
-              style={{
-                border: "1px solid #e5e5e5",
-                borderRadius: 14,
-                padding: 14,
-                background: "#fff",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0 }}>
+            <div key={r.id} className="card cardPad">
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                {/* Left */}
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>{r.email}</div>
-                  <div style={{ marginTop: 6, color: "#666", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span>
-                      Seen: <strong>{r.seen_count}</strong>
-                    </span>
-                    <span>
-                      Last: <strong>{new Date(r.last_seen_at).toLocaleString()}</strong>
-                    </span>
-                    <span>
-                      Status: <strong>{r.status}</strong>
-                    </span>
-                    <span>
-                      Guess: <strong>{rec.label}</strong> ({Math.round(rec.confidence * 100)}%)
-                    </span>
-                    {r.created_contact_id ? (
-                      <span>
-                        Contact: <strong>{r.created_contact_id.slice(0, 8)}…</strong>
-                      </span>
-                    ) : null}
+
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <span className="badge">Seen {r.seen_count}</span>
+                    <span className="badge">Last {fmtWhen(r.last_seen_at)}</span>
+                    <span className="badge">Status {r.status}</span>
+                    <span className="badge">{guess}</span>
+                    {r.created_contact_id ? <span className="badge">Contact created</span> : null}
                   </div>
 
                   {r.last_subject ? (
-                    <div style={{ marginTop: 8, color: "#333" }}>
-                      <strong>Subject:</strong> {r.last_subject}
+                    <div style={{ marginTop: 12 }}>
+                      <div className="small muted" style={{ fontWeight: 900, marginBottom: 4, letterSpacing: 0.2 }}>
+                        Subject
+                      </div>
+                      <div style={{ color: "#222" }}>{r.last_subject}</div>
                     </div>
                   ) : null}
 
-                  {r.last_snippet ? <div style={{ marginTop: 6, color: "#444" }}>{r.last_snippet}</div> : null}
+                  {r.last_snippet ? (
+                    <div style={{ marginTop: 10, color: "#333", lineHeight: 1.45 }}>{r.last_snippet}</div>
+                  ) : null}
 
                   {r.last_thread_link ? (
-                    <div style={{ marginTop: 8 }}>
-                      <a href={r.last_thread_link} target="_blank" rel="noreferrer">
-                        Open Gmail thread
+                    <div style={{ marginTop: 12 }}>
+                      <a className="navLink" href={r.last_thread_link} target="_blank" rel="noreferrer">
+                        Open Gmail thread →
                       </a>
                     </div>
                   ) : null}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 210 }}>
-                  <button
-                    onClick={() => setSelectedEmail(r.email)}
-                    disabled={busy}
-                    style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-                  >
+                {/* Right actions */}
+                <div style={{ width: 240, display: "grid", gap: 10 }}>
+                  <button className="btn btnPrimary" onClick={() => setSelectedEmail(r.email)} disabled={busy}>
                     Link to contact
                   </button>
 
-                  <button
-                    onClick={() => createContact(r.email)}
-                    disabled={busy || !!r.created_contact_id}
-                    style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                  >
+                  <button className="btn" onClick={() => createContact(r.email)} disabled={busy || !!r.created_contact_id}>
                     {r.created_contact_id ? "Contact created" : "Create contact"}
                   </button>
 
-                  <button
-                    onClick={() => ignoreEmail(r.email)}
-                    disabled={busy}
-                    style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                  >
+                  <button className="btn btnDanger" onClick={() => ignoreEmail(r.email)} disabled={busy}>
                     Ignore
                   </button>
                 </div>
@@ -485,7 +456,7 @@ export default function UnmatchedPage() {
           );
         })}
 
-        {visible.length === 0 ? <div style={{ color: "#666" }}>Nothing to review 🎉</div> : null}
+        {visible.length === 0 ? <div className="muted">Nothing to review 🎉</div> : null}
       </div>
     </div>
   );
