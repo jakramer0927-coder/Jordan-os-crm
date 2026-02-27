@@ -13,13 +13,20 @@ type TouchIntent =
   | "event_invite"
   | "other";
 
+type ContactEmail = {
+  id: string;
+  contact_id: string;
+  email: string;
+  is_primary: boolean;
+  created_at: string;
+};
+
 type Contact = {
   id: string;
   display_name: string;
   category: string;
   tier: string | null;
   client_type: string | null;
-  email: string | null;
   created_at: string;
 };
 
@@ -35,17 +42,6 @@ type Touch = {
   source_link: string | null;
 };
 
-type GmailThreadPreview = {
-  threadId: string;
-  subject: string;
-  date: string;
-  from: string;
-  to: string;
-  snippet: string;
-  link: string;
-  messageCount: number;
-};
-
 function categoryPretty(c: string) {
   const s = (c || "").trim();
   if (!s) return "Other";
@@ -57,11 +53,11 @@ export default function ContactDetailPage() {
   const id = (params?.id as string) || "";
 
   const [ready, setReady] = useState(false);
-  const [uid, setUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [touches, setTouches] = useState<Touch[]>([]);
+  const [emails, setEmails] = useState<ContactEmail[]>([]);
 
   // Edit contact
   const [editing, setEditing] = useState(false);
@@ -69,8 +65,13 @@ export default function ContactDetailPage() {
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
-  const [email, setEmail] = useState("");
   const [savingContact, setSavingContact] = useState(false);
+
+  // Email management
+  const [newEmail, setNewEmail] = useState("");
+  const [addingEmail, setAddingEmail] = useState(false);
+  const [updatingPrimary, setUpdatingPrimary] = useState(false);
+  const [deletingEmailId, setDeletingEmailId] = useState<string | null>(null);
 
   // Log touch
   const [logOpen, setLogOpen] = useState(false);
@@ -82,11 +83,10 @@ export default function ContactDetailPage() {
   const [logLink, setLogLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
-  // Gmail panel
-  const [gmailThreads, setGmailThreads] = useState<GmailThreadPreview[]>([]);
-  const [gmailQuery, setGmailQuery] = useState<string | null>(null);
-  const [gmailLoading, setGmailLoading] = useState(false);
-  const [gmailImporting, setGmailImporting] = useState(false);
+  const primaryEmail = useMemo(() => {
+    const p = emails.find((e) => e.is_primary);
+    return p?.email || emails[0]?.email || null;
+  }, [emails]);
 
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
@@ -108,11 +108,9 @@ export default function ContactDetailPage() {
     const sess = await requireSession();
     if (!sess) return;
 
-    setUid(sess.user.id);
-
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, created_at")
+      .select("id, display_name, category, tier, client_type, created_at")
       .eq("id", id)
       .single();
 
@@ -120,6 +118,7 @@ export default function ContactDetailPage() {
       setError(`Contact fetch error: ${cErr.message}`);
       setContact(null);
       setTouches([]);
+      setEmails([]);
       return;
     }
 
@@ -131,7 +130,20 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
-    setEmail(c.email || "");
+
+    const { data: eData, error: eErr } = await supabase
+      .from("contact_emails")
+      .select("id, contact_id, email, is_primary, created_at")
+      .eq("contact_id", id)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true });
+
+    if (eErr) {
+      setError((prev) => prev ?? `Emails fetch error: ${eErr.message}`);
+      setEmails([]);
+    } else {
+      setEmails((eData ?? []) as ContactEmail[]);
+    }
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -154,9 +166,6 @@ export default function ContactDetailPage() {
     setSavingContact(true);
     setError(null);
 
-    const cleanEmail = email.trim().toLowerCase();
-    const emailValue = cleanEmail ? cleanEmail : null;
-
     const { error } = await supabase
       .from("contacts")
       .update({
@@ -164,7 +173,6 @@ export default function ContactDetailPage() {
         category,
         tier,
         client_type: clientType.trim() ? clientType.trim() : null,
-        email: emailValue,
       })
       .eq("id", contact.id);
 
@@ -176,6 +184,87 @@ export default function ContactDetailPage() {
     }
 
     setEditing(false);
+    await fetchAll();
+  }
+
+  async function addEmail() {
+    if (!contact) return;
+    const clean = newEmail.trim().toLowerCase();
+    if (!clean) return;
+
+    setAddingEmail(true);
+    setError(null);
+
+    const shouldBePrimary = emails.length === 0;
+
+    const { error: insErr } = await supabase.from("contact_emails").insert({
+      contact_id: contact.id,
+      email: clean,
+      is_primary: shouldBePrimary,
+    });
+
+    setAddingEmail(false);
+
+    if (insErr) {
+      setError(`Add email error: ${insErr.message}`);
+      return;
+    }
+
+    setNewEmail("");
+    await fetchAll();
+  }
+
+  async function setPrimaryEmail(emailId: string) {
+    if (!contact) return;
+    setUpdatingPrimary(true);
+    setError(null);
+
+    // Best-effort two-step (fine for single-user app)
+    const { error: clearErr } = await supabase
+      .from("contact_emails")
+      .update({ is_primary: false })
+      .eq("contact_id", contact.id);
+
+    if (clearErr) {
+      setUpdatingPrimary(false);
+      setError(`Primary update error: ${clearErr.message}`);
+      return;
+    }
+
+    const { error: setErr } = await supabase
+      .from("contact_emails")
+      .update({ is_primary: true })
+      .eq("id", emailId)
+      .eq("contact_id", contact.id);
+
+    setUpdatingPrimary(false);
+
+    if (setErr) {
+      setError(`Primary update error: ${setErr.message}`);
+      return;
+    }
+
+    await fetchAll();
+  }
+
+  async function deleteEmail(emailId: string) {
+    if (!contact) return;
+    setDeletingEmailId(emailId);
+    setError(null);
+
+    const { error: delErr } = await supabase
+      .from("contact_emails")
+      .delete()
+      .eq("id", emailId)
+      .eq("contact_id", contact.id);
+
+    setDeletingEmailId(null);
+
+    if (delErr) {
+      setError(`Delete email error: ${delErr.message}`);
+      return;
+    }
+
     await fetchAll();
   }
 
@@ -216,97 +305,16 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
-  async function searchGmailThreads() {
-    setError(null);
-    setGmailLoading(true);
-    setGmailThreads([]);
-    setGmailQuery(null);
-
-    const sess = await requireSession();
-    if (!sess) return;
-
-    const contactEmail = (contact?.email || "").trim().toLowerCase();
-    if (!contactEmail) {
-      setGmailLoading(false);
-      setError("Add an email to this contact first (Edit contact → Email).");
-      return;
-    }
-
-    const res = await fetch(
-      `/api/gmail/contact/threads?uid=${encodeURIComponent(sess.user.id)}&email=${encodeURIComponent(contactEmail)}`
-    );
-    const text = await res.text();
-
-    let payload: any = null;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = null;
-    }
-
-    setGmailLoading(false);
-
-    if (!res.ok) {
-      setError(payload?.error || text || `Gmail search failed (status ${res.status})`);
-      return;
-    }
-
-    setGmailThreads((payload?.threads ?? []) as GmailThreadPreview[]);
-    setGmailQuery(String(payload?.q || ""));
-  }
-
-  async function importGmailForContact() {
-    setError(null);
-    setGmailImporting(true);
-
-    const sess = await requireSession();
-    if (!sess) return;
-
-    const contactEmail = (contact?.email || "").trim().toLowerCase();
-    if (!contactEmail) {
-      setGmailImporting(false);
-      setError("Add an email to this contact first (Edit contact → Email).");
-      return;
-    }
-
-    const res = await fetch(`/api/gmail/contact/import`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        uid: sess.user.id,
-        contactId: contact!.id,
-        email: contactEmail,
-        maxThreads: 5,
-      }),
-    });
-
-    const text = await res.text();
-    let payload: any = null;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = null;
-    }
-
-    setGmailImporting(false);
-
-    if (!res.ok) {
-      setError(payload?.error || text || `Gmail import failed (status ${res.status})`);
-      return;
-    }
-
-    await fetchAll();
-  }
-
   useEffect(() => {
     let alive = true;
 
     const init = async () => {
       const { data } = await supabase.auth.getSession();
-      const u = data.session?.user;
+      const uid = data.session?.user.id ?? null;
+
       if (!alive) return;
 
-      if (!u) {
+      if (!uid) {
         setTimeout(async () => {
           const { data: d2 } = await supabase.auth.getSession();
           if (!d2.session) window.location.href = "/login";
@@ -314,15 +322,13 @@ export default function ContactDetailPage() {
         return;
       }
 
-      setUid(u.id);
       setReady(true);
       await fetchAll();
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      const u = session?.user;
-      if (!u) window.location.href = "/login";
-      else setUid(u.id);
+      const uid = session?.user.id ?? null;
+      if (!uid) window.location.href = "/login";
     });
 
     init();
@@ -348,11 +354,6 @@ export default function ContactDetailPage() {
     );
   }
 
-  const gmailSearchUrl =
-    contact.email && contact.email.trim()
-      ? `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`from:${contact.email} OR to:${contact.email}`)}`
-      : null;
-
   return (
     <div style={{ padding: 40, maxWidth: 1100 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
@@ -362,36 +363,33 @@ export default function ContactDetailPage() {
             <span style={{ color: "#666" }}>
               {categoryPretty(contact.category)} {contact.tier ? `• Tier ${contact.tier}` : ""}{" "}
               {contact.client_type ? `• ${contact.client_type}` : ""}
-              {contact.email ? ` • ${contact.email}` : ""}
             </span>
           </div>
 
           <div style={{ marginTop: 8, color: "#777", fontSize: 13 }}>
-            Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+            Primary email: <strong>{primaryEmail || "—"}</strong> • Last outbound:{" "}
+            <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
           </div>
 
           <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <a
-              href="/contacts"
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
-            >
-              ← Contacts
-            </a>
-
             <a
               href="/morning"
               style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
             >
               Morning
             </a>
-
+            <a
+              href="/contacts"
+              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
+            >
+              Contacts
+            </a>
             <button
               onClick={() => setEditing((v) => !v)}
               style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
             >
               {editing ? "Close edit" : "Edit contact"}
             </button>
-
             <button
               onClick={openLog}
               style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
@@ -400,11 +398,81 @@ export default function ContactDetailPage() {
             </button>
           </div>
         </div>
-
-        <div style={{ color: "#999", fontSize: 12, textAlign: "right" }}>{uid ? `user ${uid.slice(0, 8)}…` : ""}</div>
       </div>
 
-      {error ? <div style={{ marginTop: 14, color: "crimson", fontWeight: 800, whiteSpace: "pre-wrap" }}>{error}</div> : null}
+      {error ? <div style={{ marginTop: 14, color: "crimson", fontWeight: 800 }}>{error}</div> : null}
+
+      {/* Emails */}
+      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Emails</div>
+
+        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="Add email"
+            style={{ padding: 10, width: 320, borderRadius: 10, border: "1px solid #ddd" }}
+          />
+          <button
+            onClick={addEmail}
+            disabled={addingEmail}
+            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
+          >
+            {addingEmail ? "Adding…" : "Add email"}
+          </button>
+          <div style={{ color: "#777", fontSize: 12 }}>
+            Gmail matching uses <strong>all</strong> emails here.
+          </div>
+        </div>
+
+        {emails.length === 0 ? (
+          <div style={{ marginTop: 12, color: "#666" }}>No emails yet.</div>
+        ) : (
+          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            {emails.map((e) => (
+              <div
+                key={e.id}
+                style={{
+                  border: "1px solid #eee",
+                  borderRadius: 12,
+                  padding: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 900 }}>
+                    {e.email} {e.is_primary ? <span style={{ color: "green" }}>• primary</span> : null}
+                  </div>
+                  <div style={{ color: "#777", fontSize: 12 }}>added {new Date(e.created_at).toLocaleString()}</div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  {!e.is_primary ? (
+                    <button
+                      onClick={() => setPrimaryEmail(e.id)}
+                      disabled={updatingPrimary}
+                      style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+                    >
+                      Set primary
+                    </button>
+                  ) : null}
+
+                  <button
+                    onClick={() => deleteEmail(e.id)}
+                    disabled={deletingEmailId === e.id}
+                    style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+                  >
+                    {deletingEmailId === e.id ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {editing && (
         <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
@@ -449,23 +517,13 @@ export default function ContactDetailPage() {
             </label>
           </div>
 
-          <div style={{ marginTop: 10, display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+          <div style={{ marginTop: 10 }}>
             <label style={{ fontSize: 12, color: "#666" }}>
               Client Type (optional)
               <input
                 value={clientType}
                 onChange={(e) => setClientType(e.target.value)}
                 placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..."
-                style={{ display: "block", width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
-              />
-            </label>
-
-            <label style={{ fontSize: 12, color: "#666" }}>
-              Email (recommended for Gmail sync)
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@email.com"
                 style={{ display: "block", width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
               />
             </label>
@@ -488,76 +546,6 @@ export default function ContactDetailPage() {
           </div>
         </div>
       )}
-
-      {/* Gmail panel */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}>Gmail context</div>
-            <div style={{ marginTop: 6, color: "#666", fontSize: 13 }}>
-              Pull recent threads for this contact (requires an email on the contact).
-              {gmailQuery ? (
-                <div style={{ marginTop: 6, color: "#888" }}>
-                  query: <code>{gmailQuery}</code>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {gmailSearchUrl ? (
-              <a
-                href={gmailSearchUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
-              >
-                Open Gmail search
-              </a>
-            ) : null}
-
-            <button
-              onClick={searchGmailThreads}
-              disabled={gmailLoading}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-            >
-              {gmailLoading ? "Searching…" : "Search threads"}
-            </button>
-
-            <button
-              onClick={importGmailForContact}
-              disabled={gmailImporting}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-            >
-              {gmailImporting ? "Importing…" : "Import touches"}
-            </button>
-          </div>
-        </div>
-
-        {gmailThreads.length === 0 ? (
-          <div style={{ marginTop: 10, color: "#777" }}>No Gmail threads loaded yet.</div>
-        ) : (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {gmailThreads.map((t) => (
-              <div key={t.threadId} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ fontWeight: 900 }}>{t.subject}</div>
-                  <div style={{ color: "#777", fontSize: 12 }}>{t.date}</div>
-                </div>
-                <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
-                  from: {t.from} • to: {t.to} • messages: {t.messageCount}
-                </div>
-                {t.snippet ? <div style={{ marginTop: 8, color: "#333" }}>{t.snippet}</div> : null}
-                <div style={{ marginTop: 8 }}>
-                  <a href={t.link} target="_blank" rel="noreferrer">
-                    Open thread
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* Touch history */}
       <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>

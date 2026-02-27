@@ -1,16 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-
-type Contact = {
-  id: string;
-  display_name: string;
-  category: string;
-  tier: string | null;
-  client_type: string | null;
-  created_at: string;
-};
 
 type TouchIntent =
   | "check_in"
@@ -20,6 +11,21 @@ type TouchIntent =
   | "collaboration"
   | "event_invite"
   | "other";
+
+type ContactEmail = {
+  email: string;
+  is_primary: boolean;
+};
+
+type Contact = {
+  id: string;
+  display_name: string;
+  category: string;
+  tier: string | null;
+  client_type: string | null;
+  created_at: string;
+  contact_emails?: ContactEmail[] | null;
+};
 
 type Touch = {
   id: string;
@@ -34,6 +40,7 @@ type Touch = {
 };
 
 type ContactWithLastTouch = Contact & {
+  primary_email: string | null;
   last_touch_at: string | null;
   last_touch_channel: Touch["channel"] | null;
   days_since_touch: number | null;
@@ -47,6 +54,12 @@ function daysSince(iso: string): number {
   return Math.max(0, days);
 }
 
+function pickPrimaryEmail(emails?: ContactEmail[] | null): string | null {
+  if (!emails || emails.length === 0) return null;
+  const primary = emails.find((e) => e.is_primary);
+  return (primary?.email || emails[0]?.email || "").trim() || null;
+}
+
 export default function ContactsPage() {
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -58,7 +71,8 @@ export default function ContactsPage() {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
-  const [clientType, setClientType] = useState(""); // NEW
+  const [clientType, setClientType] = useState("");
+  const [email, setEmail] = useState("");
   const [addingContact, setAddingContact] = useState(false);
 
   // Log touch form state (per contact)
@@ -74,12 +88,12 @@ export default function ContactsPage() {
   async function fetchContactsWithLastTouch() {
     setError(null);
 
-    // 1) Fetch contacts
+    // 1) Fetch contacts (with emails)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at") // NEW: client_type
+      .select("id, display_name, category, tier, client_type, created_at, contact_emails(email, is_primary)")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(500);
 
     if (cErr) {
       setError(`Contacts fetch error: ${cErr.message}`);
@@ -102,12 +116,13 @@ export default function ContactsPage() {
       .select("id, contact_id, channel, direction, occurred_at, summary, source, source_link, intent")
       .in("contact_id", contactIds)
       .order("occurred_at", { ascending: false })
-      .limit(2000);
+      .limit(4000);
 
     if (tErr) {
       setError(`Touches fetch error: ${tErr.message}`);
       const merged: ContactWithLastTouch[] = baseContacts.map((c) => ({
         ...c,
+        primary_email: pickPrimaryEmail(c.contact_emails),
         last_touch_at: null,
         last_touch_channel: null,
         days_since_touch: null,
@@ -127,6 +142,7 @@ export default function ContactsPage() {
       const last = latestByContact.get(c.id) ?? null;
       return {
         ...c,
+        primary_email: pickPrimaryEmail(c.contact_emails),
         last_touch_at: last ? last.occurred_at : null,
         last_touch_channel: last ? last.channel : null,
         days_since_touch: last ? daysSince(last.occurred_at) : null,
@@ -157,22 +173,42 @@ export default function ContactsPage() {
       return;
     }
 
-    const { error } = await supabase.from("contacts").insert({
-      display_name: name.trim(),
-      category,
-      tier,
-      client_type: clientType.trim() ? clientType.trim() : null, // NEW
-    });
+    const { data: inserted, error: insErr } = await supabase
+      .from("contacts")
+      .insert({
+        display_name: name.trim(),
+        category,
+        tier,
+        client_type: clientType.trim() ? clientType.trim() : null,
+      })
+      .select("id")
+      .single();
 
-    setAddingContact(false);
-
-    if (error) {
-      setError(`Insert contact error: ${error.message}`);
+    if (insErr || !inserted?.id) {
+      setAddingContact(false);
+      setError(`Insert contact error: ${insErr?.message || "Unknown insert error"}`);
       return;
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail) {
+      const { error: eErr } = await supabase.from("contact_emails").insert({
+        contact_id: inserted.id,
+        email: cleanEmail,
+        is_primary: true,
+      });
+
+      if (eErr) {
+        // Don't fail the whole add — just report
+        setError(`Contact created, but email insert failed: ${eErr.message}`);
+      }
+    }
+
+    setAddingContact(false);
+
     setName("");
-    setClientType(""); // NEW
+    setEmail("");
+    setClientType("");
     await fetchContactsWithLastTouch();
   }
 
@@ -283,7 +319,14 @@ export default function ContactsPage() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Name"
-          style={{ padding: 10, width: 320, borderRadius: 10, border: "1px solid #ddd" }}
+          style={{ padding: 10, width: 280, borderRadius: 10, border: "1px solid #ddd" }}
+        />
+
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Primary email (optional)"
+          style={{ padding: 10, width: 260, borderRadius: 10, border: "1px solid #ddd" }}
         />
 
         <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: 10 }}>
@@ -300,12 +343,11 @@ export default function ContactsPage() {
           <option value="C">C</option>
         </select>
 
-        {/* NEW: Client Type */}
         <input
           value={clientType}
           onChange={(e) => setClientType(e.target.value)}
-          placeholder="Client type (buyer/seller/lead...)"
-          style={{ padding: 10, width: 260, borderRadius: 10, border: "1px solid #ddd" }}
+          placeholder="Client type (optional)"
+          style={{ padding: 10, width: 220, borderRadius: 10, border: "1px solid #ddd" }}
         />
 
         <button
@@ -339,33 +381,48 @@ export default function ContactsPage() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div>
-                {/* NEW: link to detail page */}
-                <a
-                  href={`/contacts/${c.id}`}
-                  style={{ fontWeight: 800, fontSize: 16, color: "#111", textDecoration: "none" }}
-                >
-                  {c.display_name}
-                </a>
-
-                <div style={{ color: "#555", marginTop: 4 }}>
-                  {c.category} {c.tier ? `• Tier ${c.tier}` : ""}
-                  {c.client_type ? ` • ${c.client_type}` : ""}
+                <div style={{ fontWeight: 800, fontSize: 16 }}>
+                  <a href={`/contacts/${c.id}`} style={{ color: "#111", textDecoration: "none" }}>
+                    {c.display_name}
+                  </a>
                 </div>
-
+                <div style={{ color: "#555", marginTop: 4 }}>
+                  {c.category} {c.tier ? `• Tier ${c.tier}` : ""} {c.client_type ? `• ${c.client_type}` : ""}
+                </div>
                 <div style={{ color: "#777", marginTop: 6, fontSize: 13 }}>
-                  Last touch:{" "}
-                  <strong>{c.last_touch_at ? new Date(c.last_touch_at).toLocaleString() : "—"}</strong>
+                  {c.primary_email ? (
+                    <>
+                      Email: <strong>{c.primary_email}</strong> •{" "}
+                    </>
+                  ) : null}
+                  Last touch: <strong>{c.last_touch_at ? new Date(c.last_touch_at).toLocaleString() : "—"}</strong>
                   {c.last_touch_channel ? ` • ${c.last_touch_channel}` : ""}
                   {typeof c.days_since_touch === "number" ? ` • ${c.days_since_touch}d ago` : ""}
                 </div>
               </div>
 
-              <button
-                onClick={() => openLogTouch(c.id)}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-              >
-                Log touch
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <a
+                  href={`/contacts/${c.id}`}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    cursor: "pointer",
+                    textDecoration: "none",
+                    color: "#111",
+                    fontWeight: 900,
+                  }}
+                >
+                  View
+                </a>
+                <button
+                  onClick={() => openLogTouch(c.id)}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+                >
+                  Log touch
+                </button>
+              </div>
             </div>
 
             {loggingFor === c.id && (
@@ -379,11 +436,7 @@ export default function ContactsPage() {
                 }}
               >
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  <select
-                    value={touchChannel}
-                    onChange={(e) => setTouchChannel(e.target.value as any)}
-                    style={{ padding: 10 }}
-                  >
+                  <select value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as any)} style={{ padding: 10 }}>
                     <option value="email">email</option>
                     <option value="text">text</option>
                     <option value="call">call</option>
@@ -401,11 +454,7 @@ export default function ContactsPage() {
                     <option value="inbound">inbound</option>
                   </select>
 
-                  <select
-                    value={touchIntent}
-                    onChange={(e) => setTouchIntent(e.target.value as any)}
-                    style={{ padding: 10 }}
-                  >
+                  <select value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as any)} style={{ padding: 10 }}>
                     <option value="check_in">check_in</option>
                     <option value="referral_ask">referral_ask</option>
                     <option value="review_ask">review_ask</option>
