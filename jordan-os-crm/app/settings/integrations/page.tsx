@@ -11,6 +11,9 @@ export default function IntegrationsPage() {
   const [gmailLabels, setGmailLabels] = useState("Jordan OS");
   const [sheetUrl, setSheetUrl] = useState("");
 
+  const [ignoreDomains, setIgnoreDomains] = useState("smithandberg.com");
+  const [ignoreEmails, setIgnoreEmails] = useState("");
+
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -27,7 +30,6 @@ export default function IntegrationsPage() {
 
     setUid(user.id);
 
-    // Check google connection
     const { data: tData, error: tErr } = await supabase
       .from("google_tokens")
       .select("user_id")
@@ -37,15 +39,18 @@ export default function IntegrationsPage() {
     if (tErr) setErr(tErr.message);
     setConnected(!!tData?.user_id);
 
-    // Load settings
-    const { data: sData } = await supabase
+    const { data: sData, error: sErr } = await supabase
       .from("user_settings")
-      .select("gmail_label_names, sheet_url")
+      .select("gmail_label_names, sheet_url, gmail_ignore_domains, gmail_ignore_emails")
       .eq("user_id", user.id)
       .maybeSingle();
 
+    if (sErr) setErr(sErr.message);
+
     if (sData?.gmail_label_names) setGmailLabels(sData.gmail_label_names);
     if (sData?.sheet_url) setSheetUrl(sData.sheet_url);
+    if (sData?.gmail_ignore_domains) setIgnoreDomains(sData.gmail_ignore_domains);
+    if (sData?.gmail_ignore_emails) setIgnoreEmails(sData.gmail_ignore_emails);
 
     setReady(true);
   }
@@ -56,23 +61,11 @@ export default function IntegrationsPage() {
     if (!uid) return;
 
     const res = await fetch(`/api/google/oauth/start?uid=${uid}`);
-    const text = await res.text();
-
-    let j: any = null;
-    try {
-      j = JSON.parse(text);
-    } catch {}
-
+    const j = await res.json();
     if (!res.ok) {
-      setErr(j?.error || `Failed to start OAuth (status ${res.status}).\n${text.slice(0, 400)}`);
+      setErr(j?.error || "Failed to start OAuth");
       return;
     }
-
-    if (!j?.url) {
-      setErr(`OAuth start returned no url.\n${text.slice(0, 400)}`);
-      return;
-    }
-
     window.location.href = j.url;
   }
 
@@ -85,6 +78,8 @@ export default function IntegrationsPage() {
       {
         user_id: uid,
         gmail_label_names: gmailLabels,
+        gmail_ignore_domains: ignoreDomains.trim() ? ignoreDomains.trim() : null,
+        gmail_ignore_emails: ignoreEmails.trim() ? ignoreEmails.trim() : null,
         sheet_url: sheetUrl.trim() ? sheetUrl.trim() : null,
         updated_at: new Date().toISOString(),
       },
@@ -101,24 +96,16 @@ export default function IntegrationsPage() {
     if (!uid) return;
 
     const res = await fetch(`/api/gmail/sync?uid=${uid}`);
-
-    // Always read raw text first (works for JSON, HTML, plain text)
-    const text = await res.text();
-
-    // Try parse JSON
-    let j: any = null;
-    try {
-      j = JSON.parse(text);
-    } catch {}
-
-    const pretty = j ? JSON.stringify(j, null, 2) : text;
+    const j = await res.json().catch(() => null);
 
     if (!res.ok) {
-      setErr(`Gmail sync failed (status ${res.status}).\n${pretty}`);
+      setErr(j?.error || `Sync failed (status ${res.status})`);
       return;
     }
 
-    setMsg(`Gmail sync complete.\n${pretty}`);
+    setMsg(
+      `Gmail sync complete. imported=${j.imported} skipped=${j.skipped} unmatched=${j.unmatched} (fetched=${j.messagesFetched ?? "?"})`
+    );
   }
 
   async function importSheet() {
@@ -127,21 +114,12 @@ export default function IntegrationsPage() {
     if (!uid) return;
 
     const res = await fetch(`/api/sheets/import?uid=${uid}`);
-    const text = await res.text();
-
-    let j: any = null;
-    try {
-      j = JSON.parse(text);
-    } catch {}
-
-    const pretty = j ? JSON.stringify(j, null, 2) : text;
-
+    const j = await res.json();
     if (!res.ok) {
-      setErr(`Sheets import failed (status ${res.status}).\n${pretty}`);
+      setErr(j?.error || "Import failed");
       return;
     }
-
-    setMsg(`Sheet import complete.\n${pretty}`);
+    setMsg(`Sheet import complete. Upserted: ${j.upserted}, skipped: ${j.skipped}`);
   }
 
   useEffect(() => {
@@ -162,25 +140,16 @@ export default function IntegrationsPage() {
       </div>
 
       {(err || msg) && (
-        <pre
-          style={{
-            marginTop: 14,
-            padding: 12,
-            borderRadius: 12,
-            border: "1px solid #eee",
-            background: "#fafafa",
-            whiteSpace: "pre-wrap",
-            color: err ? "crimson" : "green",
-            fontWeight: 800,
-          }}
-        >
+        <div style={{ marginTop: 14, color: err ? "crimson" : "green", fontWeight: 800 }}>
           {err || msg}
-        </pre>
+        </div>
       )}
 
       <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
         <div style={{ fontWeight: 900 }}>1) Connect Google</div>
-        <div style={{ color: "#666", marginTop: 6 }}>One connection powers Gmail + Calendar + Sheets.</div>
+        <div style={{ color: "#666", marginTop: 6 }}>
+          One connection powers Gmail + Calendar + Sheets.
+        </div>
         <button
           onClick={connectGoogle}
           style={{
@@ -206,6 +175,47 @@ export default function IntegrationsPage() {
               value={gmailLabels}
               onChange={(e) => setGmailLabels(e.target.value)}
               placeholder="Jordan OS, CRM Outbound"
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 6,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
+            Ignore domains (comma separated)
+            <input
+              value={ignoreDomains}
+              onChange={(e) => setIgnoreDomains(e.target.value)}
+              placeholder="smithandberg.com, compass.com"
+              style={{
+                display: "block",
+                width: "100%",
+                padding: 10,
+                marginTop: 6,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+              }}
+            />
+          </label>
+          <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
+            Any recipient in these domains will not count toward unmatched or import.
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
+            Ignore specific emails (comma separated)
+            <input
+              value={ignoreEmails}
+              onChange={(e) => setIgnoreEmails(e.target.value)}
+              placeholder="team@smithandberg.com, jordan@smithandberg.com"
               style={{
                 display: "block",
                 width: "100%",
@@ -254,7 +264,6 @@ export default function IntegrationsPage() {
 
       <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
         <div style={{ fontWeight: 900 }}>3) Actions</div>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
           <button
             onClick={runGmailSync}
@@ -266,9 +275,8 @@ export default function IntegrationsPage() {
               fontWeight: 900,
             }}
           >
-            Run Gmail sync (labels)
+            Run Gmail sync
           </button>
-
           <button
             onClick={importSheet}
             style={{
@@ -281,11 +289,6 @@ export default function IntegrationsPage() {
           >
             Import Master Sheet (one-time)
           </button>
-        </div>
-
-        <div style={{ color: "#666", marginTop: 8 }}>
-          Gmail sync imports outbound email as touches only when a recipient matches an email in{" "}
-          <strong>contact_emails</strong>.
         </div>
       </div>
     </div>

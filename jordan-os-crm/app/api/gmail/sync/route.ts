@@ -31,6 +31,13 @@ function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, n
   return found?.value || undefined;
 }
 
+function splitCsv(v: string | null | undefined): string[] {
+  return (v || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 type GoogleTokenRow = {
   access_token: string | null;
   refresh_token: string | null;
@@ -39,6 +46,8 @@ type GoogleTokenRow = {
 
 type UserSettingsRow = {
   gmail_label_names: string | null;
+  gmail_ignore_domains: string | null;
+  gmail_ignore_emails: string | null;
 };
 
 type ContactEmailRow = {
@@ -51,13 +60,6 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const uid = url.searchParams.get("uid") || "";
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-
-    if (!process.env.SUPABASE_URL) return NextResponse.json({ error: "Missing SUPABASE_URL" }, { status: 500 });
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY)
-      return NextResponse.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
-    if (!process.env.GOOGLE_CLIENT_ID) return NextResponse.json({ error: "Missing GOOGLE_CLIENT_ID" }, { status: 500 });
-    if (!process.env.GOOGLE_CLIENT_SECRET)
-      return NextResponse.json({ error: "Missing GOOGLE_CLIENT_SECRET" }, { status: 500 });
 
     const { data: tok, error: tokErr } = await supabaseAdmin
       .from("google_tokens")
@@ -74,7 +76,7 @@ export async function GET(req: Request) {
 
     const { data: settings, error: setErr } = await supabaseAdmin
       .from("user_settings")
-      .select("gmail_label_names")
+      .select("gmail_label_names, gmail_ignore_domains, gmail_ignore_emails")
       .eq("user_id", uid)
       .maybeSingle();
 
@@ -82,14 +84,13 @@ export async function GET(req: Request) {
 
     const sRow = settings as UserSettingsRow | null;
 
-    const labelNames = (sRow?.gmail_label_names || "")
-      .split(",")
-      .map((s: string) => s.trim())
-      .filter((s: string) => s.length > 0);
-
+    const labelNames = splitCsv(sRow?.gmail_label_names);
     if (labelNames.length === 0) {
       return NextResponse.json({ error: "No Gmail labels configured in settings." }, { status: 400 });
     }
+
+    const ignoreDomains = new Set(splitCsv(sRow?.gmail_ignore_domains));
+    const ignoreEmails = new Set(splitCsv(sRow?.gmail_ignore_emails));
 
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
@@ -106,13 +107,13 @@ export async function GET(req: Request) {
 
     const labelIdByName = new Map<string, string>();
     labels.forEach((l: gmail_v1.Schema$Label) => {
-      const name = l.name || "";
+      const name = (l.name || "").toLowerCase();
       const id = l.id || "";
       if (name && id) labelIdByName.set(name, id);
     });
 
     const labelIds = labelNames
-      .map((n: string) => labelIdByName.get(n))
+      .map((n) => labelIdByName.get(n.toLowerCase()))
       .filter((x: string | undefined): x is string => typeof x === "string" && x.length > 0);
 
     if (labelIds.length === 0) {
@@ -137,29 +138,31 @@ export async function GET(req: Request) {
       if (e) contactIdByEmail.set(e, r.contact_id);
     });
 
-    // Counters
-    let scanned = 0;
+    let messagesFetched = 0;
+    let messagesParsed = 0;
+    let matchedRecipients = 0;
+
     let imported = 0;
+    let skipped = 0;
     let unmatched = 0;
 
-    let skipped_existing_message_id = 0;
-    let skipped_existing_occurred_at = 0;
-    let skipped_insert_error = 0;
-    let skipped_lookup_error = 0;
+    let ignoredRecipients = 0;
+    let ignoredByDomain = 0;
+    let ignoredByEmail = 0;
 
-    // Store a few insert errors for debugging (don’t spam response)
-    const insertErrorSamples: Array<{ messageId: string; contactId: string; error: string }> = [];
+    const unmatchedCounts = new Map<string, number>();
+    const uniqueRecipients = new Set<string>();
 
     let pageToken: string | undefined = undefined;
-    const maxToScan = 500;
+    const maxMessages = 400;
 
-    while (scanned < maxToScan) {
+    while (messagesFetched < maxMessages) {
       const listRes: gmail_v1.Schema$ListMessagesResponse =
         (
           await gmail.users.messages.list({
             userId: "me",
-            labelIds: [...labelIds, "SENT"],
-            maxResults: Math.min(100, maxToScan - scanned),
+            labelIds: ["SENT"], // SENT only; label filter happens in query-like logic below
+            maxResults: Math.min(100, maxMessages - messagesFetched),
             pageToken,
           })
         ).data;
@@ -169,9 +172,11 @@ export async function GET(req: Request) {
 
       if (msgs.length === 0) break;
 
+      // We fetched N message IDs
+      messagesFetched += msgs.length;
+
       for (const m of msgs) {
         if (!m.id) continue;
-        scanned += 1;
 
         const full = await gmail.users.messages.get({
           userId: "me",
@@ -180,22 +185,61 @@ export async function GET(req: Request) {
           metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
         });
 
+        // Require the configured labels on the message (server-side)
+        const msgLabelIds = full.data.labelIds ?? [];
+        const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
+        if (!hasAnyConfiguredLabel) {
+          continue;
+        }
+
+        messagesParsed += 1;
+
         const headers = full.data.payload?.headers ?? [];
         const toEmails = parseEmails(headerValue(headers, "To"));
         const ccEmails = parseEmails(headerValue(headers, "Cc"));
         const bccEmails = parseEmails(headerValue(headers, "Bcc"));
-        const allRecipients = Array.from(new Set([...toEmails, ...ccEmails, ...bccEmails]));
+        const allRecipientsRaw = Array.from(new Set([...toEmails, ...ccEmails, ...bccEmails]));
+
+        // Apply ignore rules
+        const allRecipients = allRecipientsRaw.filter((e) => {
+          if (!e) return false;
+          const domain = e.split("@")[1]?.toLowerCase() || "";
+          if (ignoreEmails.has(e)) {
+            ignoredRecipients += 1;
+            ignoredByEmail += 1;
+            return false;
+          }
+          if (domain && ignoreDomains.has(domain)) {
+            ignoredRecipients += 1;
+            ignoredByDomain += 1;
+            return false;
+          }
+          return true;
+        });
+
+        // Track unique recipients AFTER ignore filtering
+        allRecipients.forEach((e) => uniqueRecipients.add(e));
+
+        if (allRecipients.length === 0) {
+          continue;
+        }
 
         const subject = headerValue(headers, "Subject") || "";
         const internalDateMs = Number(full.data.internalDate || 0);
         const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
         const snippet = (full.data.snippet || "").trim();
 
-        const matchedEmail = allRecipients.find((e: string) => contactIdByEmail.has(e));
+        const matchedEmail = allRecipients.find((e) => contactIdByEmail.has(e));
         if (!matchedEmail) {
           unmatched += 1;
+          // Count all recipients as potential unmatched candidates
+          for (const e of allRecipients) {
+            unmatchedCounts.set(e, (unmatchedCounts.get(e) || 0) + 1);
+          }
           continue;
         }
+
+        matchedRecipients += 1;
 
         const contactId = contactIdByEmail.get(matchedEmail);
         if (!contactId) {
@@ -209,7 +253,7 @@ export async function GET(req: Request) {
         const messageId = m.id;
         const summary = (snippet || subject).trim() || null;
 
-        // De-dupe 1: messageId
+        // Dedupe by messageId
         const { data: ex1, error: ex1Err } = await supabaseAdmin
           .from("touches")
           .select("id")
@@ -219,35 +263,14 @@ export async function GET(req: Request) {
           .limit(1);
 
         if (ex1Err) {
-          skipped_lookup_error += 1;
+          skipped += 1;
           continue;
         }
-
         if ((ex1 ?? []).length > 0) {
-          skipped_existing_message_id += 1;
+          skipped += 1;
           continue;
         }
 
-        // De-dupe 2: occurred_at (fallback)
-        const { data: ex2, error: ex2Err } = await supabaseAdmin
-          .from("touches")
-          .select("id")
-          .eq("contact_id", contactId)
-          .eq("source", "gmail")
-          .eq("occurred_at", occurredAt)
-          .limit(1);
-
-        if (ex2Err) {
-          skipped_lookup_error += 1;
-          continue;
-        }
-
-        if ((ex2 ?? []).length > 0) {
-          skipped_existing_occurred_at += 1;
-          continue;
-        }
-
-        // Insert
         const { error: insErr } = await supabaseAdmin.from("touches").insert({
           contact_id: contactId,
           channel: "email",
@@ -261,14 +284,7 @@ export async function GET(req: Request) {
         });
 
         if (insErr) {
-          skipped_insert_error += 1;
-          if (insertErrorSamples.length < 5) {
-            insertErrorSamples.push({
-              messageId,
-              contactId,
-              error: insErr.message,
-            });
-          }
+          skipped += 1;
           continue;
         }
 
@@ -278,32 +294,35 @@ export async function GET(req: Request) {
       if (!pageToken) break;
     }
 
-    const skipped =
-      skipped_existing_message_id + skipped_existing_occurred_at + skipped_insert_error + skipped_lookup_error;
+    const topUnmatchedRecipients = Array.from(unmatchedCounts.entries())
+      .map(([email, count]) => ({ email, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 25);
 
     return NextResponse.json({
-      scanned,
       imported,
       skipped,
-      skipped_existing_message_id,
-      skipped_existing_occurred_at,
-      skipped_insert_error,
-      skipped_lookup_error,
       unmatched,
-      labelsUsed: labelNames,
-      insertErrorSamples,
-      note: "Matches recipients against contact_emails; imports outbound (SENT) only.",
+      messagesFetched,
+      messagesParsed,
+      matchedRecipients,
+      uniqueRecipientsFound: uniqueRecipients.size,
+      contactsWithEmail: contactIdByEmail.size,
+      ignoredRecipients,
+      ignoredByDomain,
+      ignoredByEmail,
+      topUnmatchedRecipients,
+      usedLabelNames: labelNames,
+      usedLabelIds: labelIds,
+      appliedLabelIds: ["SENT"],
+      maxMessages,
+      note: "Ignores recipients based on user_settings (domains + emails).",
     });
   } catch (e) {
     const se = safeErr(e);
     console.error("GMAIL_SYNC_CRASH", se);
     return NextResponse.json(
-      {
-        error: "Gmail sync crashed",
-        details: se,
-        details_message: se.message,
-        details_json: JSON.stringify(se),
-      },
+      { error: "Gmail sync crashed", details: se, details_json: JSON.stringify(se) },
       { status: 500 }
     );
   }
