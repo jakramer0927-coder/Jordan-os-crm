@@ -18,6 +18,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
         fontWeight: 900,
         fontSize: 13,
         background: "#fff",
+        display: "inline-block",
       }}
     >
       {label}
@@ -29,21 +30,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body style={{ margin: 0, background: "#fff" }}>
-        {/* TOP NAV (always visible) */}
+        {/* UNMISSABLE NAV */}
         <div
           style={{
             position: "sticky",
             top: 0,
-            zIndex: 50,
-            borderBottom: "1px solid #eee",
+            zIndex: 9999,
+            borderBottom: "2px solid #111",
             background: "#fff",
           }}
         >
+          <div style={{ background: "#111", color: "#fff", padding: "6px 16px", fontWeight: 900, fontSize: 12 }}>
+            NAV ACTIVE ✅ If you can read this, layout.tsx is rendering.
+          </div>
+
           <div
             style={{
               maxWidth: 1100,
               margin: "0 auto",
-              padding: "14px 16px",
+              padding: "12px 16px",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
@@ -66,7 +71,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </div>
 
-        {/* CONTENT */}
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>{children}</div>
       </body>
     </html>
