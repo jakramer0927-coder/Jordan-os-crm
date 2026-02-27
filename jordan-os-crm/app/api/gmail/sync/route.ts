@@ -100,6 +100,7 @@ export async function GET(req: Request) {
 
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
 
+    // Map label names -> label IDs
     const labelsRes = await gmail.users.labels.list({ userId: "me" });
     const labels = labelsRes.data.labels ?? [];
 
@@ -121,6 +122,7 @@ export async function GET(req: Request) {
       );
     }
 
+    // Load contact emails
     const { data: ce, error: ceErr } = await supabaseAdmin
       .from("contact_emails")
       .select("contact_id, email")
@@ -135,10 +137,18 @@ export async function GET(req: Request) {
       if (e) contactIdByEmail.set(e, r.contact_id);
     });
 
+    // Counters
     let scanned = 0;
     let imported = 0;
-    let skipped = 0;
     let unmatched = 0;
+
+    let skipped_existing_message_id = 0;
+    let skipped_existing_occurred_at = 0;
+    let skipped_insert_error = 0;
+    let skipped_lookup_error = 0;
+
+    // Store a few insert errors for debugging (don’t spam response)
+    const insertErrorSamples: Array<{ messageId: string; contactId: string; error: string }> = [];
 
     let pageToken: string | undefined = undefined;
     const maxToScan = 500;
@@ -199,6 +209,7 @@ export async function GET(req: Request) {
         const messageId = m.id;
         const summary = (snippet || subject).trim() || null;
 
+        // De-dupe 1: messageId
         const { data: ex1, error: ex1Err } = await supabaseAdmin
           .from("touches")
           .select("id")
@@ -207,11 +218,17 @@ export async function GET(req: Request) {
           .eq("source_message_id", messageId)
           .limit(1);
 
-        if (!ex1Err && (ex1 ?? []).length > 0) {
-          skipped += 1;
+        if (ex1Err) {
+          skipped_lookup_error += 1;
           continue;
         }
 
+        if ((ex1 ?? []).length > 0) {
+          skipped_existing_message_id += 1;
+          continue;
+        }
+
+        // De-dupe 2: occurred_at (fallback)
         const { data: ex2, error: ex2Err } = await supabaseAdmin
           .from("touches")
           .select("id")
@@ -220,11 +237,17 @@ export async function GET(req: Request) {
           .eq("occurred_at", occurredAt)
           .limit(1);
 
-        if (!ex2Err && (ex2 ?? []).length > 0) {
-          skipped += 1;
+        if (ex2Err) {
+          skipped_lookup_error += 1;
           continue;
         }
 
+        if ((ex2 ?? []).length > 0) {
+          skipped_existing_occurred_at += 1;
+          continue;
+        }
+
+        // Insert
         const { error: insErr } = await supabaseAdmin.from("touches").insert({
           contact_id: contactId,
           channel: "email",
@@ -238,7 +261,14 @@ export async function GET(req: Request) {
         });
 
         if (insErr) {
-          skipped += 1;
+          skipped_insert_error += 1;
+          if (insertErrorSamples.length < 5) {
+            insertErrorSamples.push({
+              messageId,
+              contactId,
+              error: insErr.message,
+            });
+          }
           continue;
         }
 
@@ -248,12 +278,20 @@ export async function GET(req: Request) {
       if (!pageToken) break;
     }
 
+    const skipped =
+      skipped_existing_message_id + skipped_existing_occurred_at + skipped_insert_error + skipped_lookup_error;
+
     return NextResponse.json({
       scanned,
       imported,
       skipped,
+      skipped_existing_message_id,
+      skipped_existing_occurred_at,
+      skipped_insert_error,
+      skipped_lookup_error,
       unmatched,
       labelsUsed: labelNames,
+      insertErrorSamples,
       note: "Matches recipients against contact_emails; imports outbound (SENT) only.",
     });
   } catch (e) {
