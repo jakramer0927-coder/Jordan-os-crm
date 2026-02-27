@@ -12,11 +12,6 @@ type TouchIntent =
   | "event_invite"
   | "other";
 
-type ContactEmail = {
-  email: string;
-  is_primary: boolean;
-};
-
 type Contact = {
   id: string;
   display_name: string;
@@ -24,7 +19,6 @@ type Contact = {
   tier: string | null;
   client_type: string | null;
   created_at: string;
-  contact_emails?: ContactEmail[] | null;
 };
 
 type Touch = {
@@ -39,11 +33,13 @@ type Touch = {
   intent: TouchIntent | null;
 };
 
+type ContactEmail = { contact_id: string; email: string };
+
 type ContactWithLastTouch = Contact & {
-  primary_email: string | null;
   last_touch_at: string | null;
   last_touch_channel: Touch["channel"] | null;
   days_since_touch: number | null;
+  emails: string[];
 };
 
 function daysSince(iso: string): number {
@@ -54,12 +50,6 @@ function daysSince(iso: string): number {
   return Math.max(0, days);
 }
 
-function pickPrimaryEmail(emails?: ContactEmail[] | null): string | null {
-  if (!emails || emails.length === 0) return null;
-  const primary = emails.find((e) => e.is_primary);
-  return (primary?.email || emails[0]?.email || "").trim() || null;
-}
-
 export default function ContactsPage() {
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -67,12 +57,16 @@ export default function ContactsPage() {
   const [contacts, setContacts] = useState<ContactWithLastTouch[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // search + filters
+  const [q, setQ] = useState("");
+  const [filterCategory, setFilterCategory] = useState<string>("All");
+  const [filterTier, setFilterTier] = useState<string>("All");
+
   // Create contact form
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
-  const [email, setEmail] = useState("");
   const [addingContact, setAddingContact] = useState(false);
 
   // Log touch form state (per contact)
@@ -88,12 +82,12 @@ export default function ContactsPage() {
   async function fetchContactsWithLastTouch() {
     setError(null);
 
-    // 1) Fetch contacts (with emails)
+    // 1) Fetch contacts
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at, contact_emails(email, is_primary)")
+      .select("id, display_name, category, tier, client_type, created_at")
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(2000);
 
     if (cErr) {
       setError(`Contacts fetch error: ${cErr.message}`);
@@ -108,21 +102,41 @@ export default function ContactsPage() {
       return;
     }
 
-    // 2) Fetch latest touches for these contacts (any direction/channel)
+    // 2) Fetch emails (contact_emails)
     const contactIds = baseContacts.map((c) => c.id);
 
+    const { data: eData, error: eErr } = await supabase
+      .from("contact_emails")
+      .select("contact_id, email")
+      .in("contact_id", contactIds)
+      .limit(50000);
+
+    if (eErr) {
+      // not fatal—still show contacts
+      console.warn("contact_emails fetch error", eErr.message);
+    }
+
+    const emailByContact = new Map<string, string[]>();
+    (eData ?? []).forEach((row: any) => {
+      const r = row as ContactEmail;
+      const arr = emailByContact.get(r.contact_id) ?? [];
+      arr.push(String((row as any).email || "").toLowerCase().trim());
+      emailByContact.set(r.contact_id, arr);
+    });
+
+    // 3) Fetch latest touches for these contacts
     const { data: tData, error: tErr } = await supabase
       .from("touches")
       .select("id, contact_id, channel, direction, occurred_at, summary, source, source_link, intent")
       .in("contact_id", contactIds)
       .order("occurred_at", { ascending: false })
-      .limit(4000);
+      .limit(50000);
 
     if (tErr) {
       setError(`Touches fetch error: ${tErr.message}`);
       const merged: ContactWithLastTouch[] = baseContacts.map((c) => ({
         ...c,
-        primary_email: pickPrimaryEmail(c.contact_emails),
+        emails: emailByContact.get(c.id) ?? [],
         last_touch_at: null,
         last_touch_channel: null,
         days_since_touch: null,
@@ -142,7 +156,7 @@ export default function ContactsPage() {
       const last = latestByContact.get(c.id) ?? null;
       return {
         ...c,
-        primary_email: pickPrimaryEmail(c.contact_emails),
+        emails: emailByContact.get(c.id) ?? [],
         last_touch_at: last ? last.occurred_at : null,
         last_touch_channel: last ? last.channel : null,
         days_since_touch: last ? daysSince(last.occurred_at) : null,
@@ -173,41 +187,21 @@ export default function ContactsPage() {
       return;
     }
 
-    const { data: inserted, error: insErr } = await supabase
-      .from("contacts")
-      .insert({
-        display_name: name.trim(),
-        category,
-        tier,
-        client_type: clientType.trim() ? clientType.trim() : null,
-      })
-      .select("id")
-      .single();
-
-    if (insErr || !inserted?.id) {
-      setAddingContact(false);
-      setError(`Insert contact error: ${insErr?.message || "Unknown insert error"}`);
-      return;
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail) {
-      const { error: eErr } = await supabase.from("contact_emails").insert({
-        contact_id: inserted.id,
-        email: cleanEmail,
-        is_primary: true,
-      });
-
-      if (eErr) {
-        // Don't fail the whole add — just report
-        setError(`Contact created, but email insert failed: ${eErr.message}`);
-      }
-    }
+    const { error } = await supabase.from("contacts").insert({
+      display_name: name.trim(),
+      category,
+      tier,
+      client_type: clientType.trim() ? clientType.trim() : null,
+    });
 
     setAddingContact(false);
 
+    if (error) {
+      setError(`Insert contact error: ${error.message}`);
+      return;
+    }
+
     setName("");
-    setEmail("");
     setClientType("");
     await fetchContactsWithLastTouch();
   }
@@ -256,6 +250,28 @@ export default function ContactsPage() {
     window.location.href = "/login";
   }
 
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return contacts.filter((c) => {
+      if (filterCategory !== "All" && (c.category || "") !== filterCategory) return false;
+      if (filterTier !== "All" && (c.tier || "").toUpperCase() !== filterTier) return false;
+
+      if (!query) return true;
+
+      const hay = [
+        c.display_name,
+        c.category,
+        c.tier || "",
+        c.client_type || "",
+        ...(c.emails || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return hay.includes(query);
+    });
+  }, [contacts, q, filterCategory, filterTier]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -293,16 +309,16 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (!ready) return <div style={{ padding: 20 }}>Loading…</div>;
 
   return (
-    <div style={{ padding: 40, maxWidth: 1100 }}>
+    <div style={{ padding: 0, maxWidth: 1100 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>Contacts</h1>
           <div style={{ marginTop: 6, color: "#666" }}>
-            Logged in ✅ {userId ? `(user ${userId.slice(0, 8)}…)` : ""} • Loaded:{" "}
-            <strong>{contacts.length}</strong>
+            Logged in ✅ {userId ? `(user ${userId.slice(0, 8)}…)` : ""} • Showing{" "}
+            <strong>{filtered.length}</strong> of <strong>{contacts.length}</strong>
           </div>
         </div>
         <button
@@ -313,20 +329,46 @@ export default function ContactsPage() {
         </button>
       </div>
 
+      {/* Search + filters */}
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name, email, category, tier, client type…"
+          style={{ padding: 10, width: 420, borderRadius: 10, border: "1px solid #ddd" }}
+        />
+
+        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} style={{ padding: 10 }}>
+          <option value="All">All categories</option>
+          <option>Client</option>
+          <option>Agent</option>
+          <option>Developer</option>
+          <option>Vendor</option>
+          <option>Other</option>
+        </select>
+
+        <select value={filterTier} onChange={(e) => setFilterTier(e.target.value)} style={{ padding: 10 }}>
+          <option value="All">All tiers</option>
+          <option value="A">Tier A</option>
+          <option value="B">Tier B</option>
+          <option value="C">Tier C</option>
+        </select>
+
+        <button
+          onClick={fetchContactsWithLastTouch}
+          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+        >
+          Refresh
+        </button>
+      </div>
+
       {/* Add contact */}
-      <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Name"
-          style={{ padding: 10, width: 280, borderRadius: 10, border: "1px solid #ddd" }}
-        />
-
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Primary email (optional)"
-          style={{ padding: 10, width: 260, borderRadius: 10, border: "1px solid #ddd" }}
+          placeholder="New contact name"
+          style={{ padding: 10, width: 320, borderRadius: 10, border: "1px solid #ddd" }}
         />
 
         <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: 10 }}>
@@ -346,30 +388,23 @@ export default function ContactsPage() {
         <input
           value={clientType}
           onChange={(e) => setClientType(e.target.value)}
-          placeholder="Client type (optional)"
-          style={{ padding: 10, width: 220, borderRadius: 10, border: "1px solid #ddd" }}
+          placeholder="client type (optional)"
+          style={{ padding: 10, width: 240, borderRadius: 10, border: "1px solid #ddd" }}
         />
 
         <button
           onClick={addContact}
           disabled={addingContact}
-          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
         >
           {addingContact ? "Adding…" : "Add contact"}
-        </button>
-
-        <button
-          onClick={fetchContactsWithLastTouch}
-          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-        >
-          Refresh
         </button>
       </div>
 
       {error && <div style={{ marginTop: 14, color: "crimson", fontWeight: 800 }}>{error}</div>}
 
       <div style={{ marginTop: 18 }}>
-        {contacts.map((c) => (
+        {filtered.map((c) => (
           <div
             key={c.id}
             style={{
@@ -381,48 +416,39 @@ export default function ContactsPage() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>
-                  <a href={`/contacts/${c.id}`} style={{ color: "#111", textDecoration: "none" }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+                  <a href={`/contacts/${c.id}`} style={{ fontWeight: 900, fontSize: 16, color: "#111" }}>
                     {c.display_name}
                   </a>
+                  <span style={{ color: "#666", fontWeight: 700 }}>
+                    {c.category}
+                    {c.tier ? ` • Tier ${c.tier}` : ""}
+                    {c.client_type ? ` • ${c.client_type}` : ""}
+                  </span>
                 </div>
-                <div style={{ color: "#555", marginTop: 4 }}>
-                  {c.category} {c.tier ? `• Tier ${c.tier}` : ""} {c.client_type ? `• ${c.client_type}` : ""}
-                </div>
+
+                {c.emails?.length ? (
+                  <div style={{ color: "#777", marginTop: 6, fontSize: 12 }}>
+                    {c.emails.slice(0, 3).join(" • ")}
+                    {c.emails.length > 3 ? ` • +${c.emails.length - 3} more` : ""}
+                  </div>
+                ) : (
+                  <div style={{ color: "#aaa", marginTop: 6, fontSize: 12 }}>No email on file</div>
+                )}
+
                 <div style={{ color: "#777", marginTop: 6, fontSize: 13 }}>
-                  {c.primary_email ? (
-                    <>
-                      Email: <strong>{c.primary_email}</strong> •{" "}
-                    </>
-                  ) : null}
                   Last touch: <strong>{c.last_touch_at ? new Date(c.last_touch_at).toLocaleString() : "—"}</strong>
                   {c.last_touch_channel ? ` • ${c.last_touch_channel}` : ""}
                   {typeof c.days_since_touch === "number" ? ` • ${c.days_since_touch}d ago` : ""}
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: 8 }}>
-                <a
-                  href={`/contacts/${c.id}`}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                    cursor: "pointer",
-                    textDecoration: "none",
-                    color: "#111",
-                    fontWeight: 900,
-                  }}
-                >
-                  View
-                </a>
-                <button
-                  onClick={() => openLogTouch(c.id)}
-                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                >
-                  Log touch
-                </button>
-              </div>
+              <button
+                onClick={() => openLogTouch(c.id)}
+                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+              >
+                Log touch
+              </button>
             </div>
 
             {loggingFor === c.id && (
@@ -445,11 +471,7 @@ export default function ContactsPage() {
                     <option value="other">other</option>
                   </select>
 
-                  <select
-                    value={touchDirection}
-                    onChange={(e) => setTouchDirection(e.target.value as any)}
-                    style={{ padding: 10 }}
-                  >
+                  <select value={touchDirection} onChange={(e) => setTouchDirection(e.target.value as any)} style={{ padding: 10 }}>
                     <option value="outbound">outbound</option>
                     <option value="inbound">inbound</option>
                   </select>
@@ -497,7 +519,7 @@ export default function ContactsPage() {
                   <button
                     onClick={saveTouch}
                     disabled={loggingTouch}
-                    style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
+                    style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
                   >
                     {loggingTouch ? "Saving…" : "Save touch"}
                   </button>

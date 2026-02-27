@@ -17,6 +17,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
         color: "#111",
         fontWeight: 900,
         fontSize: 13,
+        background: "#fff",
       }}
     >
       {label}
@@ -28,7 +29,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body style={{ margin: 0, background: "#fff" }}>
-        <div style={{ borderBottom: "1px solid #eee", background: "#fff" }}>
+        {/* TOP NAV (always visible) */}
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 50,
+            borderBottom: "1px solid #eee",
+            background: "#fff",
+          }}
+        >
           <div
             style={{
               maxWidth: 1100,
@@ -56,7 +66,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </div>
 
-        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 16px" }}>{children}</div>
+        {/* CONTENT */}
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px" }}>{children}</div>
       </body>
     </html>
   );
