@@ -30,25 +30,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body style={{ margin: 0, background: "#fff" }}>
-        {/* UNMISSABLE NAV */}
+        {/* TOP NAV */}
         <div
           style={{
             position: "sticky",
             top: 0,
             zIndex: 9999,
-            borderBottom: "2px solid #111",
+            borderBottom: "1px solid #eee",
             background: "#fff",
           }}
         >
-          <div style={{ background: "#111", color: "#fff", padding: "6px 16px", fontWeight: 900, fontSize: 12 }}>
-            NAV ACTIVE ✅ If you can read this, layout.tsx is rendering.
-          </div>
-
           <div
             style={{
               maxWidth: 1100,
               margin: "0 auto",
-              padding: "12px 16px",
+              padding: "14px 16px",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
