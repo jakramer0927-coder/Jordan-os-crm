@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="topbar">
           <div className="topbarInner">
             <div className="brandRow">
-              <div className="brand">
+              <div>
                 <div className="brandName">Jordan OS</div>
                 <div className="brandSub">Smith &amp; Berg — Private CRM</div>
               </div>
@@ -38,7 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        <main className="shell">{children}</main>
+        <main className="appShell">{children}</main>
       </body>
     </html>
   );
