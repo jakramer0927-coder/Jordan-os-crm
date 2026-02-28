@@ -1,224 +1,117 @@
-:root {
-  --bg: #f7f4ee;
-  --card: #ffffff;
-  --ink: #121212;
-  --muted: #6f6a60;
-  --line: rgba(18, 18, 18, 0.12);
-  --line2: rgba(18, 18, 18, 0.08);
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-  --gold: #c7a75b;
-  --gold2: rgba(199, 167, 91, 0.22);
-  --black: #0b0b0b;
-}
+/* app/globals.css */
 
+/* ===== Base reset ===== */
 * {
   box-sizing: border-box;
 }
 
 html,
 body {
-  padding: 0;
   margin: 0;
-  color: var(--ink);
-  background: var(--bg);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  padding: 0;
+  background: #ffffff;
+  color: #121212;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
 }
 
+/* ===== Theme tokens ===== */
+:root {
+  --bg: #ffffff;
+  --paper: #ffffff;
+
+  /* warm neutral (site-like) */
+  --sand: #f7f4ee;
+
+  --ink: #121212;
+  --muted: rgba(18, 18, 18, 0.64);
+
+  --line: rgba(18, 18, 18, 0.12);
+  --line2: rgba(18, 18, 18, 0.08);
+
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+/* ===== Link behavior =====
+   IMPORTANT: no global underline (prevents header/nav from turning into a mess)
+*/
 a {
   color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 12px;
-}
-
-/* Layout helpers */
-.page {
-  padding: 28px 0;
-}
-
-.pageHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 18px;
-}
-
-.h1 {
-  font-size: 30px;
-  font-weight: 900;
-  margin: 0;
-  letter-spacing: 0.2px;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-.small {
-  font-size: 12px;
-}
-
-.bold {
-  font-weight: 900;
-}
-
-.row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.stack {
-  display: grid;
-  gap: 12px;
-}
-
-.section {
-  margin-top: 18px;
-}
-
-.sectionTitleRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.sectionTitle {
-  font-weight: 900;
-  font-size: 14px;
-  letter-spacing: 0.18px;
-  text-transform: uppercase;
-}
-
-.sectionSub {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-/* Cards */
-.card {
-  background: var(--card);
-  border: 1px solid var(--line2);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-}
-
-.cardPad {
-  padding: 14px;
-}
-
-.cardSoft {
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid var(--line2);
-  border-radius: 14px;
-}
-
-/* Buttons / Inputs */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.85);
-  cursor: pointer;
-  font-weight: 900;
-  font-size: 13px;
   text-decoration: none;
-  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
-.btn:hover {
+/* Only underline links in main content */
+main a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Header/nav links should NEVER be underlined */
+.nav a {
+  text-decoration: none !important;
+}
+
+/* ===== Buttons (usable across app) ===== */
+button {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+button:hover {
   transform: translateY(-1px);
   border-color: rgba(18, 18, 18, 0.18);
 }
 
-.btnPrimary {
-  background: var(--black);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.14);
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
-.btnPrimary:hover {
-  border-color: rgba(199, 167, 91, 0.5);
-}
-
-.input,
-.select,
-.textarea {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 12px;
+/* ===== Inputs ===== */
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  padding: 10px 12px;
   outline: none;
 }
 
-.textarea {
-  min-height: 92px;
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(18, 18, 18, 0.28);
+  box-shadow: 0 0 0 4px rgba(18, 18, 18, 0.06);
+}
+
+textarea {
   resize: vertical;
 }
 
-.badge {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 999px;
+/* ===== Cards ===== */
+.card {
   border: 1px solid var(--line2);
-  background: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
-  font-weight: 800;
-  color: rgba(18, 18, 18, 0.92);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
 }
 
-.badgeGold {
-  border-color: var(--gold2);
-  background: rgba(199, 167, 91, 0.10);
-}
-
-.hr {
-  height: 1px;
-  background: var(--line2);
-  margin: 14px 0;
-}
-
-/* Modal */
-.modalBackdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.40);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 16px;
-}
-
-.modal {
-  width: min(920px, 100%);
-  background: var(--card);
-  border-radius: 18px;
-  border: 1px solid var(--line2);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.18);
-  padding: 14px;
-/* ===== Top header / navigation ===== */
-
+/* ===== Header / navigation (matches layout.tsx classes) ===== */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(247, 244, 238, 0.92);
+  background: rgba(247, 244, 238, 0.92); /* sand */
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line2);
 }
@@ -260,11 +153,6 @@ code {
   align-items: center;
 }
 
-/* Override global <a> underline ONLY in nav */
-.nav a {
-  text-decoration: none;
-}
-
 .navLink {
   display: inline-flex;
   align-items: center;
@@ -290,8 +178,21 @@ code {
   font-weight: 800;
 }
 
+/* main app shell */
 .shell {
   max-width: 1100px;
   margin: 0 auto;
   padding: 0 16px;
-}}
+}
+
+/* ===== Optional: subtle page headings ===== */
+h1,
+h2,
+h3 {
+  color: var(--ink);
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--line2);
+}
