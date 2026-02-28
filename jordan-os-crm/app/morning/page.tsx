@@ -15,8 +15,10 @@ type TouchIntent =
 type Contact = {
   id: string;
   display_name: string;
-  category: string; // Client, Agent, Developer, Vendor, Other
-  tier: string | null; // A/B/C
+  category: string;
+  tier: string | null;
+  client_type: string | null;
+  email: string | null;
   created_at: string;
 };
 
@@ -26,422 +28,265 @@ type Touch = {
   channel: "email" | "text" | "call" | "in_person" | "social_dm" | "other";
   direction: "outbound" | "inbound";
   occurred_at: string;
+  intent: TouchIntent | null;
   summary: string | null;
   source: string | null;
   source_link: string | null;
-  intent: TouchIntent | null;
 };
 
-type Row = Contact & {
+type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
+  last_outbound_channel: Touch["channel"] | null;
   days_since_outbound: number | null;
-  cadence_days: number;
-  due_in_days: number | null;
-  is_due: boolean;
-  priority_score: number;
-  why: string[];
-  draft1: string;
-  draft2: string;
 };
-
-function startOfTodayLocalISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 function daysSince(iso: string): number {
   const then = new Date(iso).getTime();
   const now = Date.now();
-  return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
+  const diffMs = now - then;
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return Math.max(0, days);
 }
 
-function categoryPretty(category: string) {
-  const c = (category || "").trim();
-  if (!c) return "Other";
-  return c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
-}
-
-function cadenceDays(categoryRaw: string, tierRaw: string | null): number {
-  const category = (categoryRaw || "").toLowerCase();
-  const tier = (tierRaw || "").toUpperCase();
-
-  if (category === "client") {
-    if (tier === "A") return 30;
-    if (tier === "B") return 60;
-    return 90;
+function fmtDate(iso: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
   }
-  if (category === "agent") {
-    if (tier === "A") return 30;
-    if (tier === "B") return 60;
-    return 90;
+}
+
+function isWeekdayLocal(): boolean {
+  const d = new Date().getDay(); // 0=Sun ... 6=Sat
+  return d >= 1 && d <= 5;
+}
+
+function cadenceDays(category: string, tier: string | null): number {
+  const cat = (category || "").toLowerCase();
+  const t = (tier || "").toUpperCase();
+
+  if (cat === "client") {
+    if (t === "A") return 30;
+    if (t === "B") return 60;
+    if (t === "C") return 90;
+    return 60;
   }
-  if (category === "developer") return 60;
-
-  if (tier === "A") return 45;
-  if (tier === "B") return 75;
-  return 120;
+  if (cat === "agent") {
+    if (t === "A") return 30;
+    return 60;
+  }
+  if (cat === "developer") return 60;
+  return 60;
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function isOverdue(c: ContactWithLastOutbound): boolean {
+  const cadence = cadenceDays(c.category, c.tier);
+  if (c.days_since_outbound == null) return true; // never reached out
+  return c.days_since_outbound >= cadence;
 }
 
-function computeScore(input: {
-  category: string;
-  tier: string | null;
-  daysSinceOutbound: number | null;
+function isAClient(c: ContactWithLastOutbound): boolean {
+  return (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A";
+}
+
+function isAgentA(c: ContactWithLastOutbound): boolean {
+  return (c.category || "").toLowerCase() === "agent" && (c.tier || "").toUpperCase() === "A";
+}
+
+function categoryBadge(c: ContactWithLastOutbound) {
+  const cat = (c.category || "Other").trim();
+  const tier = c.tier ? ` • Tier ${c.tier}` : "";
+  const ct = c.client_type ? ` • ${c.client_type}` : "";
+  return `${cat}${tier}${ct}`;
+}
+
+function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
+  // Default “phone-first outreach on iPhone” behavior; keep it simple:
+  // Clients: text, Agents: email, Dev/Vendor: email, fallback: text
+  const cat = (c.category || "").toLowerCase();
+  if (cat === "agent" || cat === "developer" || cat === "vendor") return "email";
+  return "text";
+}
+
+function draftMessage(c: ContactWithLastOutbound): string {
+  const cat = (c.category || "").toLowerCase();
+
+  if (cat === "agent") {
+    return `Hey ${c.display_name.split(" ")[0] || ""} — quick one: I’ve got an active buyer in the market right now. If you have anything quiet/off-market coming up, I’d love to hear about it. Happy to keep you posted on what I’m seeing too.`;
+  }
+
+  if (cat === "developer") {
+    return `Hi ${c.display_name.split(" ")[0] || ""} — checking in. Curious what you’re seeing right now on pricing + buyer demand, and if you have anything upcoming that fits the current moment.`;
+  }
+
+  // Client default
+  return `Hey ${c.display_name.split(" ")[0] || ""} — quick check-in. How’s everything going on your end? Anything real-estate related on your mind this spring?`;
+}
+
+type Recommendation = ContactWithLastOutbound & {
   cadence: number;
-}): { score: number; why: string[] } {
-  const category = (input.category || "").toLowerCase();
-  const tier = (input.tier || "").toUpperCase();
-  const days = input.daysSinceOutbound;
-  const cadence = input.cadence;
-
-  const effectiveDays = days === null ? cadence + 1 : days;
-  const overdueBy = effectiveDays - cadence;
-
-  const overduePoints = clamp(Math.round((overdueBy / cadence) * 60), 0, 80);
-
-  let tierPoints = 10;
-  if (tier === "A") tierPoints = 35;
-  else if (tier === "B") tierPoints = 20;
-
-  let catPoints = 10;
-  if (category === "client") catPoints = 30;
-  else if (category === "agent") catPoints = 24;
-  else if (category === "developer") catPoints = 18;
-
-  let bonus = 0;
-  if (category === "client" && tier === "A" && overdueBy >= 0) bonus += 25;
-  if (category === "agent" && tier === "A" && overdueBy >= 0) bonus += 15;
-
-  const score = tierPoints + catPoints + overduePoints + bonus;
-
-  const why: string[] = [];
-  why.push(`${categoryPretty(input.category)} • Tier ${tier || "—"}`);
-  if (days === null) why.push(`No outbound touch logged yet (cadence ${cadence}d)`);
-  else why.push(`${days} days since last outbound (cadence ${cadence}d)`);
-  if (overdueBy >= 0) why.push(`Due/overdue by ${overdueBy} day${overdueBy === 1 ? "" : "s"}`);
-  else why.push(`Not due yet (due in ${Math.abs(overdueBy)} days)`);
-
-  if (bonus > 0) {
-    if (category === "client" && tier === "A") why.push("Pinned behavior: A-Client due/overdue");
-    else if (category === "agent" && tier === "A") why.push("Boost: Agent-A due/overdue");
-  }
-
-  return { score, why };
-}
-
-function makeDrafts(name: string, categoryRaw: string, tierRaw: string | null) {
-  const category = (categoryRaw || "").toLowerCase();
-  const tier = (tierRaw || "").toUpperCase();
-
-  if (category === "client") {
-    return {
-      d1: `Hey ${name} — quick check-in. How’s everything going on your end this week?`,
-      d2:
-        tier === "A"
-          ? `Hi ${name} — I’m mapping out the week and wanted to make sure you’re feeling supported. Anything you want me to prioritize right now?`
-          : `Hi ${name} — quick touch base. Anything new on your timeline or preferences I should know about?`,
-    };
-  }
-
-  if (category === "agent") {
-    return {
-      d1: `Hey ${name} — hope you’re doing well. Anything you’re working on right now where I can be helpful?`,
-      d2:
-        tier === "A"
-          ? `Hi ${name} — quick one: I’m staying proactive with my network this week. Any buyers/sellers you want to team up on or keep an eye out for?`
-          : `Hi ${name} — checking in. If anything comes across your desk where you want a second set of eyes, I’m around.`,
-    };
-  }
-
-  if (category === "developer") {
-    return {
-      d1: `Hi ${name} — quick check-in. Any updates on current inventory or upcoming releases I should be aware of?`,
-      d2: `Hey ${name} — I’m reviewing my active buyer pool. If you have anything new (or price movements), I’d love to align.`,
-    };
-  }
-
-  return {
-    d1: `Hey ${name} — quick check-in. Hope you’re having a good week.`,
-    d2: `Hi ${name} — wanted to say hello and see if there’s anything you need from me.`,
-  };
-}
+  overdue: boolean;
+  score: number;
+  reasons: string[];
+  suggested_channel: Touch["channel"];
+  suggested_draft: string;
+};
 
 export default function MorningPage() {
   const [ready, setReady] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [uid, setUid] = useState<string | null>(null);
 
-  const [rows, setRows] = useState<Row[]>([]);
+  const [contacts, setContacts] = useState<ContactWithLastOutbound[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Today metrics
-  const [touchesToday, setTouchesToday] = useState(0);
-  const [agentTouchesToday, setAgentTouchesToday] = useState(0);
+  // logging touch inline
+  const [loggingFor, setLoggingFor] = useState<string | null>(null);
+  const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
+  const [touchIntent, setTouchIntent] = useState<TouchIntent>("check_in");
+  const [touchSummary, setTouchSummary] = useState("");
+  const [touchSource, setTouchSource] = useState("manual");
+  const [touchLink, setTouchLink] = useState("");
+  const [savingTouch, setSavingTouch] = useState(false);
 
-  // Log touch UI
-  const [loggingFor, setLoggingFor] = useState<Row | null>(null);
-  const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
-  const [logIntent, setLogIntent] = useState<TouchIntent>("check_in");
-  const [logSummary, setLogSummary] = useState("");
-  const [logSource, setLogSource] = useState("manual");
-  const [logLink, setLogLink] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const needs5 = Math.max(0, 5 - touchesToday);
-  const needs2Agents = Math.max(0, 2 - agentTouchesToday);
-
-  const top5 = useMemo(() => {
-    const dueAClients = rows
-      .filter((r) => r.category.toLowerCase() === "client" && (r.tier || "").toUpperCase() === "A" && r.is_due)
-      .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0));
-
-    const agentCandidates = rows
-      .filter((r) => r.category.toLowerCase() === "agent")
-      .sort((a, b) => {
-        if (a.is_due && !b.is_due) return -1;
-        if (!a.is_due && b.is_due) return 1;
-        return (b.priority_score ?? 0) - (a.priority_score ?? 0);
-      });
-
-    const others = rows
-      .filter((r) => r.category.toLowerCase() !== "agent")
-      .filter((r) => !(r.category.toLowerCase() === "client" && (r.tier || "").toUpperCase() === "A" && r.is_due))
-      .sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0));
-
-    const combined: Row[] = [];
-    const seen = new Set<string>();
-
-    const push = (r: Row) => {
-      if (combined.length >= 5) return;
-      if (seen.has(r.id)) return;
-      combined.push(r);
-      seen.add(r.id);
-    };
-
-    for (const r of dueAClients) push(r);
-
-    if (needs2Agents > 0) {
-      for (const r of agentCandidates) {
-        if (combined.length >= 5) break;
-        push(r);
-        const agentCountInList = combined.filter((x) => x.category.toLowerCase() === "agent").length;
-        if (agentCountInList >= needs2Agents) break;
-      }
+  async function requireSession() {
+    const { data } = await supabase.auth.getSession();
+    const user = data.session?.user ?? null;
+    if (!user) {
+      window.location.href = "/login";
+      return null;
     }
+    setUid(user.id);
+    return user;
+  }
 
-    for (const r of others) push(r);
-
-    return combined;
-  }, [rows, needs2Agents]);
-
-  const dueCounts = useMemo(() => {
-    const due = rows.filter((r) => r.is_due).length;
-    const dueClientsA = rows.filter(
-      (r) => r.is_due && r.category.toLowerCase() === "client" && (r.tier || "").toUpperCase() === "A"
-    ).length;
-    const dueAgents = rows.filter((r) => r.is_due && r.category.toLowerCase() === "agent").length;
-    return { due, dueClientsA, dueAgents };
-  }, [rows]);
-
-  async function fetchContactsAndLastOutbound() {
+  async function load() {
     setError(null);
+    setMsg(null);
+    setLoading(true);
 
+    const user = await requireSession();
+    if (!user) return;
+
+    // Contacts
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, created_at")
+      .select("id, display_name, category, tier, client_type, email, created_at")
       .order("created_at", { ascending: false })
-      .limit(3000);
+      .limit(2000);
 
     if (cErr) {
       setError(`Contacts fetch error: ${cErr.message}`);
-      setRows([]);
+      setContacts([]);
+      setLoading(false);
       return;
     }
 
-    const contacts = (cData ?? []) as Contact[];
-    if (contacts.length === 0) {
-      setRows([]);
+    const base = (cData ?? []) as Contact[];
+    if (base.length === 0) {
+      setContacts([]);
+      setLoading(false);
       return;
     }
 
-    const ids = contacts.map((c) => c.id);
-
+    // Outbound touches only (your rule)
+    const ids = base.map((c) => c.id);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
-      .select("id, contact_id, channel, direction, occurred_at, summary, source, source_link, intent")
+      .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
       .in("contact_id", ids)
       .eq("direction", "outbound")
       .order("occurred_at", { ascending: false })
-      .limit(6000);
+      .limit(8000);
 
-    if (tErr) setError((prev) => prev ?? `Touches fetch error: ${tErr.message}`);
-
-    const touches = ((tData ?? []) as Touch[]) || [];
-    const latestOutboundByContact = new Map<string, Touch>();
-    for (const t of touches) {
-      if (!latestOutboundByContact.has(t.contact_id)) latestOutboundByContact.set(t.contact_id, t);
+    if (tErr) {
+      setError(`Touches fetch error: ${tErr.message}`);
+      const mergedFail: ContactWithLastOutbound[] = base.map((c) => ({
+        ...c,
+        last_outbound_at: null,
+        last_outbound_channel: null,
+        days_since_outbound: null,
+      }));
+      setContacts(mergedFail);
+      setLoading(false);
+      return;
     }
 
-    const computed: Row[] = contacts.map((c) => {
-      const last = latestOutboundByContact.get(c.id) ?? null;
-      const lastAt = last ? last.occurred_at : null;
-      const days = lastAt ? daysSince(lastAt) : null;
+    const touches = (tData ?? []) as Touch[];
+    const latestOutbound = new Map<string, Touch>();
+    for (const t of touches) {
+      if (!latestOutbound.has(t.contact_id)) latestOutbound.set(t.contact_id, t);
+    }
 
-      const cadence = cadenceDays(c.category, c.tier);
-      const isDue = days === null ? true : days >= cadence;
-      const dueIn = days === null ? 0 : cadence - days;
-
-      const { score, why } = computeScore({
-        category: c.category,
-        tier: c.tier,
-        daysSinceOutbound: days,
-        cadence,
-      });
-
-      const drafts = makeDrafts(c.display_name, c.category, c.tier);
-
+    const merged: ContactWithLastOutbound[] = base.map((c) => {
+      const last = latestOutbound.get(c.id) ?? null;
       return {
         ...c,
-        last_outbound_at: lastAt,
-        days_since_outbound: days,
-        cadence_days: cadence,
-        due_in_days: dueIn,
-        is_due: isDue,
-        priority_score: score,
-        why,
-        draft1: drafts.d1,
-        draft2: drafts.d2,
+        last_outbound_at: last ? last.occurred_at : null,
+        last_outbound_channel: last ? last.channel : null,
+        days_since_outbound: last ? daysSince(last.occurred_at) : null,
       };
     });
 
-    computed.sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0));
-    setRows(computed);
+    setContacts(merged);
+    setLoading(false);
   }
 
-  async function fetchTodayMetrics() {
-    setError(null);
-
-    const since = startOfTodayLocalISO();
-
-    const { data: tData, error: tErr } = await supabase
-      .from("touches")
-      .select("id, contact_id, direction, occurred_at")
-      .eq("direction", "outbound")
-      .gte("occurred_at", since)
-      .order("occurred_at", { ascending: false })
-      .limit(5000);
-
-    if (tErr) {
-      setError(`Today metrics error: ${tErr.message}`);
-      setTouchesToday(0);
-      setAgentTouchesToday(0);
-      return;
-    }
-
-    const touches = (tData ?? []) as Array<Pick<Touch, "id" | "contact_id" | "direction" | "occurred_at">>;
-    setTouchesToday(touches.length);
-
-    const ids = Array.from(new Set(touches.map((t) => t.contact_id)));
-    if (ids.length === 0) {
-      setAgentTouchesToday(0);
-      return;
-    }
-
-    const { data: cData, error: cErr } = await supabase.from("contacts").select("id, category").in("id", ids);
-
-    if (cErr) {
-      setError((prev) => prev ?? `Today metrics (agent) error: ${cErr.message}`);
-      setAgentTouchesToday(0);
-      return;
-    }
-
-    const catById = new Map<string, string>();
-    (cData ?? []).forEach((c: any) => catById.set(c.id, c.category));
-
-    let agentCount = 0;
-    for (const t of touches) {
-      if ((catById.get(t.contact_id) || "").toLowerCase() === "agent") agentCount += 1;
-    }
-    setAgentTouchesToday(agentCount);
+  function openLog(c: Recommendation) {
+    setLoggingFor(c.id);
+    setTouchChannel(c.suggested_channel);
+    setTouchIntent("check_in");
+    setTouchSummary("");
+    setTouchSource("manual");
+    setTouchLink("");
   }
 
-  async function refreshAll() {
-    await Promise.all([fetchContactsAndLastOutbound(), fetchTodayMetrics()]);
-  }
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }
-
-  function openLog(r: Row) {
-    setLoggingFor(r);
-    setLogChannel(r.category.toLowerCase() === "agent" ? "text" : "text");
-    setLogIntent("check_in");
-    setLogSummary("");
-    setLogSource("manual");
-    setLogLink("");
-  }
-
-  async function saveLog() {
+  async function saveTouch() {
     if (!loggingFor) return;
-
-    setSaving(true);
+    setSavingTouch(true);
     setError(null);
+    setMsg(null);
 
-    const occurredAt = new Date().toISOString();
-
-    const { error } = await supabase.from("touches").insert({
-      contact_id: loggingFor.id,
-      channel: logChannel,
+    const { error: insErr } = await supabase.from("touches").insert({
+      contact_id: loggingFor,
+      channel: touchChannel,
       direction: "outbound",
-      intent: logIntent,
-      occurred_at: occurredAt,
-      summary: logSummary.trim() ? logSummary.trim() : null,
-      source: logSource.trim() ? logSource.trim() : null,
-      source_link: logLink.trim() ? logLink.trim() : null,
+      intent: touchIntent,
+      occurred_at: new Date().toISOString(),
+      summary: touchSummary.trim() ? touchSummary.trim() : null,
+      source: touchSource.trim() ? touchSource.trim() : null,
+      source_link: touchLink.trim() ? touchLink.trim() : null,
     });
 
-    setSaving(false);
+    setSavingTouch(false);
 
-    if (error) {
-      setError(`Insert touch error: ${error.message}`);
+    if (insErr) {
+      setError(`Insert touch error: ${insErr.message}`);
       return;
     }
 
+    setMsg("Touch saved.");
     setLoggingFor(null);
-    await refreshAll();
+    await load();
   }
 
   useEffect(() => {
     let alive = true;
 
     const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      const uid = data.session?.user.id ?? null;
-
+      const user = await requireSession();
       if (!alive) return;
+      if (!user) return;
 
-      if (!uid) {
-        setTimeout(async () => {
-          const { data: d2 } = await supabase.auth.getSession();
-          if (!d2.session) window.location.href = "/login";
-        }, 250);
-        return;
-      }
-
-      setUserId(uid);
       setReady(true);
-      await refreshAll();
+      await load();
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      const uid = session?.user.id ?? null;
-      setUserId(uid);
-      if (!uid) window.location.href = "/login";
+      const u = session?.user ?? null;
+      if (!u) window.location.href = "/login";
     });
 
     init();
@@ -450,327 +295,335 @@ export default function MorningPage() {
       alive = false;
       sub.subscription.unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  const recs = useMemo<Recommendation[]>(() => {
+    // Weekend handling: still show dashboard, but recommendations are “weekday-only”
+    const weekday = isWeekdayLocal();
+
+    // Build scored list
+    const scored: Recommendation[] = contacts.map((c) => {
+      const cadence = cadenceDays(c.category, c.tier);
+      const overdue = isOverdue(c);
+      const d = c.days_since_outbound;
+
+      const reasons: string[] = [];
+      if (overdue) reasons.push(`Overdue (cadence ${cadence}d)`);
+      if (d == null) reasons.push("No outbound logged yet");
+      else reasons.push(`${d} days since outbound`);
+
+      if (isAClient(c)) reasons.push("A-Client (never miss)");
+      if (isAgentA(c)) reasons.push("Agent-A priority");
+      if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
+
+      // Score logic (simple + deterministic; we can swap to your weighted framework later)
+      let score = 0;
+
+      // A-client hard boost
+      if (isAClient(c)) score += 1000;
+
+      // Overdue boost
+      if (overdue) score += 300;
+
+      // Days since outbound: scale
+      score += (d ?? cadence) * 2;
+
+      // Category weighting: A-client already handled
+      const cat = (c.category || "").toLowerCase();
+      if (cat === "agent") score += 60;
+      if (cat === "developer") score += 40;
+      if (cat === "client") score += 80;
+
+      // Tier weighting (non-client still useful)
+      const t = (c.tier || "").toUpperCase();
+      if (t === "A") score += 40;
+      if (t === "B") score += 20;
+
+      // Weekend: downweight (we still show, but “weekday-only” focus)
+      if (!weekday) score -= 30;
+
+      const suggested_channel = pickChannel(c);
+      const suggested_draft = draftMessage(c);
+
+      return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
+    });
+
+    // Sort by score desc
+    scored.sort((a, b) => b.score - a.score);
+
+    // Build Top 5 with constraints:
+    // - If any overdue A-clients exist, they must remain in Top 5 until touched.
+    // - Minimum 2 agents (if available).
+    // - Total 5
+    const top: Recommendation[] = [];
+    const used = new Set<string>();
+
+    // 1) lock in overdue A-clients first
+    const overdueAClients = scored.filter((c) => isAClient(c) && c.overdue);
+    for (const c of overdueAClients) {
+      if (top.length >= 5) break;
+      top.push(c);
+      used.add(c.id);
+    }
+
+    // 2) ensure at least 2 agents (prefer overdue agents)
+    const agentsNeeded = 2;
+    const agentPool = scored.filter((c) => (c.category || "").toLowerCase() === "agent" && !used.has(c.id));
+    const pickAgents = agentPool.slice(0, Math.max(0, agentsNeeded - top.filter((x) => (x.category || "").toLowerCase() === "agent").length));
+    for (const a of pickAgents) {
+      if (top.length >= 5) break;
+      top.push(a);
+      used.add(a.id);
+    }
+
+    // 3) fill remaining by score
+    for (const c of scored) {
+      if (top.length >= 5) break;
+      if (used.has(c.id)) continue;
+      top.push(c);
+      used.add(c.id);
+    }
+
+    // If there were more overdue A-clients than slots, we still show the top 5
+    // but the “Never Miss” is satisfied as much as possible; we can also add a warning banner.
+    return top;
+  }, [contacts]);
+
+  const stats = useMemo(() => {
+    const total = contacts.length;
+    const overdue = contacts.filter((c) => isOverdue(c)).length;
+    const overdueA = contacts.filter((c) => isAClient(c) && isOverdue(c)).length;
+    const agents = contacts.filter((c) => (c.category || "").toLowerCase() === "agent").length;
+    return { total, overdue, overdueA, agents };
+  }, [contacts]);
+
+  if (!ready) return <div className="page">Loading…</div>;
+
+  const weekday = isWeekdayLocal();
 
   return (
-    <div style={{ padding: 40, maxWidth: 1100 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+    <div>
+      <div className="pageHeader">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>Morning Run</h1>
-          <div style={{ marginTop: 6, color: "#666" }}>
-            Due total: <strong>{dueCounts.due}</strong> • Due A-Clients: <strong>{dueCounts.dueClientsA}</strong> • Due Agents:{" "}
-            <strong>{dueCounts.dueAgents}</strong>
-          </div>
-
-          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ border: "1px solid #ddd", borderRadius: 999, padding: "6px 10px" }}>
-              Outbound touches today: <strong>{touchesToday}</strong> / 5 {needs5 > 0 ? `• need ${needs5}` : "• ✅"}
-            </div>
-            <div style={{ border: "1px solid #ddd", borderRadius: 999, padding: "6px 10px" }}>
-              Agent touches today: <strong>{agentTouchesToday}</strong> / 2 {needs2Agents > 0 ? `• need ${needs2Agents}` : "• ✅"}
-            </div>
-            <div style={{ color: "#999", fontSize: 12 }}>
-              Outbound-only cadence • user {userId ? userId.slice(0, 8) + "…" : ""}
-            </div>
+          <h1 className="h1">Morning</h1>
+          <div className="muted" style={{ marginTop: 8 }}>
+            <span className="badge">{weekday ? "Weekday focus" : "Weekend (view-only focus)"}</span>{" "}
+            <span className="badge">{stats.total} contacts</span>{" "}
+            <span className="badge">{stats.overdue} overdue</span>{" "}
+            <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
+            <span className="badge">{stats.agents} agents</span>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <a
-            href="/contacts"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              textDecoration: "none",
-              color: "#111",
-            }}
-          >
+        <div className="row">
+          <a className="btn" href="/contacts">
             Contacts
           </a>
-          <button
-            onClick={refreshAll}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-          >
-            Refresh
-          </button>
-          <button
-            onClick={signOut}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-          >
-            Sign out
+          <a className="btn" href="/unmatched">
+            Unmatched
+          </a>
+          <button className="btn" onClick={load} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </div>
 
-      {error && <div style={{ marginTop: 14, color: "crimson", fontWeight: 800 }}>{error}</div>}
-
-      <div style={{ marginTop: 18 }}>
-        {top5.map((r, idx) => (
-          <div
-            key={r.id}
-            style={{
-              border: "1px solid #e5e5e5",
-              borderRadius: 14,
-              padding: 14,
-              marginBottom: 12,
-              background: r.is_due ? "#fff" : "#fafafa",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 16 }}>
-                  {idx + 1}. {r.display_name}
-                  {r.is_due ? (
-                    <span
-                      style={{
-                        marginLeft: 10,
-                        fontSize: 12,
-                        padding: "2px 8px",
-                        border: "1px solid #ddd",
-                        borderRadius: 999,
-                      }}
-                    >
-                      DUE
-                    </span>
-                  ) : null}
-                  {r.category.toLowerCase() === "agent" && needs2Agents > 0 ? (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        fontSize: 12,
-                        padding: "2px 8px",
-                        border: "1px solid #ddd",
-                        borderRadius: 999,
-                      }}
-                    >
-                      agent quota
-                    </span>
-                  ) : null}
-                </div>
-
-                <div style={{ color: "#555", marginTop: 4 }}>
-                  {categoryPretty(r.category)} {r.tier ? `• Tier ${r.tier}` : ""}
-                </div>
-
-                <div style={{ color: "#777", marginTop: 6, fontSize: 13 }}>
-                  Last outbound: <strong>{r.last_outbound_at ? new Date(r.last_outbound_at).toLocaleString() : "—"}</strong>
-                  {typeof r.days_since_outbound === "number" ? ` • ${r.days_since_outbound}d ago` : ""}
-                  {` • cadence ${r.cadence_days}d`}
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontWeight: 800, marginBottom: 6 }}>Why this is in your Top 5</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, color: "#444" }}>
-                    {r.why.map((w, i) => (
-                      <li key={i} style={{ marginBottom: 4 }}>
-                        {w}
-                      </li>
-                    ))}
-                    <li style={{ marginBottom: 4 }}>
-                      Priority score: <strong>{r.priority_score}</strong>
-                    </li>
-                  </ul>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontWeight: 800, marginBottom: 6 }}>Drafts</div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 10, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#999", marginBottom: 4 }}>Draft 1</div>
-                      <div>{r.draft1}</div>
-                    </div>
-                    <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 10, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#999", marginBottom: 4 }}>Draft 2</div>
-                      <div>{r.draft2}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ minWidth: 160, display: "flex", flexDirection: "column", gap: 10 }}>
-                <button
-                  onClick={() => openLog(r)}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                    cursor: "pointer",
-                    fontWeight: 800,
-                  }}
-                >
-                  Log touch
-                </button>
-
-                <button
-                  onClick={() => navigator.clipboard.writeText(r.draft1)}
-                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                >
-                  Copy draft 1
-                </button>
-
-                <button
-                  onClick={() => navigator.clipboard.writeText(r.draft2)}
-                  style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                >
-                  Copy draft 2
-                </button>
-
-                <div style={{ color: "#999", fontSize: 12 }}>Log after you send.</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {loggingFor && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 16,
-          }}
-        >
-          <div style={{ width: "min(760px, 100%)", background: "#fff", borderRadius: 16, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>Log outbound touch</div>
-                <div style={{ color: "#666", marginTop: 4 }}>
-                  {loggingFor.display_name} • {categoryPretty(loggingFor.category)}
-                  {loggingFor.tier ? ` • Tier ${loggingFor.tier}` : ""}
-                </div>
-              </div>
-              <button
-                onClick={() => setLoggingFor(null)}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-              >
-                Close
-              </button>
-            </div>
-
-            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Channel
-                <select
-                  value={logChannel}
-                  onChange={(e) => setLogChannel(e.target.value as any)}
-                  style={{ display: "block", padding: 10, marginTop: 6 }}
-                >
-                  <option value="email">email</option>
-                  <option value="text">text</option>
-                  <option value="call">call</option>
-                  <option value="in_person">in_person</option>
-                  <option value="social_dm">social_dm</option>
-                  <option value="other">other</option>
-                </select>
-              </label>
-
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Intent
-                <select
-                  value={logIntent}
-                  onChange={(e) => setLogIntent(e.target.value as any)}
-                  style={{ display: "block", padding: 10, marginTop: 6 }}
-                >
-                  <option value="check_in">check_in</option>
-                  <option value="referral_ask">referral_ask</option>
-                  <option value="review_ask">review_ask</option>
-                  <option value="deal_followup">deal_followup</option>
-                  <option value="collaboration">collaboration</option>
-                  <option value="event_invite">event_invite</option>
-                  <option value="other">other</option>
-                </select>
-              </label>
-
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Source
-                <input
-                  value={logSource}
-                  onChange={(e) => setLogSource(e.target.value)}
-                  placeholder="manual / gmail / sms"
-                  style={{
-                    display: "block",
-                    padding: 10,
-                    marginTop: 6,
-                    width: 240,
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                  }}
-                />
-              </label>
-
-              <label style={{ fontSize: 12, color: "#666", flex: 1, minWidth: 260 }}>
-                Link (optional)
-                <input
-                  value={logLink}
-                  onChange={(e) => setLogLink(e.target.value)}
-                  placeholder="paste Gmail thread link, etc."
-                  style={{
-                    display: "block",
-                    padding: 10,
-                    marginTop: 6,
-                    width: "100%",
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                  }}
-                />
-              </label>
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Summary (optional)
-                <textarea
-                  value={logSummary}
-                  onChange={(e) => setLogSummary(e.target.value)}
-                  placeholder="Quick note about what you sent / what you discussed"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    minHeight: 90,
-                    padding: 10,
-                    marginTop: 6,
-                    borderRadius: 10,
-                    border: "1px solid #ddd",
-                  }}
-                />
-              </label>
-            </div>
-
-            <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-              <button
-                onClick={saveLog}
-                disabled={saving}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "1px solid #ddd",
-                  cursor: "pointer",
-                  fontWeight: 900,
-                }}
-              >
-                {saving ? "Saving…" : "Save touch"}
-              </button>
-              <button
-                onClick={() => setLoggingFor(null)}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-              >
-                Cancel
-              </button>
-            </div>
-
-            <div style={{ marginTop: 10, color: "#999", fontSize: 12 }}>
-              Outbound touches reset cadence. Inbound replies do not.
-            </div>
+      {(error || msg) && (
+        <div className="card cardPad" style={{ borderColor: error ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: error ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+            {error || msg}
           </div>
         </div>
       )}
+
+      {/* Operating Rules */}
+      <div className="section" style={{ marginTop: 14 }}>
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">Operating rules</div>
+          <div className="sectionSub">Daily accountability, without noise.</div>
+        </div>
+
+        <div className="row">
+          <span className="badge">Top 5 per day</span>
+          <span className="badge">Min 2 agents (if available)</span>
+          <span className="badge">A-Client never missed</span>
+          <span className="badge">Outbound resets cadence</span>
+          <span className="badge">Weekday-focused suggestions</span>
+        </div>
+
+        {!weekday ? (
+          <div className="muted small" style={{ marginTop: 10 }}>
+            It’s the weekend — this still shows priorities, but your accountability focus is weekdays.
+          </div>
+        ) : null}
+      </div>
+
+      {/* Top 5 */}
+      <div className="section" style={{ marginTop: 12 }}>
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">Today’s Top 5</div>
+          <div className="sectionSub">Ranked by overdue + tier + category + days since outbound.</div>
+        </div>
+
+        <div className="stack">
+          {recs.map((c, idx) => {
+            const agent = (c.category || "").toLowerCase() === "agent";
+            const overdue = c.overdue;
+
+            return (
+              <div key={c.id} className="card cardPad">
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                      <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                        <span className="badge" style={{ marginRight: 10 }}>
+                          #{idx + 1}
+                        </span>
+                        <a href={`/contacts/${c.id}`}>{c.display_name}</a>
+                      </div>
+
+                      <div className="muted small">
+                        Last outbound: <span className="bold">{fmtDate(c.last_outbound_at)}</span>
+                        {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
+                      </div>
+                    </div>
+
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <span className="badge">{categoryBadge(c)}</span>
+                      <span className="badge">Cadence {c.cadence}d</span>
+                      {c.days_since_outbound == null ? <span className="badge">Never outbound</span> : <span className="badge">{c.days_since_outbound}d since</span>}
+                      <span className="badge">{overdue ? "Overdue" : "On track"}</span>
+                      {agent ? <span className="badge">Agent touch</span> : null}
+                    </div>
+
+                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Why this is in your Top 5
+                      </div>
+                      <div className="row">
+                        {c.reasons.slice(0, 5).map((r) => (
+                          <span key={r} className="badge">
+                            {r}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: 10 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Suggested outreach
+                        </div>
+                        <div className="row">
+                          <span className="badge">Channel: {c.suggested_channel}</span>
+                          <span className="badge">Intent: check_in</span>
+                        </div>
+
+                        <div style={{ marginTop: 10 }}>
+                          <div className="small muted bold" style={{ marginBottom: 6 }}>
+                            Draft
+                          </div>
+                          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{c.suggested_draft}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ width: 280, display: "grid", gap: 10 }}>
+                    <a className="btn" href={`/contacts/${c.id}`}>
+                      Open contact
+                    </a>
+                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                      Log outbound touch
+                    </button>
+                  </div>
+                </div>
+
+                {/* Log touch panel */}
+                {loggingFor === c.id && (
+                  <div className="section" style={{ marginTop: 12 }}>
+                    <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
+                      <div className="sectionTitle">Log outbound touch</div>
+                      <div className="sectionSub">{c.display_name}</div>
+                    </div>
+
+                    <div className="row">
+                      <div style={{ width: 200, minWidth: 180 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Channel
+                        </div>
+                        <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as any)}>
+                          <option value="email">email</option>
+                          <option value="text">text</option>
+                          <option value="call">call</option>
+                          <option value="in_person">in_person</option>
+                          <option value="social_dm">social_dm</option>
+                          <option value="other">other</option>
+                        </select>
+                      </div>
+
+                      <div style={{ width: 260, minWidth: 220 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Intent
+                        </div>
+                        <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as any)}>
+                          <option value="check_in">check_in</option>
+                          <option value="referral_ask">referral_ask</option>
+                          <option value="review_ask">review_ask</option>
+                          <option value="deal_followup">deal_followup</option>
+                          <option value="collaboration">collaboration</option>
+                          <option value="event_invite">event_invite</option>
+                          <option value="other">other</option>
+                        </select>
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Source
+                        </div>
+                        <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
+                      </div>
+                    </div>
+
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <div style={{ flex: 1, minWidth: 260 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Link (optional)
+                        </div>
+                        <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Summary (optional)
+                      </div>
+                      <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
+                    </div>
+
+                    <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
+                      <div className="muted small">Outbound touches reset cadence.</div>
+                      <div className="row">
+                        <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
+                          Cancel
+                        </button>
+                        <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+                          {savingTouch ? "Saving…" : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {recs.length === 0 ? (
+            <div className="card cardPad">
+              <div className="muted">No contacts found yet — add a few on Contacts first.</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
