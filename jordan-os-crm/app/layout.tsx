@@ -1,4 +1,3 @@
-// app/layout.tsx
 import "./globals.css";
 
 export const metadata = {
@@ -8,7 +7,7 @@ export const metadata = {
 
 function NavLink({ href, label }: { href: string; label: string }) {
   return (
-    <a className="navLink" href={href}>
+    <a href={href} className="navLink">
       {label}
     </a>
   );
@@ -19,14 +18,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <header className="topbar">
-          <div className="container">
-            <div className="topbarInner">
+          <div className="topbarInner">
+            <div className="brandRow">
               <div className="brand">
-                <div className="brandMark">Jordan OS</div>
+                <div className="brandName">Jordan OS</div>
                 <div className="brandSub">Smith &amp; Berg — Private CRM</div>
               </div>
 
-              <nav className="nav" aria-label="Primary">
+              <nav className="nav">
                 <NavLink href="/morning" label="Morning" />
                 <NavLink href="/contacts" label="Contacts" />
                 <NavLink href="/unmatched" label="Unmatched" />
@@ -34,10 +33,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <NavLink href="/settings/integrations" label="Integrations" />
               </nav>
             </div>
+
+            <div className="topbarRight">Private CRM</div>
           </div>
         </header>
 
-        <main className="container page">{children}</main>
+        <main className="shell">{children}</main>
       </body>
     </html>
   );

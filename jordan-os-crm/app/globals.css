@@ -212,4 +212,86 @@ code {
   border: 1px solid var(--line2);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.18);
   padding: 14px;
+/* ===== Top header / navigation ===== */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(247, 244, 238, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line2);
 }
+
+.topbarInner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.brandName {
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+.brandSub {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Override global <a> underline ONLY in nav */
+.nav a {
+  text-decoration: none;
+}
+
+.navLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.85);
+  font-weight: 900;
+  font-size: 13px;
+  color: var(--ink);
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.navLink:hover {
+  transform: translateY(-1px);
+  border-color: rgba(18, 18, 18, 0.18);
+}
+
+.topbarRight {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 16px;
+}}
