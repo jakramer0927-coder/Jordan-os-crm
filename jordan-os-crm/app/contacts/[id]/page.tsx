@@ -13,20 +13,13 @@ type TouchIntent =
   | "event_invite"
   | "other";
 
-type ContactEmail = {
-  id: string;
-  contact_id: string;
-  email: string;
-  is_primary: boolean;
-  created_at: string;
-};
-
 type Contact = {
   id: string;
   display_name: string;
   category: string;
   tier: string | null;
   client_type: string | null;
+  email: string | null;
   created_at: string;
 };
 
@@ -42,10 +35,25 @@ type Touch = {
   source_link: string | null;
 };
 
-function categoryPretty(c: string) {
+function prettyCategory(c: string) {
   const s = (c || "").trim();
   if (!s) return "Other";
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function fmt(iso: string | null) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function pickChannel(category: string): Touch["channel"] {
+  const cat = (category || "").toLowerCase();
+  if (cat === "agent" || cat === "developer" || cat === "vendor") return "email";
+  return "text";
 }
 
 export default function ContactDetailPage() {
@@ -54,10 +62,10 @@ export default function ContactDetailPage() {
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [touches, setTouches] = useState<Touch[]>([]);
-  const [emails, setEmails] = useState<ContactEmail[]>([]);
 
   // Edit contact
   const [editing, setEditing] = useState(false);
@@ -65,33 +73,17 @@ export default function ContactDetailPage() {
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
+  const [email, setEmail] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
-  // Email management
-  const [newEmail, setNewEmail] = useState("");
-  const [addingEmail, setAddingEmail] = useState(false);
-  const [updatingPrimary, setUpdatingPrimary] = useState(false);
-  const [deletingEmailId, setDeletingEmailId] = useState<string | null>(null);
-
-  // Log touch
+  // Log touch modal
   const [logOpen, setLogOpen] = useState(false);
   const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
-  const [logDirection, setLogDirection] = useState<Touch["direction"]>("outbound");
   const [logIntent, setLogIntent] = useState<TouchIntent>("check_in");
   const [logSummary, setLogSummary] = useState("");
   const [logSource, setLogSource] = useState("manual");
   const [logLink, setLogLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
-
-  const primaryEmail = useMemo(() => {
-    const p = emails.find((e) => e.is_primary);
-    return p?.email || emails[0]?.email || null;
-  }, [emails]);
-
-  const lastOutbound = useMemo(() => {
-    const t = touches.find((x) => x.direction === "outbound");
-    return t ? new Date(t.occurred_at) : null;
-  }, [touches]);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -104,13 +96,14 @@ export default function ContactDetailPage() {
 
   async function fetchAll() {
     setError(null);
+    setMsg(null);
 
     const sess = await requireSession();
     if (!sess) return;
 
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at")
+      .select("id, display_name, category, tier, client_type, email, created_at")
       .eq("id", id)
       .single();
 
@@ -118,7 +111,6 @@ export default function ContactDetailPage() {
       setError(`Contact fetch error: ${cErr.message}`);
       setContact(null);
       setTouches([]);
-      setEmails([]);
       return;
     }
 
@@ -130,27 +122,14 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
-
-    const { data: eData, error: eErr } = await supabase
-      .from("contact_emails")
-      .select("id, contact_id, email, is_primary, created_at")
-      .eq("contact_id", id)
-      .order("is_primary", { ascending: false })
-      .order("created_at", { ascending: true });
-
-    if (eErr) {
-      setError((prev) => prev ?? `Emails fetch error: ${eErr.message}`);
-      setEmails([]);
-    } else {
-      setEmails((eData ?? []) as ContactEmail[]);
-    }
+    setEmail(c.email || "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
       .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
       .eq("contact_id", id)
       .order("occurred_at", { ascending: false })
-      .limit(500);
+      .limit(800);
 
     if (tErr) {
       setError((prev) => prev ?? `Touches fetch error: ${tErr.message}`);
@@ -161,117 +140,56 @@ export default function ContactDetailPage() {
     setTouches((tData ?? []) as Touch[]);
   }
 
+  const lastOutbound = useMemo(() => {
+    const t = touches.find((x) => x.direction === "outbound");
+    return t ? t.occurred_at : null;
+  }, [touches]);
+
+  const outboundCount30 = useMemo(() => {
+    const now = Date.now();
+    const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+    return touches.filter((t) => t.direction === "outbound" && new Date(t.occurred_at).getTime() >= cutoff).length;
+  }, [touches]);
+
+  const inboundCount30 = useMemo(() => {
+    const now = Date.now();
+    const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+    return touches.filter((t) => t.direction === "inbound" && new Date(t.occurred_at).getTime() >= cutoff).length;
+  }, [touches]);
+
   async function saveContact() {
     if (!contact) return;
     setSavingContact(true);
     setError(null);
+    setMsg(null);
 
-    const { error } = await supabase
+    const { error: updErr } = await supabase
       .from("contacts")
       .update({
         display_name: name.trim(),
         category,
         tier,
         client_type: clientType.trim() ? clientType.trim() : null,
+        email: email.trim() ? email.trim().toLowerCase() : null,
       })
       .eq("id", contact.id);
 
     setSavingContact(false);
 
-    if (error) {
-      setError(`Update contact error: ${error.message}`);
+    if (updErr) {
+      setError(`Update contact error: ${updErr.message}`);
       return;
     }
 
     setEditing(false);
-    await fetchAll();
-  }
-
-  async function addEmail() {
-    if (!contact) return;
-    const clean = newEmail.trim().toLowerCase();
-    if (!clean) return;
-
-    setAddingEmail(true);
-    setError(null);
-
-    const shouldBePrimary = emails.length === 0;
-
-    const { error: insErr } = await supabase.from("contact_emails").insert({
-      contact_id: contact.id,
-      email: clean,
-      is_primary: shouldBePrimary,
-    });
-
-    setAddingEmail(false);
-
-    if (insErr) {
-      setError(`Add email error: ${insErr.message}`);
-      return;
-    }
-
-    setNewEmail("");
-    await fetchAll();
-  }
-
-  async function setPrimaryEmail(emailId: string) {
-    if (!contact) return;
-    setUpdatingPrimary(true);
-    setError(null);
-
-    // Best-effort two-step (fine for single-user app)
-    const { error: clearErr } = await supabase
-      .from("contact_emails")
-      .update({ is_primary: false })
-      .eq("contact_id", contact.id);
-
-    if (clearErr) {
-      setUpdatingPrimary(false);
-      setError(`Primary update error: ${clearErr.message}`);
-      return;
-    }
-
-    const { error: setErr } = await supabase
-      .from("contact_emails")
-      .update({ is_primary: true })
-      .eq("id", emailId)
-      .eq("contact_id", contact.id);
-
-    setUpdatingPrimary(false);
-
-    if (setErr) {
-      setError(`Primary update error: ${setErr.message}`);
-      return;
-    }
-
-    await fetchAll();
-  }
-
-  async function deleteEmail(emailId: string) {
-    if (!contact) return;
-    setDeletingEmailId(emailId);
-    setError(null);
-
-    const { error: delErr } = await supabase
-      .from("contact_emails")
-      .delete()
-      .eq("id", emailId)
-      .eq("contact_id", contact.id);
-
-    setDeletingEmailId(null);
-
-    if (delErr) {
-      setError(`Delete email error: ${delErr.message}`);
-      return;
-    }
-
+    setMsg("Saved.");
     await fetchAll();
   }
 
   function openLog() {
+    if (!contact) return;
     setLogOpen(true);
-    setLogChannel("text");
-    setLogDirection("outbound");
+    setLogChannel(pickChannel(contact.category));
     setLogIntent("check_in");
     setLogSummary("");
     setLogSource("manual");
@@ -282,11 +200,12 @@ export default function ContactDetailPage() {
     if (!contact) return;
     setSavingTouch(true);
     setError(null);
+    setMsg(null);
 
-    const { error } = await supabase.from("touches").insert({
+    const { error: insErr } = await supabase.from("touches").insert({
       contact_id: contact.id,
       channel: logChannel,
-      direction: logDirection,
+      direction: "outbound",
       intent: logIntent,
       occurred_at: new Date().toISOString(),
       summary: logSummary.trim() ? logSummary.trim() : null,
@@ -296,12 +215,13 @@ export default function ContactDetailPage() {
 
     setSavingTouch(false);
 
-    if (error) {
-      setError(`Insert touch error: ${error.message}`);
+    if (insErr) {
+      setError(`Insert touch error: ${insErr.message}`);
       return;
     }
 
     setLogOpen(false);
+    setMsg("Touch saved.");
     await fetchAll();
   }
 
@@ -340,243 +260,182 @@ export default function ContactDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (!ready) return <div className="page">Loading…</div>;
 
   if (!contact) {
     return (
-      <div style={{ padding: 40 }}>
-        <div style={{ fontWeight: 900, fontSize: 20 }}>Contact not found</div>
-        {error ? <div style={{ marginTop: 10, color: "crimson", fontWeight: 800 }}>{error}</div> : null}
-        <div style={{ marginTop: 14 }}>
-          <a href="/contacts">← Back to Contacts</a>
+      <div className="page">
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Contact not found</div>
+          {error ? <div style={{ marginTop: 10, color: "#8a0000", fontWeight: 900 }}>{error}</div> : null}
+          <div style={{ marginTop: 14 }}>
+            <a href="/contacts">← Back to Contacts</a>
+          </div>
         </div>
       </div>
     );
   }
 
+  const headline = `${prettyCategory(contact.category)}${contact.tier ? ` • Tier ${contact.tier}` : ""}${
+    contact.client_type ? ` • ${contact.client_type}` : ""
+  }`;
+
   return (
-    <div style={{ padding: 40, maxWidth: 1100 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-        <div>
-          <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>{contact.display_name}</h1>
-            <span style={{ color: "#666" }}>
-              {categoryPretty(contact.category)} {contact.tier ? `• Tier ${contact.tier}` : ""}{" "}
-              {contact.client_type ? `• ${contact.client_type}` : ""}
-            </span>
+    <div className="page">
+      <div className="pageHeader">
+        <div style={{ minWidth: 0 }}>
+          <h1 className="h1" style={{ wordBreak: "break-word" }}>
+            {contact.display_name}
+          </h1>
+          <div className="muted" style={{ marginTop: 8 }}>
+            <span className="badge badgeGold">{headline}</span>{" "}
+            {contact.email ? <span className="badge">{contact.email}</span> : <span className="badge">No email on file</span>}
           </div>
 
-          <div style={{ marginTop: 8, color: "#777", fontSize: 13 }}>
-            Primary email: <strong>{primaryEmail || "—"}</strong> • Last outbound:{" "}
-            <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
-          </div>
-
-          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <a
-              href="/morning"
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
-            >
-              Morning
-            </a>
-            <a
-              href="/contacts"
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", textDecoration: "none", color: "#111" }}
-            >
-              Contacts
-            </a>
-            <button
-              onClick={() => setEditing((v) => !v)}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-            >
-              {editing ? "Close edit" : "Edit contact"}
-            </button>
-            <button
-              onClick={openLog}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-            >
-              Log touch
-            </button>
+          <div className="muted small" style={{ marginTop: 10 }}>
+            Last outbound: <span className="bold">{fmt(lastOutbound)}</span>
           </div>
         </div>
-      </div>
 
-      {error ? <div style={{ marginTop: 14, color: "crimson", fontWeight: 800 }}>{error}</div> : null}
-
-      {/* Emails */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ fontWeight: 900, fontSize: 16 }}>Emails</div>
-
-        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            placeholder="Add email"
-            style={{ padding: 10, width: 320, borderRadius: 10, border: "1px solid #ddd" }}
-          />
-          <button
-            onClick={addEmail}
-            disabled={addingEmail}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-          >
-            {addingEmail ? "Adding…" : "Add email"}
+        <div className="row">
+          <a className="btn" href="/morning">
+            Morning
+          </a>
+          <a className="btn" href="/contacts">
+            Contacts
+          </a>
+          <button className="btn" onClick={() => setEditing((v) => !v)}>
+            {editing ? "Close edit" : "Edit"}
           </button>
-          <div style={{ color: "#777", fontSize: 12 }}>
-            Gmail matching uses <strong>all</strong> emails here.
-          </div>
+          <button className="btn btnPrimary" onClick={openLog}>
+            Log outbound
+          </button>
         </div>
-
-        {emails.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#666" }}>No emails yet.</div>
-        ) : (
-          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-            {emails.map((e) => (
-              <div
-                key={e.id}
-                style={{
-                  border: "1px solid #eee",
-                  borderRadius: 12,
-                  padding: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 900 }}>
-                    {e.email} {e.is_primary ? <span style={{ color: "green" }}>• primary</span> : null}
-                  </div>
-                  <div style={{ color: "#777", fontSize: 12 }}>added {new Date(e.created_at).toLocaleString()}</div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  {!e.is_primary ? (
-                    <button
-                      onClick={() => setPrimaryEmail(e.id)}
-                      disabled={updatingPrimary}
-                      style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                    >
-                      Set primary
-                    </button>
-                  ) : null}
-
-                  <button
-                    onClick={() => deleteEmail(e.id)}
-                    disabled={deletingEmailId === e.id}
-                    style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-                  >
-                    {deletingEmailId === e.id ? "Deleting…" : "Delete"}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
+      {(error || msg) && (
+        <div className="card cardPad" style={{ marginTop: 14, borderColor: error ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: error ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>{error || msg}</div>
+        </div>
+      )}
+
+      {/* Metrics strip */}
+      <div className="section">
+        <div className="row">
+          <span className="badge">30d outbound: {outboundCount30}</span>
+          <span className="badge">30d inbound: {inboundCount30}</span>
+          <span className="badge">Touch history: {touches.length}</span>
+        </div>
+      </div>
+
+      {/* Edit */}
       {editing && (
-        <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
+        <div className="section">
+          <div className="card cardPad">
+            <div className="sectionTitleRow" style={{ marginBottom: 6 }}>
+              <div className="sectionTitle">Edit contact</div>
+              <div className="sectionSub">Keep data minimal; keep it accurate.</div>
+            </div>
 
-          <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "1fr 200px 200px" }}>
-            <label style={{ fontSize: 12, color: "#666" }}>
-              Name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={{ display: "block", width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
-              />
-            </label>
+            <div className="row" style={{ alignItems: "stretch" }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Name
+                </div>
+                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
 
-            <label style={{ fontSize: 12, color: "#666" }}>
-              Category
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                style={{ display: "block", width: "100%", padding: 10, marginTop: 6 }}
-              >
-                <option>Client</option>
-                <option>Agent</option>
-                <option>Developer</option>
-                <option>Vendor</option>
-                <option>Other</option>
-              </select>
-            </label>
+              <div style={{ width: 220, minWidth: 200 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Category
+                </div>
+                <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option>Client</option>
+                  <option>Agent</option>
+                  <option>Developer</option>
+                  <option>Vendor</option>
+                  <option>Other</option>
+                </select>
+              </div>
 
-            <label style={{ fontSize: 12, color: "#666" }}>
-              Tier
-              <select
-                value={tier}
-                onChange={(e) => setTier(e.target.value as any)}
-                style={{ display: "block", width: "100%", padding: 10, marginTop: 6 }}
-              >
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-              </select>
-            </label>
-          </div>
+              <div style={{ width: 220, minWidth: 200 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Tier
+                </div>
+                <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                </select>
+              </div>
+            </div>
 
-          <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 12, color: "#666" }}>
-              Client Type (optional)
-              <input
-                value={clientType}
-                onChange={(e) => setClientType(e.target.value)}
-                placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..."
-                style={{ display: "block", width: "100%", padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
-              />
-            </label>
-          </div>
+            <div className="row" style={{ marginTop: 10, alignItems: "stretch" }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Client Type (optional)
+                </div>
+                <input
+                  className="input"
+                  value={clientType}
+                  onChange={(e) => setClientType(e.target.value)}
+                  placeholder="buyer / seller / lead / past_client / landlord / tenant / sphere..."
+                />
+              </div>
 
-          <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-            <button
-              onClick={saveContact}
-              disabled={savingContact}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-            >
-              {savingContact ? "Saving…" : "Save"}
-            </button>
-            <button
-              onClick={() => setEditing(false)}
-              style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-            >
-              Cancel
-            </button>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Primary email (optional)
+                </div>
+                <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@email.com" />
+              </div>
+            </div>
+
+            <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => setEditing(false)} disabled={savingContact}>
+                Cancel
+              </button>
+              <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
+                {savingContact ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Touch history */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ fontWeight: 900, fontSize: 16 }}>Touch history</div>
+      {/* Touch History */}
+      <div className="section">
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">Touch history</div>
+          <div className="sectionSub">Outbound resets cadence. Inbound is tracked.</div>
+        </div>
 
         {touches.length === 0 ? (
-          <div style={{ marginTop: 10, color: "#666" }}>No touches yet.</div>
+          <div className="card cardPad">
+            <div className="muted">No touches yet.</div>
+          </div>
         ) : (
-          <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          <div className="stack">
             {touches.map((t) => (
-              <div key={t.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: 12, background: "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div key={t.id} className="card cardPad">
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
                   <div style={{ fontWeight: 900 }}>
                     {t.direction.toUpperCase()} • {t.channel}
-                    {t.intent ? <span style={{ color: "#666", fontWeight: 600 }}> • {t.intent}</span> : null}
+                    {t.intent ? <span className="muted" style={{ fontWeight: 800 }}> • {t.intent}</span> : null}
                   </div>
-                  <div style={{ color: "#777" }}>{new Date(t.occurred_at).toLocaleString()}</div>
+                  <div className="muted small">{fmt(t.occurred_at)}</div>
                 </div>
 
-                {t.summary ? <div style={{ marginTop: 8, color: "#333" }}>{t.summary}</div> : null}
+                {t.summary ? <div style={{ marginTop: 10, lineHeight: 1.5 }}>{t.summary}</div> : null}
 
-                <div style={{ marginTop: 8, color: "#777", fontSize: 12 }}>
-                  {t.source ? `source: ${t.source}` : ""}
+                <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+                  <div className="muted small">
+                    {t.source ? <span className="badge">source: {t.source}</span> : null}
+                  </div>
                   {t.source_link ? (
-                    <>
-                      {" "}
-                      •{" "}
-                      <a href={t.source_link} target="_blank" rel="noreferrer">
-                        open link
-                      </a>
-                    </>
+                    <a className="btn" href={t.source_link} target="_blank" rel="noreferrer">
+                      Open thread
+                    </a>
                   ) : null}
                 </div>
               </div>
@@ -587,51 +446,28 @@ export default function ContactDetailPage() {
 
       {/* Log touch modal */}
       {logOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 16,
-          }}
-        >
-          <div style={{ width: "min(820px, 100%)", background: "#fff", borderRadius: 16, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <div className="modalBackdrop">
+          <div className="modal">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
-                <div style={{ color: "#666", marginTop: 4 }}>{contact.display_name}</div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>Log outbound touch</div>
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {contact.display_name}
+                </div>
               </div>
-              <button
-                onClick={() => setLogOpen(false)}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-              >
+              <button className="btn" onClick={() => setLogOpen(false)} disabled={savingTouch}>
                 Close
               </button>
             </div>
 
-            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Direction
-                <select
-                  value={logDirection}
-                  onChange={(e) => setLogDirection(e.target.value as any)}
-                  style={{ display: "block", padding: 10, marginTop: 6 }}
-                >
-                  <option value="outbound">outbound</option>
-                  <option value="inbound">inbound</option>
-                </select>
-              </label>
+            <div className="hr" />
 
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Channel
-                <select
-                  value={logChannel}
-                  onChange={(e) => setLogChannel(e.target.value as any)}
-                  style={{ display: "block", padding: 10, marginTop: 6 }}
-                >
+            <div className="row" style={{ alignItems: "stretch" }}>
+              <div style={{ width: 220, minWidth: 200 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Channel
+                </div>
+                <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
                   <option value="email">email</option>
                   <option value="text">text</option>
                   <option value="call">call</option>
@@ -639,15 +475,13 @@ export default function ContactDetailPage() {
                   <option value="social_dm">social_dm</option>
                   <option value="other">other</option>
                 </select>
-              </label>
+              </div>
 
-              <label style={{ fontSize: 12, color: "#666" }}>
-                Intent
-                <select
-                  value={logIntent}
-                  onChange={(e) => setLogIntent(e.target.value as any)}
-                  style={{ display: "block", padding: 10, marginTop: 6 }}
-                >
+              <div style={{ width: 260, minWidth: 220 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Intent
+                </div>
+                <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
                   <option value="check_in">check_in</option>
                   <option value="referral_ask">referral_ask</option>
                   <option value="review_ask">review_ask</option>
@@ -656,59 +490,39 @@ export default function ContactDetailPage() {
                   <option value="event_invite">event_invite</option>
                   <option value="other">other</option>
                 </select>
-              </label>
+              </div>
 
-              <label style={{ fontSize: 12, color: "#666", flex: 1, minWidth: 220 }}>
-                Source
-                <input
-                  value={logSource}
-                  onChange={(e) => setLogSource(e.target.value)}
-                  placeholder="manual / gmail / sms"
-                  style={{ display: "block", padding: 10, marginTop: 6, width: "100%", borderRadius: 10, border: "1px solid #ddd" }}
-                />
-              </label>
+              <div style={{ flex: 1, minWidth: 240 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Source
+                </div>
+                <input className="input" value={logSource} onChange={(e) => setLogSource(e.target.value)} placeholder="manual / gmail / sms" />
+              </div>
+            </div>
 
-              <label style={{ fontSize: 12, color: "#666", flex: 1, minWidth: 260 }}>
-                Link (optional)
-                <input
-                  value={logLink}
-                  onChange={(e) => setLogLink(e.target.value)}
-                  placeholder="thread link / calendar link"
-                  style={{ display: "block", padding: 10, marginTop: 6, width: "100%", borderRadius: 10, border: "1px solid #ddd" }}
-                />
-              </label>
+            <div className="row" style={{ marginTop: 10 }}>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div className="small muted bold" style={{ marginBottom: 6 }}>
+                  Link (optional)
+                </div>
+                <input className="input" value={logLink} onChange={(e) => setLogLink(e.target.value)} placeholder="thread link / calendar link" />
+              </div>
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <label style={{ fontSize: 12, color: "#666" }}>
+              <div className="small muted bold" style={{ marginBottom: 6 }}>
                 Summary (optional)
-                <textarea
-                  value={logSummary}
-                  onChange={(e) => setLogSummary(e.target.value)}
-                  placeholder="Quick note about what you sent / what happened"
-                  style={{ display: "block", width: "100%", minHeight: 90, padding: 10, marginTop: 6, borderRadius: 10, border: "1px solid #ddd" }}
-                />
-              </label>
+              </div>
+              <textarea className="textarea" value={logSummary} onChange={(e) => setLogSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
             </div>
 
-            <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-              <button
-                onClick={saveTouch}
-                disabled={savingTouch}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer", fontWeight: 900 }}
-              >
-                {savingTouch ? "Saving…" : "Save touch"}
-              </button>
-              <button
-                onClick={() => setLogOpen(false)}
-                style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-              >
+            <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => setLogOpen(false)} disabled={savingTouch}>
                 Cancel
               </button>
-            </div>
-
-            <div style={{ marginTop: 10, color: "#999", fontSize: 12 }}>
-              Note: outbound resets cadence. inbound is tracked but doesn’t reset cadence.
+              <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+                {savingTouch ? "Saving…" : "Save touch"}
+              </button>
             </div>
           </div>
         </div>
