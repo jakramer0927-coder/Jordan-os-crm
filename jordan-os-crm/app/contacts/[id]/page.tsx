@@ -40,6 +40,105 @@ function prettyCategory(c: string) {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+/** Paste iMessage thread text -> attach to this contact */
+function TextThreadUploadPanel({ contactId }: { contactId: string }) {
+  const [uid, setUid] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user ?? null;
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+      setUid(user.id);
+    });
+  }, []);
+
+  async function upload() {
+    setErr(null);
+    setMsg(null);
+
+    if (!uid) return setErr("Not signed in.");
+    if (!raw.trim() || raw.trim().length < 20) return setErr("Paste a longer text thread.");
+    setBusy(true);
+
+    try {
+      const res = await fetch("/api/text/imessage/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          contact_id: contactId,
+          title: title.trim() || null,
+          raw_text: raw,
+        }),
+      });
+
+      const j = await res.json();
+
+      if (!res.ok) {
+        setErr(j?.error || "Import failed");
+      } else {
+        setMsg(`Imported thread ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+        setTitle("");
+        setRaw("");
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card cardPad stack">
+      <div style={{ fontWeight: 900, fontSize: 16 }}>Upload text thread</div>
+      <div className="subtle" style={{ marginTop: 6 }}>
+        Paste iMessage thread text → attach to this contact → used for notes + better drafts.
+      </div>
+
+      {(err || msg) && (
+        <div className={err ? "alert alertError" : "alert"} style={{ marginTop: 10 }}>
+          <div style={{ fontWeight: 900, whiteSpace: "pre-wrap" }}>{err || msg}</div>
+        </div>
+      )}
+
+      <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <input
+          className="input"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder='Optional title (e.g., "Feb 2026 — renovation planning")'
+          style={{ flex: 1, minWidth: 260 }}
+        />
+        <button className="btn btnPrimary" onClick={upload} disabled={busy}>
+          {busy ? "Importing…" : "Import"}
+        </button>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <textarea
+          className="textarea"
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nRay: All good...`}
+          style={{ minHeight: 220 }}
+        />
+      </div>
+
+      <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
+        Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw thread is saved.
+      </div>
+    </div>
+  );
+}
+
 export default function ContactDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || "";
@@ -357,6 +456,9 @@ export default function ContactDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ✅ Upload texts here */}
+      <TextThreadUploadPanel contactId={contact.id} />
 
       {logOpen && (
         <div

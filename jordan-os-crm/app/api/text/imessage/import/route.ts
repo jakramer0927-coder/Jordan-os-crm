@@ -18,188 +18,57 @@ function safeErr(e: unknown) {
 
 type Body = {
   uid: string;
-
-  // Optional: attach to a known contact now. (You can link later too.)
   contact_id?: string | null;
-
-  // Optional: shown in UI
   title?: string | null;
-
-  // The iMessage thread pasted as plain text
   raw_text: string;
-
-  /**
-   * Optional parsing hints:
-   * - my_labels: treat these speaker prefixes as "you/outbound"
-   * - other_labels: treat these speaker prefixes as "them/inbound"
-   *
-   * Example paste format that works well:
-   *   You: Hey — quick one...
-   *   Ray: Yep, sounds good.
-   */
-  my_labels?: string[] | null;
-  other_labels?: string[] | null;
-
-  /**
-   * If true, we keep a single “thread blob” message when we can’t parse speakers.
-   * Default true (so you never lose data).
-   */
-  keep_blob_if_unparsed?: boolean | null;
 };
 
-type ParsedMsg = {
-  direction: "outbound" | "inbound";
-  occurred_at: string | null;
-  body: string;
-};
-
-// --- iMessage paste parsing helpers ---
-//
-// We support a few common patterns:
-//
-// Pattern A (best): "Speaker: message" lines (common from many exports/pastes)
-//   You: Hey...
-//   Ray: Got it.
-//
-// Pattern B (some Mac exports): timestamp line then message lines
-//   Tue, Feb 27, 2026 at 9:41 AM
-//   Ray: Can you...
-// (We treat timestamps as "current timestamp context" for subsequent message lines)
-//
-// Pattern C: When no clear separators exist: we fallback to 1 blob message.
-
-function normalizeLine(s: string) {
-  return (s || "").replace(/\u00A0/g, " ").trim(); // nbsp -> space
-}
-
-function looksLikeTimestampLine(line: string): boolean {
-  const s = line.toLowerCase();
-
-  // examples:
-  // "Tue, Feb 27, 2026 at 9:41 AM"
-  // "February 27, 2026 at 9:41 AM"
-  // "2/27/26, 9:41 AM"
-  // "2/27/2026, 09:41"
-  const a = /\b(mon|tue|wed|thu|fri|sat|sun)\b.*\b(at)\b.*\b(am|pm)\b/i.test(line);
-  const b = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b.*\b(at)\b.*\b(am|pm)\b/i.test(line);
-  const c = /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b.*\b\d{1,2}:\d{2}\b/i.test(line);
-  const d = /\b\d{1,2}:\d{2}\s?(am|pm)\b/i.test(line) && (s.includes("at") || s.includes(","));
-
-  return a || b || c || d;
-}
-
-function tryParseTimestamp(line: string): string | null {
-  // Best-effort: Date.parse handles many of the above.
-  // We do NOT hard-fail on timestamps; null is acceptable.
-  const t = Date.parse(line);
-  if (Number.isFinite(t)) return new Date(t).toISOString();
-
-  // Sometimes "Tue, Feb 27, 2026 at 9:41 AM" parses; sometimes not depending on locale.
-  // If it fails, return null.
-  return null;
-}
-
-function parseSpeakerLine(
-  line: string,
-  myLabels: Set<string>,
-  otherLabels: Set<string>
-): { direction: "outbound" | "inbound"; body: string } | null {
-  // Speaker: message
-  // NOTE: we only split on the first ":" to preserve URLs etc.
-  const idx = line.indexOf(":");
-  if (idx <= 0) return null;
-
-  const speakerRaw = normalizeLine(line.slice(0, idx));
-  const bodyRaw = normalizeLine(line.slice(idx + 1));
-
-  if (!speakerRaw || !bodyRaw) return null;
-
-  const speaker = speakerRaw.toLowerCase();
-
-  // If user explicitly provides labels, use them.
-  if (myLabels.size > 0 || otherLabels.size > 0) {
-    if (myLabels.has(speaker)) return { direction: "outbound", body: bodyRaw };
-    if (otherLabels.has(speaker)) return { direction: "inbound", body: bodyRaw };
-    // unknown speaker — don’t guess
-    return null;
-  }
-
-  // Default heuristics (safe):
-  // "you", "me" => outbound
-  // anything else => inbound
-  if (speaker === "you" || speaker === "me" || speaker === "myself") {
-    return { direction: "outbound", body: bodyRaw };
-  }
-
-  return { direction: "inbound", body: bodyRaw };
-}
-
-function parseImessagePaste(raw: string, body: Body): { messages: ParsedMsg[]; parsed: boolean } {
-  const keepBlob = body.keep_blob_if_unparsed ?? true;
-
-  const myLabels = new Set((body.my_labels ?? []).map((s) => String(s).toLowerCase().trim()).filter(Boolean));
-  const otherLabels = new Set((body.other_labels ?? []).map((s) => String(s).toLowerCase().trim()).filter(Boolean));
-
+/**
+ * Minimal parser for iMessage pasted transcripts.
+ * We keep it tolerant: we store raw + best-effort parsed “messages”.
+ *
+ * Expected common formats:
+ * - "Jordan: text..."
+ * - "You: text..."
+ * - Timestamps may appear; we do best effort.
+ */
+function parseIMessage(raw: string) {
   const lines = raw
     .split(/\r?\n/)
-    .map(normalizeLine)
-    .filter((l) => l.length > 0);
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0);
 
-  if (lines.length === 0) return { messages: [], parsed: false };
+  // Heuristic: new message starts when line matches "Name: ..."
+  const msgStart = /^(.{1,40}):\s*(.*)$/;
 
-  const out: ParsedMsg[] = [];
-  let currentTs: string | null = null;
+  type Parsed = { sender: string; text: string };
+  const out: Parsed[] = [];
 
-  // Pass 1: parse speaker lines; update timestamp context when we see a ts line.
+  let current: Parsed | null = null;
+
   for (const line of lines) {
-    if (looksLikeTimestampLine(line)) {
-      const ts = tryParseTimestamp(line);
-      if (ts) currentTs = ts;
-      continue;
-    }
-
-    const sp = parseSpeakerLine(line, myLabels, otherLabels);
-    if (sp) {
-      out.push({
-        direction: sp.direction,
-        occurred_at: currentTs,
-        body: sp.body,
-      });
-      continue;
-    }
-
-    // If line is not a speaker line, we’ll treat it as a continuation of the prior message (common in long texts)
-    if (out.length > 0) {
-      out[out.length - 1] = {
-        ...out[out.length - 1]!,
-        body: `${out[out.length - 1]!.body}\n${line}`.trim(),
-      };
+    const m = line.match(msgStart);
+    if (m) {
+      // flush previous
+      if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
+      current = { sender: m[1]!.trim(), text: (m[2] || "").trim() };
     } else {
-      // no prior message yet — hold it; we’ll handle as blob if needed
+      // continuation line
+      if (!current) {
+        // if we don't have a sender yet, treat as unknown/system
+        current = { sender: "Unknown", text: line.trim() };
+      } else {
+        current.text += `\n${line.trim()}`;
+      }
     }
   }
 
-  // If we parsed at least 2 messages, we consider it parsed.
-  if (out.length >= 2) return { messages: out, parsed: true };
+  if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
 
-  // If we only got 1 message, it might still be real — keep it.
-  if (out.length === 1) return { messages: out, parsed: true };
+  // Cap to avoid accidentally pasting novels
+  const capped = out.slice(0, 2000);
 
-  // Fallback: blob
-  if (keepBlob) {
-    return {
-      messages: [
-        {
-          direction: "inbound", // neutral default; you can change later per thread
-          occurred_at: null,
-          body: lines.join("\n").trim(),
-        },
-      ],
-      parsed: false,
-    };
-  }
-
-  return { messages: [], parsed: false };
+  return capped;
 }
 
 export async function POST(req: Request) {
@@ -208,80 +77,73 @@ export async function POST(req: Request) {
 
     const uid = body?.uid || "";
     const contactId = body?.contact_id || null;
-    const title = (body?.title || "iMessage thread").trim();
-    const rawText = String(body?.raw_text || "").trim();
+    const title = (body?.title || "").trim() || null;
+    const rawText = (body?.raw_text || "").trim();
 
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (contactId && !isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
+    if (!rawText || rawText.length < 20) return NextResponse.json({ error: "raw_text is too short" }, { status: 400 });
 
-    if (!rawText || rawText.length < 10) {
-      return NextResponse.json({ error: "raw_text is empty or too short" }, { status: 400 });
-    }
-
-    // 1) Insert thread
+    // 1) Store raw thread
+    // Create this table if you don’t have it yet:
+    //   text_threads(id uuid pk default gen_random_uuid(), user_id uuid, contact_id uuid null, title text null, raw_text text, source text, created_at timestamptz default now())
     const { data: threadRow, error: threadErr } = await supabaseAdmin
       .from("text_threads")
       .insert({
         user_id: uid,
         contact_id: contactId,
         title,
-        source: "imessage_paste",
         raw_text: rawText,
+        source: "imessage_paste",
       })
       .select("id")
       .single();
 
     if (threadErr || !threadRow) {
-      return NextResponse.json({ error: threadErr?.message || "Failed to create thread" }, { status: 500 });
+      return NextResponse.json(
+        { error: threadErr?.message || "Failed to insert text_threads" },
+        { status: 500 }
+      );
     }
 
-    const threadId: string = threadRow.id;
+    const thread_id = threadRow.id as string;
 
-    // 2) Parse into messages
-    const parsed = parseImessagePaste(rawText, body);
-    const msgs = parsed.messages;
+    // 2) Parse + store messages
+    // Create this table if you don’t have it yet:
+    //   text_messages(id uuid pk default gen_random_uuid(), user_id uuid, contact_id uuid null, thread_id uuid, sender text, body text, created_at timestamptz default now())
+    const parsed = parseIMessage(rawText);
 
-    if (msgs.length === 0) {
+    if (parsed.length === 0) {
       return NextResponse.json({
         ok: true,
-        thread_id: threadId,
+        thread_id,
         inserted_messages: 0,
-        parsed: false,
-        note: "Thread stored but no messages parsed. Provide 'Speaker: message' lines for best parsing.",
+        note: "Thread saved, but no messages were parsed. (Paste format didn’t match — still stored raw.)",
       });
     }
 
-    // 3) Insert messages (batch)
-    const toInsert = msgs.map((m) => ({
+    const toInsert = parsed.map((m) => ({
       user_id: uid,
-      thread_id: threadId,
       contact_id: contactId,
-      direction: m.direction,
-      occurred_at: m.occurred_at,
-      body: m.body,
+      thread_id,
+      sender: m.sender,
+      body: m.text,
     }));
 
     const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(toInsert);
 
     if (msgErr) {
       return NextResponse.json(
-        {
-          error: "Failed to insert parsed messages",
-          details: msgErr.message,
-          thread_id: threadId,
-        },
+        { error: msgErr.message, ok: false, thread_id, inserted_messages: 0 },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       ok: true,
-      thread_id: threadId,
-      parsed: parsed.parsed,
-      inserted_messages: msgs.length,
-      sample: msgs.slice(0, 5),
-      note:
-        "Tip: Best results when paste lines look like 'You: ...' and 'Name: ...'. You can pass my_labels/other_labels to control direction.",
+      thread_id,
+      inserted_messages: toInsert.length,
+      sample: toInsert.slice(0, 3),
     });
   } catch (e) {
     const se = safeErr(e);
