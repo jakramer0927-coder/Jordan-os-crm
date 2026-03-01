@@ -21,7 +21,7 @@ function safeErr(e: unknown) {
 }
 
 type Body = {
-  uid: string;
+  uid: string; // kept for API consistency + future multi-tenant
   domain: string; // e.g. "smithandberg.com"
 };
 
@@ -37,10 +37,12 @@ export async function POST(req: Request) {
     // email ilike "%@domain"
     const pattern = `%@${domain}`;
 
+    // NOTE:
+    // unmatched_recipients currently has NO user_id column (single-tenant table).
+    // So we filter ONLY by email pattern.
     const { data, error } = await supabaseAdmin
       .from("unmatched_recipients")
       .update({ status: "ignored" })
-      .eq("user_id", uid)
       .ilike("email", pattern)
       .select("id");
 
