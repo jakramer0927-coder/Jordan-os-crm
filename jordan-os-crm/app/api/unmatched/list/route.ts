@@ -18,7 +18,6 @@ function safeErr(e: unknown) {
 
 type UnmatchedRow = {
   id: string;
-  user_id: string;
   email: string;
   first_seen_at: string;
   last_seen_at: string;
@@ -33,19 +32,24 @@ type UnmatchedRow = {
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
+
+    // Keep uid as a guardrail (auth contract), even though table is currently single-tenant.
     const uid = url.searchParams.get("uid") || "";
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     const includeIgnored = (url.searchParams.get("includeIgnored") || "false") === "true";
-    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || 300)));
-    const cursor = url.searchParams.get("cursor"); // ISO timestamp (last_seen_at) for pagination
+
+    // Keep the list light. You can request more via ?limit=
+    const limit = Math.min(300, Math.max(1, Number(url.searchParams.get("limit") || 150)));
+
+    // Cursor pagination: pass the last row’s last_seen_at back in as ?cursor=
+    const cursor = url.searchParams.get("cursor"); // ISO timestamp (last_seen_at)
 
     let q = supabaseAdmin
       .from("unmatched_recipients")
       .select(
-        "id, user_id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id"
+        "id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id"
       )
-      .eq("user_id", uid)
       .order("last_seen_at", { ascending: false })
       .limit(limit);
 
@@ -53,13 +57,12 @@ export async function GET(req: Request) {
     if (cursor) q = q.lt("last_seen_at", cursor);
 
     const { data, error } = await q;
-
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const rows = (data ?? []) as UnmatchedRow[];
     const nextCursor = rows.length > 0 ? rows[rows.length - 1]!.last_seen_at : null;
 
-    return NextResponse.json({ rows, nextCursor, limit });
+    return NextResponse.json({ rows, nextCursor, limit, includeIgnored });
   } catch (e) {
     const se = safeErr(e);
     console.error("UNMATCHED_LIST_CRASH", se);
