@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { buildDraft, type VoiceExample } from "@/lib/voice/generator";
 
 type TouchIntent =
   | "check_in"
@@ -38,6 +39,15 @@ type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
   days_since_outbound: number | null;
+};
+
+type Recommendation = ContactWithLastOutbound & {
+  cadence: number;
+  overdue: boolean;
+  score: number;
+  reasons: string[];
+  suggested_channel: Touch["channel"];
+  suggested_draft: string;
 };
 
 function daysSince(iso: string): number {
@@ -82,7 +92,7 @@ function cadenceDays(category: string, tier: string | null): number {
 
 function isOverdue(c: ContactWithLastOutbound): boolean {
   const cadence = cadenceDays(c.category, c.tier);
-  if (c.days_since_outbound == null) return true;
+  if (c.days_since_outbound == null) return true; // never reached out
   return c.days_since_outbound >= cadence;
 }
 
@@ -107,39 +117,23 @@ function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
   return "text";
 }
 
-function draftMessage(c: ContactWithLastOutbound): string {
-  const cat = (c.category || "").toLowerCase();
-
-  if (cat === "agent") {
-    return `Hey ${c.display_name.split(" ")[0] || ""} — quick one: I’ve got an active buyer in the market right now. If you have anything quiet/off-market coming up, I’d love to hear about it. Happy to keep you posted on what I’m seeing too.`;
-  }
-
-  if (cat === "developer") {
-    return `Hi ${c.display_name.split(" ")[0] || ""} — checking in. Curious what you’re seeing right now on pricing + buyer demand, and if you have anything upcoming that fits the current moment.`;
-  }
-
-  return `Hey ${c.display_name.split(" ")[0] || ""} — quick check-in. How’s everything going on your end? Anything real-estate related on your mind this spring?`;
+function firstName(full: string) {
+  const f = (full || "").trim().split(/\s+/)[0] || "";
+  return f;
 }
-
-type Recommendation = ContactWithLastOutbound & {
-  cadence: number;
-  overdue: boolean;
-  score: number;
-  reasons: string[];
-  suggested_channel: Touch["channel"];
-  suggested_draft: string;
-};
 
 export default function MorningPage() {
   const [ready, setReady] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
 
   const [contacts, setContacts] = useState<ContactWithLastOutbound[]>([]);
+  const [voiceExamples, setVoiceExamples] = useState<VoiceExample[]>([]);
+
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // log touch inline
+  // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
   const [touchIntent, setTouchIntent] = useState<TouchIntent>("check_in");
@@ -159,6 +153,25 @@ export default function MorningPage() {
     return user;
   }
 
+  async function loadVoiceExamples(userId: string) {
+    // If this table name differs in your DB, tell me and I’ll adapt it.
+    const { data, error } = await supabase
+      .from("user_voice_examples")
+      .select("id, user_id, channel, contact_category, intent, text, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      // Don’t block Morning on this; just show warning
+      setError((prev) => prev ?? `Voice examples load error: ${error.message}`);
+      setVoiceExamples([]);
+      return;
+    }
+
+    setVoiceExamples((data ?? []) as VoiceExample[]);
+  }
+
   async function load() {
     setError(null);
     setMsg(null);
@@ -167,6 +180,10 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) return;
 
+    // Load voice examples (async, but we’ll do it here for simplicity)
+    await loadVoiceExamples(user.id);
+
+    // Contacts
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, client_type, email, created_at")
@@ -187,6 +204,7 @@ export default function MorningPage() {
       return;
     }
 
+    // Outbound touches only (your rule)
     const ids = base.map((c) => c.id);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -305,11 +323,13 @@ export default function MorningPage() {
       if (overdue) reasons.push(`Overdue (cadence ${cadence}d)`);
       if (d == null) reasons.push("No outbound logged yet");
       else reasons.push(`${d} days since outbound`);
+
       if (isAClient(c)) reasons.push("A-Client (never miss)");
       if (isAgentA(c)) reasons.push("Agent-A priority");
       if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
 
       let score = 0;
+
       if (isAClient(c)) score += 1000;
       if (overdue) score += 300;
       score += (d ?? cadence) * 2;
@@ -326,7 +346,33 @@ export default function MorningPage() {
       if (!weekday) score -= 30;
 
       const suggested_channel = pickChannel(c);
-      const suggested_draft = draftMessage(c);
+
+      // ✅ Better voice example selection:
+      // - Same channel
+      // - Exact category match preferred, but allow untagged
+      // - Prefer shorter messages (your tone is tight and direct)
+      const vx = voiceExamples
+        .filter((v) => v.channel === suggested_channel)
+        .filter((v) => {
+          const vc = (v.contact_category || "").toLowerCase();
+          const cc = (c.category || "").toLowerCase();
+          if (vc && vc === cc) return true;
+          if (!vc) return true;
+          return false;
+        })
+        .sort((a, b) => a.text.length - b.text.length)
+        .slice(0, 80);
+
+      const suggested_draft = buildDraft({
+        channel: suggested_channel,
+        intent: "check_in",
+        contactName: c.display_name,
+        contactCategory: c.category,
+        tier: c.tier,
+        clientType: c.client_type,
+        daysSinceOutbound: c.days_since_outbound,
+        examples: vx,
+      });
 
       return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
     });
@@ -361,7 +407,7 @@ export default function MorningPage() {
     }
 
     return top;
-  }, [contacts]);
+  }, [contacts, voiceExamples]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
@@ -371,29 +417,30 @@ export default function MorningPage() {
     return { total, overdue, overdueA, agents };
   }, [contacts]);
 
-  if (!ready) return <div className="card cardPad">Loading…</div>;
+  if (!ready) return <div className="page">Loading…</div>;
 
   const weekday = isWeekdayLocal();
 
   return (
-    <div className="stack">
-      <div className="rowBetween">
+    <div>
+      <div className="pageHeader">
         <div>
           <h1 className="h1">Morning</h1>
-          <div className="subtle" style={{ marginTop: 8 }}>
+          <div className="muted" style={{ marginTop: 8 }}>
             <span className="badge">{weekday ? "Weekday focus" : "Weekend (view-only focus)"}</span>{" "}
             <span className="badge">{stats.total} contacts</span>{" "}
             <span className="badge">{stats.overdue} overdue</span>{" "}
             <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
-            <span className="badge">{stats.agents} agents</span>
+            <span className="badge">{stats.agents} agents</span>{" "}
+            <span className="badge">{voiceExamples.length} voice examples</span>
           </div>
         </div>
 
         <div className="row">
-          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>
+          <a className="btn" href="/contacts">
             Contacts
           </a>
-          <a className="btn" href="/unmatched" style={{ textDecoration: "none" }}>
+          <a className="btn" href="/unmatched">
             Unmatched
           </a>
           <button className="btn" onClick={load} disabled={loading}>
@@ -403,198 +450,143 @@ export default function MorningPage() {
       </div>
 
       {(error || msg) && (
-        <div className={`alert ${error ? "alertError" : "alertOk"}`}>
-          {error || msg}
+        <div className="card cardPad" style={{ borderColor: error ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: error ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+            {error || msg}
+          </div>
         </div>
       )}
 
-      <div className="card cardPad stack">
-        <div className="rowBetween">
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}>Operating rules</div>
-            <div className="subtle" style={{ marginTop: 6 }}>
-              Daily accountability, without noise.
-            </div>
-          </div>
-        </div>
-
-        <div className="row">
-          <span className="badge">Top 5 per day</span>
-          <span className="badge">Min 2 agents (if available)</span>
-          <span className="badge">A-Client never missed</span>
-          <span className="badge">Outbound resets cadence</span>
-          <span className="badge">Weekday-focused suggestions</span>
-        </div>
-
-        {!weekday ? (
-          <div className="subtle" style={{ fontSize: 12 }}>
-            It’s the weekend — priorities are shown, but weekday accountability is the focus.
-          </div>
-        ) : null}
-      </div>
-
-      <div className="card cardPad stack">
-        <div className="rowBetween">
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}>Today’s Top 5</div>
-            <div className="subtle" style={{ marginTop: 6 }}>
-              Ranked by overdue + tier + category + days since outbound.
-            </div>
-          </div>
+      <div className="section" style={{ marginTop: 12 }}>
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">Today’s Top 5</div>
+          <div className="sectionSub">Ranked by overdue + tier + category + days since outbound.</div>
         </div>
 
         <div className="stack">
-          {recs.map((c, idx) => {
-            const agent = (c.category || "").toLowerCase() === "agent";
-            const overdue = c.overdue;
-
-            return (
-              <div key={c.id} className="card cardPad">
-                <div className="rowBetween" style={{ alignItems: "flex-start" }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="rowBetween" style={{ alignItems: "baseline" }}>
-                      <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
-                        <span className="badge" style={{ marginRight: 10 }}>
-                          #{idx + 1}
-                        </span>
-                        <a href={`/contacts/${c.id}`} style={{ textDecoration: "none" }}>
-                          {c.display_name}
-                        </a>
-                      </div>
-
-                      <div className="subtle" style={{ fontSize: 12 }}>
-                        Last outbound: <strong>{fmtDate(c.last_outbound_at)}</strong>
-                        {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
-                      </div>
+          {recs.map((c, idx) => (
+            <div key={c.id} className="card cardPad">
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                    <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                      <span className="badge" style={{ marginRight: 10 }}>
+                        #{idx + 1}
+                      </span>
+                      <a href={`/contacts/${c.id}`}>{c.display_name}</a>
                     </div>
 
-                    <div className="row" style={{ marginTop: 10 }}>
-                      <span className="badge">{categoryBadge(c)}</span>
-                      <span className="badge">Cadence {c.cadence}d</span>
-                      {c.days_since_outbound == null ? (
-                        <span className="badge">Never outbound</span>
-                      ) : (
-                        <span className="badge">{c.days_since_outbound}d since</span>
-                      )}
-                      <span className="badge">{overdue ? "Overdue" : "On track"}</span>
-                      {agent ? <span className="badge">Agent touch</span> : null}
-                    </div>
-
-                    <div className="card cardPad" style={{ marginTop: 12, background: "rgba(247,244,238,.55)" }}>
-                      <div className="label" style={{ marginBottom: 8 }}>
-                        Why this is in your Top 5
-                      </div>
-                      <div className="row">
-                        {c.reasons.slice(0, 5).map((r) => (
-                          <span key={r} className="badge">
-                            {r}
-                          </span>
-                        ))}
-                      </div>
-
-                      <div style={{ marginTop: 12 }}>
-                        <div className="label" style={{ marginBottom: 8 }}>
-                          Suggested outreach
-                        </div>
-                        <div className="row">
-                          <span className="badge">Channel: {c.suggested_channel}</span>
-                          <span className="badge">Intent: check_in</span>
-                        </div>
-
-                        <div style={{ marginTop: 12 }}>
-                          <div className="label" style={{ marginBottom: 8 }}>
-                            Draft
-                          </div>
-                          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{c.suggested_draft}</div>
-                        </div>
-                      </div>
+                    <div className="muted small">
+                      Last outbound: <span className="bold">{fmtDate(c.last_outbound_at)}</span>
+                      {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
                     </div>
                   </div>
 
-                  <div className="stack" style={{ minWidth: 260 }}>
-                    <a className="btn" href={`/contacts/${c.id}`} style={{ textDecoration: "none" }}>
-                      Open contact
-                    </a>
-                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                      Log outbound touch
-                    </button>
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <span className="badge">{categoryBadge(c)}</span>
+                    <span className="badge">Cadence {c.cadence}d</span>
+                    {c.days_since_outbound == null ? <span className="badge">Never outbound</span> : <span className="badge">{c.days_since_outbound}d since</span>}
+                    <span className="badge">{c.overdue ? "Overdue" : "On track"}</span>
+                  </div>
+
+                  <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                    <div className="small muted bold" style={{ marginBottom: 6 }}>
+                      Suggested outreach ({c.suggested_channel})
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{c.suggested_draft}</div>
                   </div>
                 </div>
 
-                {loggingFor === c.id && (
-                  <div className="card cardPad" style={{ marginTop: 12, background: "rgba(247,244,238,.55)" }}>
-                    <div className="rowBetween">
-                      <div>
-                        <div style={{ fontWeight: 900, fontSize: 16 }}>Log outbound touch</div>
-                        <div className="subtle" style={{ marginTop: 4 }}>{c.display_name}</div>
+                <div style={{ width: 280, display: "grid", gap: 10 }}>
+                  <a className="btn" href={`/contacts/${c.id}`}>
+                    Open contact
+                  </a>
+                  <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                    Log outbound touch
+                  </button>
+                </div>
+              </div>
+
+              {loggingFor === c.id && (
+                <div className="section" style={{ marginTop: 12 }}>
+                  <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
+                    <div className="sectionTitle">Log outbound touch</div>
+                    <div className="sectionSub">{c.display_name}</div>
+                  </div>
+
+                  <div className="row">
+                    <div style={{ width: 200, minWidth: 180 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Channel
                       </div>
-                      <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
-                        Close
-                      </button>
+                      <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as any)}>
+                        <option value="email">email</option>
+                        <option value="text">text</option>
+                        <option value="call">call</option>
+                        <option value="in_person">in_person</option>
+                        <option value="social_dm">social_dm</option>
+                        <option value="other">other</option>
+                      </select>
                     </div>
 
-                    <div className="row" style={{ marginTop: 12, alignItems: "flex-end" }}>
-                      <div className="field" style={{ width: 200, minWidth: 180 }}>
-                        <div className="label">Channel</div>
-                        <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as any)}>
-                          <option value="email">email</option>
-                          <option value="text">text</option>
-                          <option value="call">call</option>
-                          <option value="in_person">in_person</option>
-                          <option value="social_dm">social_dm</option>
-                          <option value="other">other</option>
-                        </select>
+                    <div style={{ width: 260, minWidth: 220 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Intent
                       </div>
-
-                      <div className="field" style={{ width: 260, minWidth: 220 }}>
-                        <div className="label">Intent</div>
-                        <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as any)}>
-                          <option value="check_in">check_in</option>
-                          <option value="referral_ask">referral_ask</option>
-                          <option value="review_ask">review_ask</option>
-                          <option value="deal_followup">deal_followup</option>
-                          <option value="collaboration">collaboration</option>
-                          <option value="event_invite">event_invite</option>
-                          <option value="other">other</option>
-                        </select>
-                      </div>
-
-                      <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                        <div className="label">Source</div>
-                        <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
-                      </div>
+                      <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as any)}>
+                        <option value="check_in">check_in</option>
+                        <option value="referral_ask">referral_ask</option>
+                        <option value="review_ask">review_ask</option>
+                        <option value="deal_followup">deal_followup</option>
+                        <option value="collaboration">collaboration</option>
+                        <option value="event_invite">event_invite</option>
+                        <option value="other">other</option>
+                      </select>
                     </div>
 
-                    <div className="field" style={{ marginTop: 10 }}>
-                      <div className="label">Link (optional)</div>
-                      <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
-                    </div>
-
-                    <div className="field" style={{ marginTop: 10 }}>
-                      <div className="label">Summary (optional)</div>
-                      <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
-                    </div>
-
-                    <div className="rowBetween" style={{ marginTop: 12 }}>
-                      <div className="subtle" style={{ fontSize: 12 }}>Outbound touches reset cadence.</div>
-                      <div className="row">
-                        <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
-                          Cancel
-                        </button>
-                        <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
-                          {savingTouch ? "Saving…" : "Save"}
-                        </button>
+                    <div style={{ flex: 1, minWidth: 220 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Source
                       </div>
+                      <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+
+                  <div className="row" style={{ marginTop: 10 }}>
+                    <div style={{ flex: 1, minWidth: 260 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Link (optional)
+                      </div>
+                      <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <div className="small muted bold" style={{ marginBottom: 6 }}>
+                      Summary (optional)
+                    </div>
+                    <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
+                  </div>
+
+                  <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
+                    <div className="muted small">Outbound touches reset cadence.</div>
+                    <div className="row">
+                      <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
+                        Cancel
+                      </button>
+                      <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+                        {savingTouch ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
 
           {recs.length === 0 ? (
             <div className="card cardPad">
-              <div className="subtle">No contacts found yet — add a few on Contacts first.</div>
+              <div className="muted">No contacts found yet — add a few on Contacts first.</div>
             </div>
           ) : null}
         </div>

@@ -11,11 +11,9 @@ export default function IntegrationsPage() {
   const [gmailLabels, setGmailLabels] = useState("Jordan OS");
   const [sheetUrl, setSheetUrl] = useState("");
 
-  const [ignoreDomains, setIgnoreDomains] = useState("smithandberg.com");
-  const [ignoreEmails, setIgnoreEmails] = useState("");
-
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function load() {
     setErr(null);
@@ -30,6 +28,7 @@ export default function IntegrationsPage() {
 
     setUid(user.id);
 
+    // Check if google_tokens exists
     const { data: tData, error: tErr } = await supabase
       .from("google_tokens")
       .select("user_id")
@@ -39,18 +38,15 @@ export default function IntegrationsPage() {
     if (tErr) setErr(tErr.message);
     setConnected(!!tData?.user_id);
 
-    const { data: sData, error: sErr } = await supabase
+    // Load settings
+    const { data: sData } = await supabase
       .from("user_settings")
-      .select("gmail_label_names, sheet_url, gmail_ignore_domains, gmail_ignore_emails")
+      .select("gmail_label_names, sheet_url")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (sErr) setErr(sErr.message);
-
     if (sData?.gmail_label_names) setGmailLabels(sData.gmail_label_names);
     if (sData?.sheet_url) setSheetUrl(sData.sheet_url);
-    if (sData?.gmail_ignore_domains) setIgnoreDomains(sData.gmail_ignore_domains);
-    if (sData?.gmail_ignore_emails) setIgnoreEmails(sData.gmail_ignore_emails);
 
     setReady(true);
   }
@@ -60,8 +56,11 @@ export default function IntegrationsPage() {
     setMsg(null);
     if (!uid) return;
 
+    setBusy(true);
     const res = await fetch(`/api/google/oauth/start?uid=${uid}`);
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+
     if (!res.ok) {
       setErr(j?.error || "Failed to start OAuth");
       return;
@@ -74,17 +73,17 @@ export default function IntegrationsPage() {
     setMsg(null);
     if (!uid) return;
 
+    setBusy(true);
     const { error } = await supabase.from("user_settings").upsert(
       {
         user_id: uid,
         gmail_label_names: gmailLabels,
-        gmail_ignore_domains: ignoreDomains.trim() ? ignoreDomains.trim() : null,
-        gmail_ignore_emails: ignoreEmails.trim() ? ignoreEmails.trim() : null,
         sheet_url: sheetUrl.trim() ? sheetUrl.trim() : null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
     );
+    setBusy(false);
 
     if (error) setErr(error.message);
     else setMsg("Saved.");
@@ -95,16 +94,19 @@ export default function IntegrationsPage() {
     setMsg(null);
     if (!uid) return;
 
+    setBusy(true);
     const res = await fetch(`/api/gmail/sync?uid=${uid}`);
-    const j = await res.json().catch(() => null);
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
 
     if (!res.ok) {
       setErr(j?.error || `Sync failed (status ${res.status})`);
       return;
     }
 
+    // Show full JSON if you want later; keep concise for now
     setMsg(
-      `Gmail sync complete. imported=${j.imported} skipped=${j.skipped} unmatched=${j.unmatched} (fetched=${j.messagesFetched ?? "?"})`
+      `Gmail sync complete.\nImported: ${j.imported}\nSkipped: ${j.skipped}\nUnmatched: ${j.unmatched}\nMessagesFetched: ${j.messagesFetched ?? "—"}`
     );
   }
 
@@ -113,13 +115,40 @@ export default function IntegrationsPage() {
     setMsg(null);
     if (!uid) return;
 
+    setBusy(true);
     const res = await fetch(`/api/sheets/import?uid=${uid}`);
-    const j = await res.json();
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+
     if (!res.ok) {
       setErr(j?.error || "Import failed");
       return;
     }
-    setMsg(`Sheet import complete. Upserted: ${j.upserted}, skipped: ${j.skipped}`);
+    setMsg(`Sheet import complete.\nUpserted: ${j.upserted}\nSkipped: ${j.skipped}`);
+  }
+
+  async function syncVoiceExamples() {
+    setErr(null);
+    setMsg(null);
+    if (!uid) return;
+
+    setBusy(true);
+    const res = await fetch(`/api/voice/sync_gmail_sent?uid=${uid}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ days: 365, maxMessages: 600 }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+
+    if (!res.ok) {
+      setErr(j?.error || "Voice sync failed");
+      return;
+    }
+
+    setMsg(
+      `Voice sync complete.\nScanned: ${j.scanned}\nInserted: ${j.inserted}\nSkipped: ${j.skipped}\nQuery: ${j.usedQuery}`
+    );
   }
 
   useEffect(() => {
@@ -127,168 +156,93 @@ export default function IntegrationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (!ready) return <div className="page">Loading…</div>;
 
   return (
-    <div style={{ padding: 40, maxWidth: 900 }}>
-      <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>Integrations</h1>
-      <div style={{ color: "#666", marginTop: 8 }}>
-        Google connection:{" "}
-        <strong style={{ color: connected ? "green" : "crimson" }}>
-          {connected ? "Connected" : "Not connected"}
-        </strong>
-      </div>
-
-      {(err || msg) && (
-        <div style={{ marginTop: 14, color: err ? "crimson" : "green", fontWeight: 800 }}>
-          {err || msg}
-        </div>
-      )}
-
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ fontWeight: 900 }}>1) Connect Google</div>
-        <div style={{ color: "#666", marginTop: 6 }}>
-          One connection powers Gmail + Calendar + Sheets.
-        </div>
-        <button
-          onClick={connectGoogle}
-          style={{
-            marginTop: 10,
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            cursor: "pointer",
-            fontWeight: 900,
-          }}
-        >
-          Connect Google
-        </button>
-      </div>
-
-      <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ fontWeight: 900 }}>2) Settings</div>
-
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
-            Gmail label names (comma separated)
-            <input
-              value={gmailLabels}
-              onChange={(e) => setGmailLabels(e.target.value)}
-              placeholder="Jordan OS, CRM Outbound"
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 6,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-              }}
-            />
-          </label>
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
-            Ignore domains (comma separated)
-            <input
-              value={ignoreDomains}
-              onChange={(e) => setIgnoreDomains(e.target.value)}
-              placeholder="smithandberg.com, compass.com"
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 6,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-              }}
-            />
-          </label>
-          <div style={{ marginTop: 6, color: "#777", fontSize: 12 }}>
-            Any recipient in these domains will not count toward unmatched or import.
+    <div className="page">
+      <div className="pageHeader">
+        <div>
+          <h1 className="h1">Integrations</h1>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Google connection:{" "}
+            <span className="badge" style={{ borderColor: connected ? "rgba(11,107,42,0.35)" : "rgba(138,0,0,0.35)" }}>
+              {connected ? "Connected" : "Not connected"}
+            </span>
           </div>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
-            Ignore specific emails (comma separated)
-            <input
-              value={ignoreEmails}
-              onChange={(e) => setIgnoreEmails(e.target.value)}
-              placeholder="team@smithandberg.com, jordan@smithandberg.com"
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 6,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-              }}
-            />
-          </label>
+        <div className="row">
+          <a className="btn" href="/morning">
+            Morning
+          </a>
+          <a className="btn" href="/contacts">
+            Contacts
+          </a>
+          <a className="btn" href="/unmatched">
+            Unmatched
+          </a>
         </div>
+      </div>
 
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block", fontSize: 12, color: "#666" }}>
-            Master Google Sheet URL (one-time import)
-            <input
-              value={sheetUrl}
-              onChange={(e) => setSheetUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              style={{
-                display: "block",
-                width: "100%",
-                padding: 10,
-                marginTop: 6,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-              }}
-            />
-          </label>
+      {(err || msg) && (
+        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>{err || msg}</div>
         </div>
+      )}
 
-        <button
-          onClick={saveSettings}
-          style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            cursor: "pointer",
-            fontWeight: 900,
-          }}
-        >
-          Save settings
+      <div className="section">
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">1) Connect Google</div>
+          <div className="sectionSub">One connection powers Gmail + Sheets.</div>
+        </div>
+        <button className="btn btnPrimary" onClick={connectGoogle} disabled={busy}>
+          {busy ? "Working…" : "Connect Google"}
         </button>
       </div>
 
-      <div style={{ marginTop: 14, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-        <div style={{ fontWeight: 900 }}>3) Actions</div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-          <button
-            onClick={runGmailSync}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              cursor: "pointer",
-              fontWeight: 900,
-            }}
-          >
-            Run Gmail sync
+      <div className="section">
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">2) Settings</div>
+          <div className="sectionSub">Labels for Gmail sync + sheet URL for one-time import.</div>
+        </div>
+
+        <div className="stack">
+          <label className="field">
+            <div className="label">Gmail label names (comma separated)</div>
+            <input className="input" value={gmailLabels} onChange={(e) => setGmailLabels(e.target.value)} placeholder="Jordan OS, CRM Outbound" />
+          </label>
+
+          <label className="field">
+            <div className="label">Master Google Sheet URL (one-time import)</div>
+            <input className="input" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." />
+          </label>
+
+          <button className="btn" onClick={saveSettings} disabled={busy}>
+            Save settings
           </button>
-          <button
-            onClick={importSheet}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              cursor: "pointer",
-              fontWeight: 900,
-            }}
-          >
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">3) Actions</div>
+          <div className="sectionSub">Sync touches + build your writing style automatically.</div>
+        </div>
+
+        <div className="row">
+          <button className="btn" onClick={runGmailSync} disabled={busy}>
+            Run Gmail sync (touches)
+          </button>
+          <button className="btn" onClick={syncVoiceExamples} disabled={busy}>
+            Sync Gmail → Voice Examples
+          </button>
+          <button className="btn" onClick={importSheet} disabled={busy}>
             Import Master Sheet (one-time)
           </button>
+        </div>
+
+        <div className="muted small" style={{ marginTop: 10 }}>
+          “Voice Examples” are pulled from your Sent mail and used to make the recommended outreach sound like you over time.
         </div>
       </div>
     </div>
