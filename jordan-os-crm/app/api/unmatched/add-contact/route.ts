@@ -7,91 +7,97 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
+function normEmail(s: string): string {
+  return (s || "").toLowerCase().trim();
 }
 
-function guessDisplayNameFromEmail(email: string) {
+function displayFromEmail(email: string): string {
   const local = email.split("@")[0] || email;
   const cleaned = local.replace(/[._-]+/g, " ").trim();
-  return cleaned
-    .split(" ")
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  const words = cleaned.split(" ").filter(Boolean);
+  const titled = words.map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w));
+  return titled.join(" ") || email;
+}
+
+function safeErr(e: unknown) {
+  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
+  return {
+    message: String(anyE?.message || e || "Unknown error"),
+    name: String(anyE?.name || ""),
+    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
+  };
 }
 
 type Body = {
   uid: string;
   email: string;
-  category?: string; // Client / Agent / Developer / Vendor / Other
-  tier?: "A" | "B" | "C";
-  client_type?: string | null;
-  display_name?: string;
+  category?: string; // optional override
+  tier?: string | null;
 };
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
 
-    const uid = body.uid || "";
-    const emailRaw = body.email || "";
+    const uid = body?.uid || "";
+    const email = normEmail(body?.email || "");
 
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-    if (!emailRaw.trim()) return NextResponse.json({ error: "Missing email" }, { status: 400 });
+    if (!email || !email.includes("@")) return NextResponse.json({ error: "Invalid email" }, { status: 400 });
 
-    const email = normalizeEmail(emailRaw);
+    // 1) Create contact
+    const display_name = displayFromEmail(email);
+    const category = body?.category || "Client";
+    const tier = body?.tier ?? null;
 
-    // 1) If contact_emails already has it, return that contact
-    const { data: existingEmail } = await supabaseAdmin
-      .from("contact_emails")
-      .select("contact_id, email")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (existingEmail?.contact_id) {
-      return NextResponse.json({ ok: true, created: false, contact_id: existingEmail.contact_id, email });
-    }
-
-    const category = body.category?.trim() || "Agent";
-    const tier = body.tier || "C";
-
-    const display_name =
-      body.display_name?.trim() || guessDisplayNameFromEmail(email);
-
-    // 2) Create contact
-    const { data: newContact, error: cErr } = await supabaseAdmin
+    const { data: insC, error: insCErr } = await supabaseAdmin
       .from("contacts")
       .insert({
         user_id: uid,
         display_name,
         category,
         tier,
-        client_type: body.client_type ?? null,
+        email, // keep legacy single email if you still have it
       })
-      .select("id")
+      .select("id, display_name")
       .single();
 
-    if (cErr || !newContact?.id) {
-      return NextResponse.json({ error: cErr?.message || "Failed to create contact" }, { status: 500 });
+    if (insCErr || !insC) {
+      return NextResponse.json({ error: insCErr?.message || "Failed to create contact" }, { status: 500 });
     }
 
-    // 3) Attach email
-    const { error: eErr } = await supabaseAdmin.from("contact_emails").insert({
-      contact_id: newContact.id,
+    const contactId = String((insC as { id: string }).id);
+
+    // 2) Add email to contact_emails (dedupe handled by constraint if you created one)
+    const { error: ceErr } = await supabaseAdmin.from("contact_emails").insert({
+      contact_id: contactId,
       email,
-      label: "primary",
+      created_at: new Date().toISOString(),
     });
 
-    if (eErr) {
-      return NextResponse.json(
-        { error: `Contact created but email insert failed: ${eErr.message}`, contact_id: newContact.id },
-        { status: 500 }
-      );
+    // If it errors due to duplicate, ignore
+    if (ceErr && !/duplicate key/i.test(ceErr.message)) {
+      return NextResponse.json({ error: `contact_emails insert failed: ${ceErr.message}` }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, created: true, contact_id: newContact.id, email, display_name, category, tier });
-  } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e || "Unknown error") }, { status: 500 });
+    // 3) Mark unmatched row as auto_created + attach created_contact_id
+    const { error: upErr } = await supabaseAdmin
+      .from("unmatched_recipients")
+      .update({
+        status: "auto_created",
+        created_contact_id: contactId,
+      })
+      .eq("user_id", uid)
+      .eq("email", email);
+
+    if (upErr) {
+      return NextResponse.json({ error: `unmatched update failed: ${upErr.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, contact_id: contactId, display_name });
+  } catch (e) {
+    const se = safeErr(e);
+    console.error("UNMATCHED_ADD_CONTACT_CRASH", se);
+    return NextResponse.json({ error: "Add contact crashed", details: se }, { status: 500 });
   }
 }
