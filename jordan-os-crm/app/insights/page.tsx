@@ -15,8 +15,8 @@ type TouchIntent =
 type Contact = {
   id: string;
   display_name: string;
-  category: string; // Client, Agent, Developer, ...
-  tier: string | null; // A/B/C
+  category: string;
+  tier: string | null;
 };
 
 type Touch = {
@@ -27,14 +27,9 @@ type Touch = {
   intent: TouchIntent | null;
 };
 
-type ContactLastOutboundRow = {
-  contact_id: string;
-  last_outbound_at: string | null;
-};
-
 type Intervention = {
   key: string;
-  priority: number; // higher = more urgent
+  priority: number;
   title: string;
   summary: string;
   target: string;
@@ -89,33 +84,29 @@ function cadenceDays(categoryRaw: string, tierRaw: string | null): number {
   return 120;
 }
 
-// Local start-of-day
 function startOfDayLocal(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
 }
 
-// Monday 00:00 local for current week
 function startOfWeekMondayLocal(now = new Date()) {
   const d = startOfDayLocal(now);
-  const day = d.getDay(); // 0 Sun .. 6 Sat
-  const diffToMonday = (day + 6) % 7; // Mon ->0, Tue->1, Sun->6
+  const day = d.getDay();
+  const diffToMonday = (day + 6) % 7;
   d.setDate(d.getDate() - diffToMonday);
   return d;
 }
 
-// Count weekdays from Monday..today inclusive if today is weekday, else through Friday
 function weekdaysElapsedThisWeek(now = new Date()) {
-  const day = now.getDay(); // 0 Sun..6 Sat
-  if (day === 0) return 5; // Sun -> treat as week done (Fri)
-  if (day === 6) return 5; // Sat -> treat as week done (Fri)
-  // Mon=1 ->1, Tue=2 ->2 ... Fri=5 ->5
+  const day = now.getDay();
+  if (day === 0) return 5;
+  if (day === 6) return 5;
   return day;
 }
 
 function isThursdayOrLater(now = new Date()) {
-  const day = now.getDay(); // Thu=4, Fri=5
+  const day = now.getDay();
   return day >= 4 && day <= 6;
 }
 
@@ -151,15 +142,13 @@ export default function InsightsPage() {
 
   const [aClientsTotal, setAClientsTotal] = useState(0);
   const [aClientsDueOrOverdue, setAClientsDueOrOverdue] = useState(0);
-  const [aClientsVeryOverdue, setAClientsVeryOverdue] = useState(0); // > cadence + 14 days
+  const [aClientsVeryOverdue, setAClientsVeryOverdue] = useState(0);
 
   const [loadedHealth, setLoadedHealth] = useState(false);
 
-  // We keep some computed contact context for interventions
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [lastOutboundById, setLastOutboundById] = useState<Map<string, string | null>>(new Map());
 
-  const now = useMemo(() => new Date(), []);
   const wow = useMemo(() => deltaPct(out7, out7Prev), [out7, out7Prev]);
 
   const weekdaysElapsed = useMemo(() => weekdaysElapsedThisWeek(new Date()), [wtdOutbound, wtdAgents, wtdReferralAsks]);
@@ -167,21 +156,17 @@ export default function InsightsPage() {
   const expectedAgentsWTD = useMemo(() => weekdaysElapsed * 2, [weekdaysElapsed]);
 
   const healthScore = useMemo(() => {
-    // Score 0..100
-    // 30% A-client compliance, 25% velocity consistency, 20% agent leverage, 15% ask discipline, 10% database growth (placeholder)
-    // We keep it simple + stable for now.
     const aComp =
       aClientsTotal > 0
         ? clamp(Math.round(30 * (1 - aClientsDueOrOverdue / aClientsTotal)), 0, 30)
         : 30;
 
-    const velocity = clamp(Math.round((out30 / 120) * 25), 0, 25); // rough: 120 outbound / 30d => full
+    const velocity = clamp(Math.round((out30 / 120) * 25), 0, 25);
 
     const agentShare = out7 > 0 ? agents7 / out7 : 0;
-    const agent = clamp(Math.round((agentShare / 0.4) * 20), 0, 20); // 40% => full
+    const agent = clamp(Math.round((agentShare / 0.4) * 20), 0, 20);
 
-    const asks = refAsks30; // primary focus
-    const ask = clamp(Math.round((asks / 4) * 15), 0, 15); // 1/wk => ~4/mo full
+    const ask = clamp(Math.round((refAsks30 / 4) * 15), 0, 15);
 
     const growth = clamp(Math.round((contactsTotal / 200) * 10), 0, 10);
 
@@ -235,15 +220,8 @@ export default function InsightsPage() {
   }, [wow, out7Prev, out7, agents7, aClientsTotal, aClientsDueOrOverdue, aClientsVeryOverdue, refAsks30, reviewAsks30]);
 
   const interventions: Intervention[] = useMemo(() => {
-    // Build top 2 interventions based on your “Active Coach” rules:
-    // - Weekday-only cadence targets; weekly aggregate
-    // - Referral ask minimum 1 per week (warning Thurs+ if 0)
-    // - A-client risk: due/overdue and “very overdue” > cadence+14
-    // - Agent leverage: target 2/weekday
-
     const list: Intervention[] = [];
 
-    // Helper: suggest contacts by category (and optionally tier), sorted by "most overdue"
     const suggest = (opts: { category?: string; tier?: string; limit?: number; onlyDue?: boolean }) => {
       const limit = opts.limit ?? 3;
       const cat = (opts.category || "").toLowerCase();
@@ -265,7 +243,6 @@ export default function InsightsPage() {
         })
         .filter((x) => (opts.onlyDue ? x.isDue : true))
         .sort((a, b) => {
-          // null last => treat as most urgent
           const ao = a.days === null ? 9999 : a.overdueBy;
           const bo = b.days === null ? 9999 : b.overdueBy;
           return bo - ao;
@@ -286,7 +263,6 @@ export default function InsightsPage() {
       return candidates;
     };
 
-    // A-client protection intervention
     if (aClientsVeryOverdue > 0 || (aClientsTotal > 0 && aClientsDueOrOverdue / aClientsTotal >= 0.15)) {
       const pr = aClientsVeryOverdue > 0 ? 100 : 85;
       const suggested = suggest({ category: "client", tier: "A", limit: 5, onlyDue: true });
@@ -304,11 +280,10 @@ export default function InsightsPage() {
       });
     }
 
-    // Weekly velocity pacing intervention (weekday-only, weekly aggregate)
     const paceRatio = expectedOutboundWTD > 0 ? wtdOutbound / expectedOutboundWTD : 1;
     if (expectedOutboundWTD > 0 && paceRatio < 0.8) {
       const deficit = expectedOutboundWTD - wtdOutbound;
-      const suggested = suggest({ limit: 5 }); // any category, most overdue-ish
+      const suggested = suggest({ limit: 5 });
       list.push({
         key: "weekly_velocity",
         priority: 75,
@@ -319,7 +294,6 @@ export default function InsightsPage() {
       });
     }
 
-    // Agent leverage pacing intervention
     const agentPaceRatio = expectedAgentsWTD > 0 ? wtdAgents / expectedAgentsWTD : 1;
     if (expectedAgentsWTD > 0 && agentPaceRatio < 0.8) {
       const deficit = expectedAgentsWTD - wtdAgents;
@@ -334,11 +308,10 @@ export default function InsightsPage() {
       });
     }
 
-    // Referral ask discipline intervention (minimum 1/wk) — only start nagging Thurs+
     if (isThursdayOrLater(new Date()) && wtdReferralAsks === 0) {
-      const suggested = suggest({ category: "client", tier: "A", limit: 3, onlyDue: false }).concat(
-        suggest({ category: "client", tier: "B", limit: 2, onlyDue: false })
-      ).slice(0, 5);
+      const suggested = suggest({ category: "client", tier: "A", limit: 3, onlyDue: false })
+        .concat(suggest({ category: "client", tier: "B", limit: 2, onlyDue: false }))
+        .slice(0, 5);
 
       list.push({
         key: "referral_ask",
@@ -350,7 +323,6 @@ export default function InsightsPage() {
       });
     }
 
-    // If nothing triggers, still provide a “keep winning” intervention (low priority)
     if (list.length === 0) {
       list.push({
         key: "no_intervention",
@@ -362,7 +334,6 @@ export default function InsightsPage() {
       });
     }
 
-    // Return top 2 by priority
     return list.sort((a, b) => b.priority - a.priority).slice(0, 2);
   }, [
     contacts,
@@ -437,7 +408,6 @@ export default function InsightsPage() {
       setReviewAsks30(rows.filter((r) => r.intent === "review_ask").length);
     }
 
-    // Agent vs Client split for last 7 days
     const touchedIds7 = Array.from(new Set(now7.map((t) => t.contact_id)));
     if (touchedIds7.length === 0) {
       setAgents7(0);
@@ -460,7 +430,6 @@ export default function InsightsPage() {
       }
     }
 
-    // Week-to-date coach metrics
     const monday = startOfWeekMondayLocal(new Date());
     const mondayISO = monday.toISOString();
 
@@ -502,7 +471,10 @@ export default function InsightsPage() {
     setError(null);
     setLoadedHealth(false);
 
-    const { data: cData, error: cErr } = await supabase.from("contacts").select("id, display_name, category, tier").limit(20000);
+    const { data: cData, error: cErr } = await supabase
+      .from("contacts")
+      .select("id, display_name, category, tier")
+      .limit(20000);
 
     if (cErr) {
       setError(`Contacts fetch error: ${cErr.message}`);
@@ -545,7 +517,6 @@ export default function InsightsPage() {
       const cadence = cadenceDays(c.category, c.tier);
 
       if (!last) {
-        // treat "never touched" as overdue; also treat as "very overdue" once you have enough data
         dueOrOverdue += 1;
         continue;
       }
@@ -601,165 +572,141 @@ export default function InsightsPage() {
     };
   }, []);
 
-  if (!ready) return <div style={{ padding: 40 }}>Loading…</div>;
+  if (!ready) return <div className="card cardPad">Loading…</div>;
 
   return (
-    <div style={{ padding: 40, maxWidth: 1100 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+    <div className="stack">
+      <div className="rowBetween">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>Insights</h1>
-          <div style={{ marginTop: 6, color: "#666" }}>Velocity • Asks • Database health • Active Coach</div>
+          <h1 className="h1">Insights</h1>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Velocity • Asks • Database health • Active Coach
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <a
-            href="/morning"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              textDecoration: "none",
-              color: "#111",
-            }}
-          >
+        <div className="row">
+          <a className="btn" href="/morning" style={{ textDecoration: "none" }}>
             Morning
           </a>
-          <a
-            href="/contacts"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              textDecoration: "none",
-              color: "#111",
-            }}
-          >
+          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>
             Contacts
           </a>
-          <button
-            onClick={refreshAll}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
-          >
+          <button className="btn" onClick={refreshAll}>
             Refresh
           </button>
         </div>
       </div>
 
-      {error && <div style={{ marginTop: 14, color: "crimson", fontWeight: 800 }}>{error}</div>}
+      {error ? <div className="alert alertError">{error}</div> : null}
 
-      {/* Summary cards */}
       <div
+        className="stack"
         style={{
-          marginTop: 18,
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
           gap: 12,
         }}
       >
-        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-          <div style={{ fontSize: 12, color: "#999" }}>Operator score</div>
+        <div className="card cardPad">
+          <div className="label">Operator score</div>
           <div style={{ fontSize: 34, fontWeight: 900, marginTop: 6 }}>{healthScore}</div>
-          <div style={{ color: "#666", marginTop: 4 }}>0–100 (compliance + velocity + leverage + asks)</div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            0–100 (compliance + velocity + leverage + asks)
+          </div>
         </div>
 
-        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-          <div style={{ fontSize: 12, color: "#999" }}>Outbound velocity</div>
+        <div className="card cardPad">
+          <div className="label">Outbound velocity</div>
           <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
             {out7} (7d) • {out30} (30d)
           </div>
-          <div style={{ color: "#666", marginTop: 4 }}>
+          <div className="subtle" style={{ marginTop: 6 }}>
             WoW: <strong>{wow >= 0 ? `+${wow}%` : `${wow}%`}</strong> (prior 7d: {out7Prev})
           </div>
         </div>
 
-        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-          <div style={{ fontSize: 12, color: "#999" }}>Mix (last 7d)</div>
+        <div className="card cardPad">
+          <div className="label">Mix (last 7d)</div>
           <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
             Agents: {agents7} ({pct(agents7, out7)}) • Clients: {clients7} ({pct(clients7, out7)})
           </div>
-          <div style={{ color: "#666", marginTop: 4 }}>Goal: keep agents meaningful while protecting clients.</div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Goal: keep agents meaningful while protecting clients.
+          </div>
         </div>
 
-        <div style={{ border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
-          <div style={{ fontSize: 12, color: "#999" }}>Asks (last 30d)</div>
+        <div className="card cardPad">
+          <div className="label">Asks (last 30d)</div>
           <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
             Referrals: {refAsks30} • Reviews: {reviewAsks30}
           </div>
-          <div style={{ color: "#666", marginTop: 4 }}>Tracked via touch intent.</div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Tracked via touch intent.
+          </div>
         </div>
       </div>
 
-      {/* Active Coach */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
+      <div className="card cardPad stack">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Coach intervention</div>
 
-        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", color: "#555" }}>
-          <div style={{ border: "1px solid #ddd", borderRadius: 999, padding: "6px 10px" }}>
-            Week-to-date outbound: <strong>{wtdOutbound}</strong> / {expectedOutboundWTD} (5/weekday)
-          </div>
-          <div style={{ border: "1px solid #ddd", borderRadius: 999, padding: "6px 10px" }}>
-            Week-to-date agents: <strong>{wtdAgents}</strong> / {expectedAgentsWTD} (2/weekday)
-          </div>
-          <div style={{ border: "1px solid #ddd", borderRadius: 999, padding: "6px 10px" }}>
+        <div className="row" style={{ marginTop: 10 }}>
+          <span className="badge">
+            WTD outbound: <strong>{wtdOutbound}</strong> / {expectedOutboundWTD} (5/weekday)
+          </span>
+          <span className="badge">
+            WTD agents: <strong>{wtdAgents}</strong> / {expectedAgentsWTD} (2/weekday)
+          </span>
+          <span className="badge">
             Referral asks this week: <strong>{wtdReferralAsks}</strong> / 1
-          </div>
-          <div style={{ color: "#999", fontSize: 12, alignSelf: "center" }}>
+          </span>
+          <span className="subtle" style={{ fontSize: 12 }}>
             Weekday-only • Weekly aggregate scoring • Top 2 interventions
-          </div>
+          </span>
         </div>
 
-        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+        <div className="stack" style={{ marginTop: 10 }}>
           {interventions.map((iv) => (
-            <div key={iv.key} style={{ border: "1px solid #ddd", borderRadius: 14, padding: 12, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <div key={iv.key} className="card cardPad">
+              <div className="rowBetween" style={{ alignItems: "flex-start" }}>
                 <div>
                   <div style={{ fontWeight: 900, fontSize: 16 }}>{iv.title}</div>
-                  <div style={{ marginTop: 6, color: "#555" }}>{iv.summary}</div>
+                  <div className="subtle" style={{ marginTop: 6 }}>{iv.summary}</div>
                   <div style={{ marginTop: 8, fontWeight: 800 }}>{iv.target}</div>
                 </div>
-                <div style={{ color: "#999", fontSize: 12, minWidth: 90, textAlign: "right" }}>
+                <div className="subtle" style={{ fontSize: 12, minWidth: 110, textAlign: "right" }}>
                   priority
-                  <div style={{ fontWeight: 900, fontSize: 18, color: "#111" }}>{iv.priority}</div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: "var(--ink)" }}>{iv.priority}</div>
                 </div>
               </div>
 
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontWeight: 800, marginBottom: 6 }}>Suggested contacts</div>
+              <div style={{ marginTop: 12 }}>
+                <div className="label" style={{ marginBottom: 8 }}>
+                  Suggested contacts
+                </div>
+
                 {iv.suggested.length === 0 ? (
-                  <div style={{ color: "#666" }}>No suggestions available yet (add more contacts / touches).</div>
+                  <div className="subtle">No suggestions available yet (add more contacts / touches).</div>
                 ) : (
-                  <div style={{ display: "grid", gap: 8 }}>
+                  <div className="stack">
                     {iv.suggested.map((s) => (
-                      <div
-                        key={s.contact_id}
-                        style={{ border: "1px solid #eee", borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", gap: 10 }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 900 }}>
-                            {s.display_name}{" "}
-                            <span style={{ fontWeight: 600, color: "#666" }}>
-                              • {categoryPretty(s.category)} {s.tier ? `• Tier ${s.tier}` : ""}
-                            </span>
+                      <div key={s.contact_id} className="card cardPad">
+                        <div className="rowBetween" style={{ alignItems: "flex-start" }}>
+                          <div>
+                            <div style={{ fontWeight: 900 }}>
+                              {s.display_name}{" "}
+                              <span className="subtle" style={{ fontWeight: 700 }}>
+                                • {categoryPretty(s.category)} {s.tier ? `• Tier ${s.tier}` : ""}
+                              </span>
+                            </div>
+                            <div className="subtle" style={{ marginTop: 6 }}>
+                              {s.why}
+                              {typeof s.days_since_outbound === "number" ? ` • ${s.days_since_outbound}d` : ""}
+                            </div>
                           </div>
-                          <div style={{ color: "#777", marginTop: 4 }}>
-                            {s.why}
-                            {typeof s.days_since_outbound === "number" ? ` • ${s.days_since_outbound}d` : ""}
-                          </div>
+                          <a className="btn" href="/morning" style={{ textDecoration: "none", whiteSpace: "nowrap" }}>
+                            Go act →
+                          </a>
                         </div>
-                        <a
-                          href="/morning"
-                          style={{
-                            alignSelf: "center",
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            border: "1px solid #ddd",
-                            textDecoration: "none",
-                            color: "#111",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          Go act →
-                        </a>
                       </div>
                     ))}
                   </div>
@@ -770,56 +717,53 @@ export default function InsightsPage() {
         </div>
       </div>
 
-      {/* Database health */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
+      <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Database health</div>
-        <div style={{ marginTop: 8, color: "#666" }}>
+        <div className="subtle" style={{ marginTop: 8 }}>
           Contacts: <strong>{contactsTotal}</strong> • Clients: <strong>{clientsTotal}</strong> • Agents:{" "}
           <strong>{agentsTotal}</strong>
         </div>
 
-        <div style={{ marginTop: 10, color: "#444" }}>
-          A-Clients: <strong>{aClientsTotal}</strong> • A-Clients due/overdue (outbound):{" "}
-          <strong>{aClientsDueOrOverdue}</strong>{" "}
-          {!loadedHealth ? <span style={{ color: "#999" }}> (loading…)</span> : null}
+        <div style={{ marginTop: 10 }}>
+          <span className="badge">A-Clients: {aClientsTotal}</span>{" "}
+          <span className="badge">A-Clients due/overdue: {aClientsDueOrOverdue}</span>{" "}
+          {!loadedHealth ? <span className="subtle" style={{ fontSize: 12 }}>loading…</span> : null}
           {aClientsVeryOverdue > 0 ? (
-            <span style={{ marginLeft: 10, color: "crimson", fontWeight: 900 }}>
-              • {aClientsVeryOverdue} very overdue
+            <span className="badge" style={{ borderColor: "rgba(220,20,60,.25)", background: "rgba(220,20,60,.06)" }}>
+              {aClientsVeryOverdue} very overdue
             </span>
           ) : null}
         </div>
       </div>
 
-      {/* Warnings */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
+      <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Early warnings</div>
         {warnings.length === 0 ? (
-          <div style={{ marginTop: 8, color: "#666" }}>No warnings right now ✅</div>
+          <div className="subtle" style={{ marginTop: 8 }}>
+            No warnings right now ✅
+          </div>
         ) : (
-          <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          <div className="stack" style={{ marginTop: 12 }}>
             {warnings.map((w, i) => (
-              <div key={i} style={{ border: "1px solid #ddd", borderRadius: 12, padding: 12, background: "#fff" }}>
+              <div key={i} className="card cardPad">
                 <div style={{ fontWeight: 900 }}>{w.title}</div>
-                <div style={{ marginTop: 6, color: "#555" }}>{w.detail}</div>
+                <div className="subtle" style={{ marginTop: 6 }}>{w.detail}</div>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Next actions */}
-      <div style={{ marginTop: 18, border: "1px solid #e5e5e5", borderRadius: 14, padding: 14 }}>
+      <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Next actions</div>
-        <ul style={{ marginTop: 10, paddingLeft: 18, color: "#444" }}>
+        <ul style={{ marginTop: 10, paddingLeft: 18 }}>
           <li>
             Use <a href="/morning">Morning</a> to execute your Top 5.
           </li>
           <li>
             Tag at least 1 touch per week as <code>referral_ask</code>.
           </li>
-          <li>
-            If “Agent leverage drifting” appears, prioritize agents before the weekend.
-          </li>
+          <li>If “Agent leverage drifting” appears, prioritize agents before the weekend.</li>
         </ul>
       </div>
     </div>
