@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { buildDraft, type VoiceExample } from "@/lib/voice/generator";
 
 type TouchIntent =
   | "check_in"
@@ -41,13 +40,29 @@ type ContactWithLastOutbound = Contact & {
   days_since_outbound: number | null;
 };
 
-type Recommendation = ContactWithLastOutbound & {
-  cadence: number;
-  overdue: boolean;
-  score: number;
-  reasons: string[];
-  suggested_channel: Touch["channel"];
-  suggested_draft: string;
+type VoiceProfile = {
+  ok: boolean;
+  count: number;
+  rules: string[];
+  topPhrases?: Array<{ phrase: string; count: number }>;
+  stats?: {
+    avgLen: number;
+    percentQuestions: number;
+    percentEmDash: number;
+    percentWarm: number;
+    percentValue: number;
+    percentSoftClose: number;
+    percentExclaim: number;
+  } | null;
+  examples: Array<{
+    id: string;
+    channel: string;
+    intent: string | null;
+    contact_category: string | null;
+    occurred_at: string | null;
+    text: string;
+    len: number;
+  }>;
 };
 
 function daysSince(iso: string): number {
@@ -68,7 +83,7 @@ function fmtDate(iso: string | null) {
 }
 
 function isWeekdayLocal(): boolean {
-  const d = new Date().getDay(); // 0=Sun ... 6=Sat
+  const d = new Date().getDay();
   return d >= 1 && d <= 5;
 }
 
@@ -87,12 +102,13 @@ function cadenceDays(category: string, tier: string | null): number {
     return 60;
   }
   if (cat === "developer") return 60;
+  if (cat === "vendor") return 60;
   return 60;
 }
 
 function isOverdue(c: ContactWithLastOutbound): boolean {
   const cadence = cadenceDays(c.category, c.tier);
-  if (c.days_since_outbound == null) return true; // never reached out
+  if (c.days_since_outbound == null) return true;
   return c.days_since_outbound >= cadence;
 }
 
@@ -117,21 +133,157 @@ function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
   return "text";
 }
 
-function firstName(full: string) {
-  const f = (full || "").trim().split(/\s+/)[0] || "";
-  return f;
+function firstName(displayName: string): string {
+  const first = (displayName || "").trim().split(/\s+/)[0] || "";
+  return first || "there";
 }
+
+function choose<T>(arr: T[], fallback: T): T {
+  if (!arr || arr.length === 0) return fallback;
+  return arr[Math.floor(Math.random() * arr.length)] || fallback;
+}
+
+function buildDraftWithVoice(opts: {
+  contact: ContactWithLastOutbound;
+  intent: TouchIntent;
+  channel: Touch["channel"];
+  voice: VoiceProfile | null;
+}): string {
+  const c = opts.contact;
+  const cat = (c.category || "").toLowerCase();
+  const name = firstName(c.display_name);
+
+  // “Jordan voice” scaffolding: opener → value/ask → soft close
+  const openers = [
+    `Hey ${name} — quick one.`,
+    `Hey ${name} — quick check-in.`,
+    `Hi ${name} — quick note.`,
+    `Hey ${name} — hope you’re doing well.`,
+  ];
+
+  const softCloses = [
+    "No rush — just let me know.",
+    "If helpful, happy to share more.",
+    "Happy to be a sounding board.",
+    "Keep me posted when you have a sec.",
+  ];
+
+  const agentValues = [
+    "I’ve got an active buyer in the market right now and I’m keeping my eyes open.",
+    "I’m seeing a little shift in buyer sensitivity — curious what you’re noticing.",
+    "I’m comparing a few pockets right now — always interested in anything quiet/off-market.",
+  ];
+
+  const agentAsks = [
+    "Do you have anything coming up (or off-market) that I should know about?",
+    "What are you seeing right now on pricing + demand?",
+    "Any inventory you’re watching that feels like it’s about to trade?",
+  ];
+
+  const clientValues = [
+    "Just checking in and making sure everything’s going smoothly on your end.",
+    "Wanted to say hi — it’s been a minute and I figured I’d reach out.",
+    "Quick pulse check — I’ve been watching the market closely and thought of you.",
+  ];
+
+  const clientAsks = [
+    "Anything real-estate related on your mind right now?",
+    "Any changes in your plans this spring?",
+    "Want me to keep an eye out for anything specific, or run a quick value check?",
+  ];
+
+  const devValues = [
+    "Checking in — curious what you’re seeing on absorption + buyer feedback right now.",
+    "Wanted to reconnect and see what’s in the pipeline.",
+    "Quick note — I’m tracking a few new-build comps and would love to compare notes.",
+  ];
+
+  const devAsks = [
+    "Anything upcoming that fits the current moment?",
+    "What’s your read on pricing strategy this quarter?",
+    "Are you seeing more pushback on finishes or layout lately?",
+  ];
+
+  const vendorValues = [
+    "Quick check-in — hope business is good on your side.",
+    "Wanted to stay in touch — I’ve got a few projects moving and may need help soon.",
+    "Quick note — I’m tightening up my vendor bench and making sure I’ve got the right partners queued.",
+  ];
+
+  const vendorAsks = [
+    "What’s your schedule look like over the next couple weeks?",
+    "Any changes to pricing or lead times I should be aware of?",
+    "If I loop you in on something, what’s the fastest way to get it on your radar?",
+  ];
+
+  // If we have voice profile, nudge opener/close choices toward the phrases you actually use
+  const voice = opts.voice;
+  let opener = choose(openers, `Hey ${name} — quick one.`);
+  let close = choose(softCloses, "No rush — just let me know.");
+
+  if (voice?.topPhrases?.some((p) => p.phrase === "no rush")) close = "No rush — just let me know.";
+  if (voice?.topPhrases?.some((p) => p.phrase === "quick one")) opener = `Hey ${name} — quick one.`;
+
+  // Build by category
+  let value = "";
+  let ask = "";
+
+  if (cat === "agent") {
+    value = choose(agentValues, agentValues[0]);
+    ask = choose(agentAsks, agentAsks[0]);
+  } else if (cat === "developer") {
+    value = choose(devValues, devValues[0]);
+    ask = choose(devAsks, devAsks[0]);
+  } else if (cat === "vendor") {
+    value = choose(vendorValues, vendorValues[0]);
+    ask = choose(vendorAsks, vendorAsks[0]);
+  } else {
+    value = choose(clientValues, clientValues[0]);
+    ask = choose(clientAsks, clientAsks[0]);
+  }
+
+  // Intent tweaks (keep it subtle)
+  if (opts.intent === "referral_ask") {
+    ask = cat === "agent"
+      ? "If you bump into anyone who needs a strong agent on the buy side, I’d really appreciate a quick intro."
+      : "If anyone comes up in your world who needs help buying or selling, I’d be grateful for an intro.";
+  }
+
+  if (opts.intent === "review_ask") {
+    ask = "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you’d think.";
+  }
+
+  // Keep it Jordan-short: 2–4 sentences max
+  // Email can be slightly longer; text should be tighter.
+  const isText = opts.channel === "text";
+  const body = isText
+    ? `${opener} ${value} ${ask} ${close}`
+    : `${opener}\n\n${value}\n${ask}\n\n${close}`;
+
+  return body.trim();
+}
+
+type Recommendation = ContactWithLastOutbound & {
+  cadence: number;
+  overdue: boolean;
+  score: number;
+  reasons: string[];
+  suggested_channel: Touch["channel"];
+  suggested_draft: string;
+};
 
 export default function MorningPage() {
   const [ready, setReady] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
 
   const [contacts, setContacts] = useState<ContactWithLastOutbound[]>([]);
-  const [voiceExamples, setVoiceExamples] = useState<VoiceExample[]>([]);
-
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // voice
+  const [voice, setVoice] = useState<VoiceProfile | null>(null);
+  const [voiceLoaded, setVoiceLoaded] = useState(false);
 
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
@@ -153,23 +305,17 @@ export default function MorningPage() {
     return user;
   }
 
-  async function loadVoiceExamples(userId: string) {
-    // If this table name differs in your DB, tell me and I’ll adapt it.
-    const { data, error } = await supabase
-      .from("user_voice_examples")
-      .select("id, user_id, channel, contact_category, intent, text, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1000);
-
-    if (error) {
-      // Don’t block Morning on this; just show warning
-      setError((prev) => prev ?? `Voice examples load error: ${error.message}`);
-      setVoiceExamples([]);
-      return;
+  async function loadVoiceProfile(userId: string) {
+    try {
+      const res = await fetch(`/api/voice/profile?uid=${userId}&limit=120&minLen=140`);
+      const j = (await res.json()) as VoiceProfile | { error?: string };
+      if (!res.ok) return;
+      if ((j as VoiceProfile).ok) setVoice(j as VoiceProfile);
+    } catch {
+      // ignore
+    } finally {
+      setVoiceLoaded(true);
     }
-
-    setVoiceExamples((data ?? []) as VoiceExample[]);
   }
 
   async function load() {
@@ -180,8 +326,8 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) return;
 
-    // Load voice examples (async, but we’ll do it here for simplicity)
-    await loadVoiceExamples(user.id);
+    // Load voice once
+    if (!voiceLoaded) await loadVoiceProfile(user.id);
 
     // Contacts
     const { data: cData, error: cErr } = await supabase
@@ -204,7 +350,7 @@ export default function MorningPage() {
       return;
     }
 
-    // Outbound touches only (your rule)
+    // Outbound touches only
     const ids = base.map((c) => c.id);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -329,7 +475,6 @@ export default function MorningPage() {
       if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
 
       let score = 0;
-
       if (isAClient(c)) score += 1000;
       if (overdue) score += 300;
       score += (d ?? cadence) * 2;
@@ -338,6 +483,7 @@ export default function MorningPage() {
       if (cat === "agent") score += 60;
       if (cat === "developer") score += 40;
       if (cat === "client") score += 80;
+      if (cat === "vendor") score += 30;
 
       const t = (c.tier || "").toUpperCase();
       if (t === "A") score += 40;
@@ -347,31 +493,12 @@ export default function MorningPage() {
 
       const suggested_channel = pickChannel(c);
 
-      // ✅ Better voice example selection:
-      // - Same channel
-      // - Exact category match preferred, but allow untagged
-      // - Prefer shorter messages (your tone is tight and direct)
-      const vx = voiceExamples
-        .filter((v) => v.channel === suggested_channel)
-        .filter((v) => {
-          const vc = (v.contact_category || "").toLowerCase();
-          const cc = (c.category || "").toLowerCase();
-          if (vc && vc === cc) return true;
-          if (!vc) return true;
-          return false;
-        })
-        .sort((a, b) => a.text.length - b.text.length)
-        .slice(0, 80);
-
-      const suggested_draft = buildDraft({
-        channel: suggested_channel,
+      // Here’s the key: voice-based drafts
+      const suggested_draft = buildDraftWithVoice({
+        contact: c,
         intent: "check_in",
-        contactName: c.display_name,
-        contactCategory: c.category,
-        tier: c.tier,
-        clientType: c.client_type,
-        daysSinceOutbound: c.days_since_outbound,
-        examples: vx,
+        channel: suggested_channel,
+        voice,
       });
 
       return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
@@ -391,8 +518,10 @@ export default function MorningPage() {
 
     const agentsNeeded = 2;
     const agentPool = scored.filter((c) => (c.category || "").toLowerCase() === "agent" && !used.has(c.id));
-    const alreadyAgents = top.filter((x) => (x.category || "").toLowerCase() === "agent").length;
-    const pickAgents = agentPool.slice(0, Math.max(0, agentsNeeded - alreadyAgents));
+    const pickAgents = agentPool.slice(
+      0,
+      Math.max(0, agentsNeeded - top.filter((x) => (x.category || "").toLowerCase() === "agent").length)
+    );
     for (const a of pickAgents) {
       if (top.length >= 5) break;
       top.push(a);
@@ -407,7 +536,7 @@ export default function MorningPage() {
     }
 
     return top;
-  }, [contacts, voiceExamples]);
+  }, [contacts, voice]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
@@ -431,9 +560,21 @@ export default function MorningPage() {
             <span className="badge">{stats.total} contacts</span>{" "}
             <span className="badge">{stats.overdue} overdue</span>{" "}
             <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
-            <span className="badge">{stats.agents} agents</span>{" "}
-            <span className="badge">{voiceExamples.length} voice examples</span>
+            <span className="badge">{stats.agents} agents</span>
+            {voiceLoaded ? (
+              <span className="badge">
+                Voice: <strong>{voice?.count ?? 0}</strong> examples
+              </span>
+            ) : (
+              <span className="badge">Voice: loading…</span>
+            )}
           </div>
+
+          {voice?.rules?.length ? (
+            <div className="muted small" style={{ marginTop: 10 }}>
+              <strong>Voice rules:</strong> {voice.rules.slice(0, 3).join(" • ")}
+            </div>
+          ) : null}
         </div>
 
         <div className="row">
@@ -457,6 +598,27 @@ export default function MorningPage() {
         </div>
       )}
 
+      <div className="section" style={{ marginTop: 14 }}>
+        <div className="sectionTitleRow">
+          <div className="sectionTitle">Operating rules</div>
+          <div className="sectionSub">Daily accountability, without noise.</div>
+        </div>
+
+        <div className="row">
+          <span className="badge">Top 5 per day</span>
+          <span className="badge">Min 2 agents (if available)</span>
+          <span className="badge">A-Client never missed</span>
+          <span className="badge">Outbound resets cadence</span>
+          <span className="badge">Weekday-focused suggestions</span>
+        </div>
+
+        {!weekday ? (
+          <div className="muted small" style={{ marginTop: 10 }}>
+            It’s the weekend — this still shows priorities, but your accountability focus is weekdays.
+          </div>
+        ) : null}
+      </div>
+
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
           <div className="sectionTitle">Today’s Top 5</div>
@@ -464,125 +626,142 @@ export default function MorningPage() {
         </div>
 
         <div className="stack">
-          {recs.map((c, idx) => (
-            <div key={c.id} className="card cardPad">
-              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-                    <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
-                      <span className="badge" style={{ marginRight: 10 }}>
-                        #{idx + 1}
-                      </span>
-                      <a href={`/contacts/${c.id}`}>{c.display_name}</a>
+          {recs.map((c, idx) => {
+            const agent = (c.category || "").toLowerCase() === "agent";
+            const overdue = c.overdue;
+
+            return (
+              <div key={c.id} className="card cardPad">
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                      <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                        <span className="badge" style={{ marginRight: 10 }}>
+                          #{idx + 1}
+                        </span>
+                        <a href={`/contacts/${c.id}`}>{c.display_name}</a>
+                      </div>
+
+                      <div className="muted small">
+                        Last outbound: <span className="bold">{fmtDate(c.last_outbound_at)}</span>
+                        {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
+                      </div>
                     </div>
 
-                    <div className="muted small">
-                      Last outbound: <span className="bold">{fmtDate(c.last_outbound_at)}</span>
-                      {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <span className="badge">{categoryBadge(c)}</span>
+                      <span className="badge">Cadence {c.cadence}d</span>
+                      {c.days_since_outbound == null ? (
+                        <span className="badge">Never outbound</span>
+                      ) : (
+                        <span className="badge">{c.days_since_outbound}d since</span>
+                      )}
+                      <span className="badge">{overdue ? "Overdue" : "On track"}</span>
+                      {agent ? <span className="badge">Agent touch</span> : null}
+                    </div>
+
+                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Suggested outreach (Jordan voice)
+                      </div>
+                      <div className="row">
+                        <span className="badge">Channel: {c.suggested_channel}</span>
+                        <span className="badge">Intent: check_in</span>
+                      </div>
+
+                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+                        {c.suggested_draft}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="row" style={{ marginTop: 10 }}>
-                    <span className="badge">{categoryBadge(c)}</span>
-                    <span className="badge">Cadence {c.cadence}d</span>
-                    {c.days_since_outbound == null ? <span className="badge">Never outbound</span> : <span className="badge">{c.days_since_outbound}d since</span>}
-                    <span className="badge">{c.overdue ? "Overdue" : "On track"}</span>
-                  </div>
-
-                  <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                    <div className="small muted bold" style={{ marginBottom: 6 }}>
-                      Suggested outreach ({c.suggested_channel})
-                    </div>
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{c.suggested_draft}</div>
+                  <div style={{ width: 280, display: "grid", gap: 10 }}>
+                    <a className="btn" href={`/contacts/${c.id}`}>
+                      Open contact
+                    </a>
+                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                      Log outbound touch
+                    </button>
                   </div>
                 </div>
 
-                <div style={{ width: 280, display: "grid", gap: 10 }}>
-                  <a className="btn" href={`/contacts/${c.id}`}>
-                    Open contact
-                  </a>
-                  <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                    Log outbound touch
-                  </button>
-                </div>
-              </div>
-
-              {loggingFor === c.id && (
-                <div className="section" style={{ marginTop: 12 }}>
-                  <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
-                    <div className="sectionTitle">Log outbound touch</div>
-                    <div className="sectionSub">{c.display_name}</div>
-                  </div>
-
-                  <div className="row">
-                    <div style={{ width: 200, minWidth: 180 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Channel
-                      </div>
-                      <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as any)}>
-                        <option value="email">email</option>
-                        <option value="text">text</option>
-                        <option value="call">call</option>
-                        <option value="in_person">in_person</option>
-                        <option value="social_dm">social_dm</option>
-                        <option value="other">other</option>
-                      </select>
+                {loggingFor === c.id && (
+                  <div className="section" style={{ marginTop: 12 }}>
+                    <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
+                      <div className="sectionTitle">Log outbound touch</div>
+                      <div className="sectionSub">{c.display_name}</div>
                     </div>
 
-                    <div style={{ width: 260, minWidth: 220 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Intent
-                      </div>
-                      <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as any)}>
-                        <option value="check_in">check_in</option>
-                        <option value="referral_ask">referral_ask</option>
-                        <option value="review_ask">review_ask</option>
-                        <option value="deal_followup">deal_followup</option>
-                        <option value="collaboration">collaboration</option>
-                        <option value="event_invite">event_invite</option>
-                        <option value="other">other</option>
-                      </select>
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 220 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Source
-                      </div>
-                      <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
-                    </div>
-                  </div>
-
-                  <div className="row" style={{ marginTop: 10 }}>
-                    <div style={{ flex: 1, minWidth: 260 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Link (optional)
-                      </div>
-                      <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 10 }}>
-                    <div className="small muted bold" style={{ marginBottom: 6 }}>
-                      Summary (optional)
-                    </div>
-                    <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
-                  </div>
-
-                  <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
-                    <div className="muted small">Outbound touches reset cadence.</div>
                     <div className="row">
-                      <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
-                        Cancel
-                      </button>
-                      <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
-                        {savingTouch ? "Saving…" : "Save"}
-                      </button>
+                      <div style={{ width: 200, minWidth: 180 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Channel
+                        </div>
+                        <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as Touch["channel"])}>
+                          <option value="email">email</option>
+                          <option value="text">text</option>
+                          <option value="call">call</option>
+                          <option value="in_person">in_person</option>
+                          <option value="social_dm">social_dm</option>
+                          <option value="other">other</option>
+                        </select>
+                      </div>
+
+                      <div style={{ width: 260, minWidth: 220 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Intent
+                        </div>
+                        <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as TouchIntent)}>
+                          <option value="check_in">check_in</option>
+                          <option value="referral_ask">referral_ask</option>
+                          <option value="review_ask">review_ask</option>
+                          <option value="deal_followup">deal_followup</option>
+                          <option value="collaboration">collaboration</option>
+                          <option value="event_invite">event_invite</option>
+                          <option value="other">other</option>
+                        </select>
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Source
+                        </div>
+                        <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
+                      </div>
+                    </div>
+
+                    <div className="row" style={{ marginTop: 10 }}>
+                      <div style={{ flex: 1, minWidth: 260 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>
+                          Link (optional)
+                        </div>
+                        <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 10 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Summary (optional)
+                      </div>
+                      <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
+                    </div>
+
+                    <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
+                      <div className="muted small">Outbound touches reset cadence.</div>
+                      <div className="row">
+                        <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
+                          Cancel
+                        </button>
+                        <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+                          {savingTouch ? "Saving…" : "Save"}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
 
           {recs.length === 0 ? (
             <div className="card cardPad">
