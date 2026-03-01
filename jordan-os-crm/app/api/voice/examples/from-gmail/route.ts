@@ -6,8 +6,7 @@ import { getGoogleOAuthClient } from "@/lib/google";
 
 export const runtime = "nodejs";
 
-// bump this anytime you deploy changes so you can verify the live route immediately
-const ROUTE_VERSION = "voice-from-gmail@2026-03-01a";
+const ROUTE_VERSION = "voice-from-gmail@2026-03-01b";
 
 function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -30,6 +29,10 @@ function parseBool(v: string | null, defaultVal: boolean) {
   return defaultVal;
 }
 
+function clampInt(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
 type GoogleTokenRow = {
   access_token: string | null;
   refresh_token: string | null;
@@ -47,6 +50,7 @@ function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, n
 }
 
 function buildVoiceText(subject: string, snippet: string) {
+  // Keep it simple: this is “seed” voice. Even short is useful.
   const s = (subject || "").trim();
   const sn = (snippet || "").trim();
   const combined = [s ? `Subject: ${s}` : "", sn ? `Snippet: ${sn}` : ""].filter(Boolean).join("\n");
@@ -60,13 +64,15 @@ export async function POST(req: Request) {
     const uid = url.searchParams.get("uid") || "";
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid", version: ROUTE_VERSION }, { status: 400 });
 
-    const days = Math.max(1, Math.min(3650, Number(url.searchParams.get("days") || 365)));
-    const maxMessages = Math.max(1, Math.min(2000, Number(url.searchParams.get("max") || 400)));
+    const days = clampInt(Number(url.searchParams.get("days") || 365), 1, 3650);
+    const maxMessages = clampInt(Number(url.searchParams.get("max") || 400), 1, 2000);
 
-    // IMPORTANT: default false (do NOT require labels)
+    // default false (do NOT require labels)
     const requireLabels = parseBool(url.searchParams.get("requireLabels"), false);
 
-    // environment sanity checks
+    // NEW: min length filter defaults to 0 (don’t drop anything)
+    const minLen = clampInt(Number(url.searchParams.get("minLen") || 0), 0, 500);
+
     if (!process.env.SUPABASE_URL) return NextResponse.json({ error: "Missing SUPABASE_URL", version: ROUTE_VERSION }, { status: 500 });
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY)
       return NextResponse.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY", version: ROUTE_VERSION }, { status: 500 });
@@ -74,7 +80,6 @@ export async function POST(req: Request) {
     if (!process.env.GOOGLE_CLIENT_SECRET)
       return NextResponse.json({ error: "Missing GOOGLE_CLIENT_SECRET", version: ROUTE_VERSION }, { status: 500 });
 
-    // tokens
     const { data: tok, error: tokErr } = await supabaseAdmin
       .from("google_tokens")
       .select("access_token, refresh_token, expiry_date")
@@ -88,7 +93,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing refresh token (reconnect Google)", version: ROUTE_VERSION }, { status: 400 });
     }
 
-    // settings (labels)
     const { data: settings, error: setErr } = await supabaseAdmin
       .from("user_settings")
       .select("gmail_label_names")
@@ -112,7 +116,6 @@ export async function POST(req: Request) {
 
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
 
-    // If requireLabels=true, map label names -> label IDs and apply them.
     let usedLabelNames: string[] = [];
     let usedLabelIds: string[] = [];
 
@@ -151,17 +154,21 @@ export async function POST(req: Request) {
 
     const usedQuery = `in:sent from:me newer_than:${days}d`;
 
-    // Use Gmail search query ALWAYS (q), and only apply labelIds if requireLabels=true.
-    // This avoids the “only 3 labeled” trap and makes behavior predictable.
     let pageToken: string | undefined = undefined;
     let messagesFetched = 0;
 
-    // We’ll insert into user_voice_examples
-    // Expected columns (minimum): id (uuid), user_id, source, source_message_id, occurred_at, text, created_at
-    // If your schema differs, tell me the exact columns and I’ll adjust.
-    let inserted = 0;
-    let skipped = 0;
     let scanned = 0;
+    let inserted = 0;
+
+    // NEW: diagnostics
+    let skipped = 0;
+    let skippedTooShort = 0;
+    let skippedDuped = 0;
+    let skippedInsertErr = 0;
+
+    let firstInsertError: string | null = null;
+
+    const samples: Array<{ id: string; subject: string; snippetLen: number; textLen: number }> = [];
 
     while (messagesFetched < maxMessages) {
       const batchSize = Math.min(100, maxMessages - messagesFetched);
@@ -188,7 +195,6 @@ export async function POST(req: Request) {
         if (!m.id) continue;
         scanned += 1;
 
-        // Get subject/snippet + timestamp
         const full = await gmail.users.messages.get({
           userId: "me",
           id: m.id,
@@ -200,16 +206,19 @@ export async function POST(req: Request) {
         const snippet = (full.data.snippet || "").trim();
         const text = buildVoiceText(subject, snippet);
 
-        // Basic usefulness filter
-        if (text.length < 40) {
+        if (samples.length < 8) {
+          samples.push({ id: m.id, subject, snippetLen: snippet.length, textLen: text.length });
+        }
+
+        if (text.length < minLen) {
           skipped += 1;
+          skippedTooShort += 1;
           continue;
         }
 
         const internalDateMs = Number(full.data.internalDate || 0);
         const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
 
-        // de-dupe by (user_id, source, source_message_id)
         const { data: existing, error: exErr } = await supabaseAdmin
           .from("user_voice_examples")
           .select("id")
@@ -220,6 +229,7 @@ export async function POST(req: Request) {
 
         if (!exErr && (existing ?? []).length > 0) {
           skipped += 1;
+          skippedDuped += 1;
           continue;
         }
 
@@ -233,6 +243,8 @@ export async function POST(req: Request) {
 
         if (insErr) {
           skipped += 1;
+          skippedInsertErr += 1;
+          if (!firstInsertError) firstInsertError = insErr.message;
           continue;
         }
 
@@ -251,11 +263,19 @@ export async function POST(req: Request) {
       usedQuery,
       days,
       maxMessages,
+      minLen,
       scanned,
       messagesFetched,
       inserted,
       skipped,
-      note: "Default behavior does NOT require labels. Set requireLabels=true to restrict to labeled sent mail.",
+      skipBreakdown: {
+        tooShort: skippedTooShort,
+        duped: skippedDuped,
+        insertErr: skippedInsertErr,
+      },
+      firstInsertError,
+      samples,
+      note: "Default behavior does NOT require labels. Use minLen to filter if you want.",
     });
   } catch (e) {
     const se = safeErr(e);
