@@ -10,23 +10,26 @@ export default async function middleware(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return req.cookies.get(name)?.value;
+        getAll() {
+          return req.cookies.getAll();
         },
-        set() {},
-        remove() {},
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            res.cookies.set(name, value, options);
+          });
+        },
       },
     }
   );
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data } = await supabase.auth.getSession();
+  const session = data.session;
 
-  const isLoginPage = req.nextUrl.pathname.startsWith("/login");
-  const isAuthCallback = req.nextUrl.pathname.startsWith("/auth");
+  const path = req.nextUrl.pathname;
+  const isLogin = path.startsWith("/login");
+  const isAuth = path.startsWith("/auth");
 
-  if (!session && !isLoginPage && !isAuthCallback) {
+  if (!session && !isLogin && !isAuth) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
