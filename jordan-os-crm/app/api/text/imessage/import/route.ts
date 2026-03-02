@@ -23,24 +23,17 @@ type Body = {
   raw_text: string;
 };
 
-/**
- * Minimal parser for iMessage pasted transcripts.
- * Expected common formats:
- * - "Jordan: text..."
- * - "You: text..."
- * - Continuation lines append to previous message
- */
-function parseIMessage(raw: string) {
+type Parsed = { senderRaw: string; text: string };
+
+function parseIMessage(raw: string): Parsed[] {
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trimEnd())
     .filter((l) => l.trim().length > 0);
 
-  const msgStart = /^(.{1,40}):\s*(.*)$/;
+  const msgStart = /^(.{1,60}):\s*(.*)$/;
 
-  type Parsed = { senderRaw: string; text: string };
   const out: Parsed[] = [];
-
   let current: Parsed | null = null;
 
   for (const line of lines) {
@@ -53,38 +46,62 @@ function parseIMessage(raw: string) {
       else current.text += `\n${line.trim()}`;
     }
   }
-
   if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
 
   return out.slice(0, 2000);
 }
 
-/**
- * IMPORTANT: your DB has a CHECK constraint on text_messages.sender.
- * We normalize to a safe small set: "me" | "them"
- * (Adjust these literals if your constraint expects different values.)
- */
-function normalizeSender(senderRaw: string) {
-  const s = (senderRaw || "").trim().toLowerCase();
+function guessDirectionAndSender(senderRaw: string) {
+  const s = (senderRaw || "").toLowerCase().trim();
 
-  // Common iMessage exports
-  if (s === "you" || s === "me" || s.includes("jordan")) return "me";
+  // Common paste patterns
+  const meAliases = new Set(["you", "me", "jordan", "jordan kramer", "jk"]);
+  const themAliases = new Set(["them", "other"]);
 
-  // Anything else is "them"
-  return "them";
+  // sender constrained by DB check constraint
+  let sender: "me" | "them" = "them";
+  let direction: "outbound" | "inbound" = "inbound";
+
+  if (meAliases.has(s)) {
+    sender = "me";
+    direction = "outbound";
+  } else if (themAliases.has(s)) {
+    sender = "them";
+    direction = "inbound";
+  } else {
+    // default: treat unknown names as "them"
+    sender = "them";
+    direction = "inbound";
+  }
+
+  return { sender, direction };
 }
 
-/**
- * If you want better identification of "me", you can also pass your name via env later.
- * For now, "You"/"Me"/"Jordan" => me.
- */
+function chunk<T>(arr: T[], size: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
-async function insertInChunks<T>(table: string, rows: T[], chunkSize = 200) {
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    const { error } = await supabaseAdmin.from(table).insert(chunk as any);
-    if (error) throw new Error(error.message);
-  }
+function makeSummary(messages: Array<{ sender: "me" | "them"; body: string }>) {
+  const lastInbound = [...messages].reverse().find((m) => m.sender === "them")?.body || "";
+  const lastOutbound = [...messages].reverse().find((m) => m.sender === "me")?.body || "";
+
+  const openQuestion =
+    [...messages]
+      .reverse()
+      .find((m) => m.sender === "me" && m.body.includes("?"))
+      ?.body.split("\n")[0]
+      .slice(0, 180) || null;
+
+  const topicGuess = (lastInbound || lastOutbound).slice(0, 200);
+
+  return [
+    `Topic: ${topicGuess || "—"}`,
+    openQuestion ? `Open loop: ${openQuestion}` : `Open loop: —`,
+    lastInbound ? `Last inbound: ${lastInbound.slice(0, 180)}` : `Last inbound: —`,
+    lastOutbound ? `Last outbound: ${lastOutbound.slice(0, 180)}` : `Last outbound: —`,
+  ].join("\n");
 }
 
 export async function POST(req: Request) {
@@ -100,7 +117,7 @@ export async function POST(req: Request) {
     if (contactId && !isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
     if (!rawText || rawText.length < 20) return NextResponse.json({ error: "raw_text is too short" }, { status: 400 });
 
-    // 1) Store raw thread
+    // 1) Insert thread
     const { data: threadRow, error: threadErr } = await supabaseAdmin
       .from("text_threads")
       .insert({
@@ -119,7 +136,7 @@ export async function POST(req: Request) {
 
     const thread_id = threadRow.id as string;
 
-    // 2) Parse + store messages
+    // 2) Parse + normalize + insert messages
     const parsed = parseIMessage(rawText);
 
     if (parsed.length === 0) {
@@ -127,43 +144,54 @@ export async function POST(req: Request) {
         ok: true,
         thread_id,
         inserted_messages: 0,
-        note: "Thread saved, but no messages were parsed. Raw saved.",
+        note: "Thread saved, but no messages were parsed. Raw stored.",
       });
     }
 
-    const nowIso = new Date().toISOString();
-
     const toInsert = parsed.map((m) => {
-      const sender = normalizeSender(m.senderRaw); // MUST satisfy DB check constraint
-      const direction = sender === "me" ? "outbound" : "inbound";
-
-      // Preserve original label without violating constraints
-      const bodyText =
-        m.senderRaw && m.senderRaw.trim().length > 0 && m.senderRaw.trim().toLowerCase() !== sender
-          ? `[${m.senderRaw.trim()}] ${m.text}`
-          : m.text;
-
+      const g = guessDirectionAndSender(m.senderRaw);
       return {
         user_id: uid,
         thread_id,
         contact_id: contactId,
-        sender, // "me" | "them"
-        direction, // required by your schema
-        occurred_at: null, // we don't have real timestamps from paste; ok if nullable
-        body: bodyText,
-        created_at: nowIso,
+        sender: g.sender, // "me" | "them" satisfies sender check
+        direction: g.direction, // satisfies direction NOT NULL
+        occurred_at: null,
+        body: `[${m.senderRaw}] ${m.text}`,
       };
     });
 
-    // Insert in chunks so big threads don’t blow up payload limits
-    await insertInChunks("text_messages", toInsert, 200);
+    const chunks = chunk(toInsert, 250);
+    let inserted = 0;
+
+    for (const ch of chunks) {
+      // eslint-disable-next-line no-await-in-loop
+      const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(ch);
+      if (msgErr) {
+        return NextResponse.json(
+          { ok: false, error: msgErr.message, thread_id, inserted_messages: inserted },
+          { status: 500 }
+        );
+      }
+      inserted += ch.length;
+    }
+
+    // 3) Auto-summary (deterministic)
+    const summary = makeSummary(toInsert.map((x) => ({ sender: x.sender, body: x.body })));
+
+    // Best-effort update; if columns don't exist yet, you’ll see the error in response.
+    const { error: sumErr } = await supabaseAdmin
+      .from("text_threads")
+      .update({ summary, last_activity_at: new Date().toISOString() })
+      .eq("id", thread_id);
 
     return NextResponse.json({
       ok: true,
       thread_id,
-      inserted_messages: toInsert.length,
+      inserted_messages: inserted,
+      summary_saved: !sumErr,
+      summary_error: sumErr ? sumErr.message : null,
       sample: toInsert.slice(0, 3),
-      note: "sender normalized to satisfy DB constraint; original sender preserved in body prefix.",
     });
   } catch (e) {
     const se = safeErr(e);
