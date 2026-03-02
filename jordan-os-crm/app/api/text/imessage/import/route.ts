@@ -25,7 +25,7 @@ type Body = {
 
 /**
  * Minimal parser for iMessage pasted transcripts.
- * Accepts:
+ * Expected common formats:
  * - "Jordan: text..."
  * - "You: text..."
  * - Continuation lines append to previous message
@@ -38,7 +38,7 @@ function parseIMessage(raw: string) {
 
   const msgStart = /^(.{1,40}):\s*(.*)$/;
 
-  type Parsed = { sender: string; text: string };
+  type Parsed = { senderRaw: string; text: string };
   const out: Parsed[] = [];
 
   let current: Parsed | null = null;
@@ -47,9 +47,9 @@ function parseIMessage(raw: string) {
     const m = line.match(msgStart);
     if (m) {
       if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
-      current = { sender: m[1]!.trim(), text: (m[2] || "").trim() };
+      current = { senderRaw: m[1]!.trim(), text: (m[2] || "").trim() };
     } else {
-      if (!current) current = { sender: "Unknown", text: line.trim() };
+      if (!current) current = { senderRaw: "Unknown", text: line.trim() };
       else current.text += `\n${line.trim()}`;
     }
   }
@@ -59,33 +59,31 @@ function parseIMessage(raw: string) {
   return out.slice(0, 2000);
 }
 
-function normalizeSender(s: string) {
-  return (s || "").trim().toLowerCase();
+/**
+ * IMPORTANT: your DB has a CHECK constraint on text_messages.sender.
+ * We normalize to a safe small set: "me" | "them"
+ * (Adjust these literals if your constraint expects different values.)
+ */
+function normalizeSender(senderRaw: string) {
+  const s = (senderRaw || "").trim().toLowerCase();
+
+  // Common iMessage exports
+  if (s === "you" || s === "me" || s.includes("jordan")) return "me";
+
+  // Anything else is "them"
+  return "them";
 }
 
 /**
- * Heuristic: decide if the sender is "me" (outbound) vs "them" (inbound).
- * iMessage exports often use "You".
- * You can expand this list later (Jordan, Jordan Kramer, etc).
+ * If you want better identification of "me", you can also pass your name via env later.
+ * For now, "You"/"Me"/"Jordan" => me.
  */
-function isMeSender(senderRaw: string) {
-  const s = normalizeSender(senderRaw);
-  if (!s) return false;
-  const meSet = new Set([
-    "you",
-    "me",
-    "myself",
-    "jordan",
-    "jordan kramer",
-    "jk",
-  ]);
-  return meSet.has(s);
-}
 
-async function insertInChunks<T>(rows: T[], chunkSize = 500, inserter: (chunk: T[]) => Promise<void>) {
+async function insertInChunks<T>(table: string, rows: T[], chunkSize = 200) {
   for (let i = 0; i < rows.length; i += chunkSize) {
-    // eslint-disable-next-line no-await-in-loop
-    await inserter(rows.slice(i, i + chunkSize));
+    const chunk = rows.slice(i, i + chunkSize);
+    const { error } = await supabaseAdmin.from(table).insert(chunk as any);
+    if (error) throw new Error(error.message);
   }
 }
 
@@ -129,36 +127,43 @@ export async function POST(req: Request) {
         ok: true,
         thread_id,
         inserted_messages: 0,
-        note: "Thread saved, but no messages were parsed. Raw stored.",
+        note: "Thread saved, but no messages were parsed. Raw saved.",
       });
     }
 
+    const nowIso = new Date().toISOString();
+
     const toInsert = parsed.map((m) => {
-      const outbound = isMeSender(m.sender);
+      const sender = normalizeSender(m.senderRaw); // MUST satisfy DB check constraint
+      const direction = sender === "me" ? "outbound" : "inbound";
+
+      // Preserve original label without violating constraints
+      const bodyText =
+        m.senderRaw && m.senderRaw.trim().length > 0 && m.senderRaw.trim().toLowerCase() !== sender
+          ? `[${m.senderRaw.trim()}] ${m.text}`
+          : m.text;
+
       return {
         user_id: uid,
         thread_id,
         contact_id: contactId,
-        direction: outbound ? "outbound" : "inbound", // ✅ REQUIRED
-        occurred_at: null, // optional; add timestamp parsing later
-        body: m.text,       // ✅ matches schema
-        sender: m.sender,   // ✅ REQUIRED
+        sender, // "me" | "them"
+        direction, // required by your schema
+        occurred_at: null, // we don't have real timestamps from paste; ok if nullable
+        body: bodyText,
+        created_at: nowIso,
       };
     });
 
-    let inserted = 0;
-
-    await insertInChunks(toInsert, 500, async (chunk) => {
-      const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(chunk);
-      if (msgErr) throw new Error(msgErr.message);
-      inserted += chunk.length;
-    });
+    // Insert in chunks so big threads don’t blow up payload limits
+    await insertInChunks("text_messages", toInsert, 200);
 
     return NextResponse.json({
       ok: true,
       thread_id,
-      inserted_messages: inserted,
+      inserted_messages: toInsert.length,
       sample: toInsert.slice(0, 3),
+      note: "sender normalized to satisfy DB constraint; original sender preserved in body prefix.",
     });
   } catch (e) {
     const se = safeErr(e);
