@@ -31,51 +31,77 @@ export default function ContactsPage() {
     return user;
   }
 
-  async function search(query: string) {
-    if (!uid) return;
+  // 🔹 Load recent contacts (on page load)
+  async function loadRecent(userId: string) {
+    setBusy(true);
+    setErr(null);
+
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, display_name, category, tier")
+      .eq("user_id", userId) // remove if using RLS auth.uid()
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    setBusy(false);
+
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+
+    setRows((data ?? []) as ContactLite[]);
+  }
+
+  // 🔹 Search (only when query >= 2 chars)
+  async function search(userId: string, query: string) {
     const term = query.trim();
-    if (!term) {
-      setRows([]);
+    if (term.length < 2) {
+      await loadRecent(userId);
       return;
     }
 
     setBusy(true);
     setErr(null);
 
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(term)}`);
+    const res = await fetch(`/api/contacts/search?uid=${userId}&q=${encodeURIComponent(term)}`);
     const j = await res.json();
 
     setBusy(false);
 
     if (!res.ok) {
       setErr(j?.error || "Search failed");
-      setRows([]);
       return;
     }
 
     setRows((j.results || []) as ContactLite[]);
   }
 
-  // debounce
+  // 🔹 Debounce search
   useEffect(() => {
+    if (!uid) return;
+
     const t = setTimeout(() => {
-      search(q);
-    }, 180);
+      search(uid, q);
+    }, 300);
+
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, uid]);
 
+  // 🔹 Initial load
   useEffect(() => {
     requireSession().then((u) => {
-      if (u) setReady(true);
+      if (!u) return;
+      setReady(true);
+      loadRecent(u.id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hint = useMemo(() => {
-    if (!q.trim()) return "Type a name, email, or company…";
-    if (busy) return "Searching…";
-    return `${rows.length} result(s)`;
+    if (busy) return "Loading…";
+    if (q.trim().length >= 2) return `${rows.length} result(s)`;
+    return `${rows.length} recent contact(s)`;
   }, [q, busy, rows.length]);
 
   if (!ready) return <div className="page">Loading…</div>;
@@ -103,25 +129,31 @@ export default function ContactsPage() {
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search contacts…"
+          placeholder="Search contacts… (min 2 characters)"
         />
       </div>
 
       <div className="section" style={{ marginTop: 14 }}>
         <div className="stack">
           {rows.map((c) => (
-            <a key={c.id} className="card cardPad" href={`/contacts/${c.id}`} style={{ textDecoration: "none" }}>
+            <a
+              key={c.id}
+              className="card cardPad"
+              href={`/contacts/${c.id}`}
+              style={{ textDecoration: "none" }}
+            >
               <div className="rowBetween">
                 <div style={{ fontWeight: 900 }}>{c.display_name}</div>
                 <div className="muted small">
-                  {c.category}{c.tier ? ` • ${c.tier}` : ""}{c.email ? ` • ${c.email}` : ""}
+                  {c.category}
+                  {c.tier ? ` • ${c.tier}` : ""}
                 </div>
               </div>
             </a>
           ))}
 
-          {q.trim() && !busy && rows.length === 0 ? (
-            <div className="muted">No matches.</div>
+          {!busy && rows.length === 0 ? (
+            <div className="muted">No contacts found.</div>
           ) : null}
         </div>
       </div>
