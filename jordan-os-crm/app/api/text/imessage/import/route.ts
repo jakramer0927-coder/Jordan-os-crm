@@ -25,12 +25,10 @@ type Body = {
 
 /**
  * Minimal parser for iMessage pasted transcripts.
- * We keep it tolerant: we store raw + best-effort parsed “messages”.
- *
- * Expected common formats:
+ * Accepts:
  * - "Jordan: text..."
  * - "You: text..."
- * - Timestamps may appear; we do best effort.
+ * - Continuation lines append to previous message
  */
 function parseIMessage(raw: string) {
   const lines = raw
@@ -38,7 +36,6 @@ function parseIMessage(raw: string) {
     .map((l) => l.trimEnd())
     .filter((l) => l.trim().length > 0);
 
-  // Heuristic: new message starts when line matches "Name: ..."
   const msgStart = /^(.{1,40}):\s*(.*)$/;
 
   type Parsed = { sender: string; text: string };
@@ -49,26 +46,47 @@ function parseIMessage(raw: string) {
   for (const line of lines) {
     const m = line.match(msgStart);
     if (m) {
-      // flush previous
       if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
       current = { sender: m[1]!.trim(), text: (m[2] || "").trim() };
     } else {
-      // continuation line
-      if (!current) {
-        // if we don't have a sender yet, treat as unknown/system
-        current = { sender: "Unknown", text: line.trim() };
-      } else {
-        current.text += `\n${line.trim()}`;
-      }
+      if (!current) current = { sender: "Unknown", text: line.trim() };
+      else current.text += `\n${line.trim()}`;
     }
   }
 
   if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
 
-  // Cap to avoid accidentally pasting novels
-  const capped = out.slice(0, 2000);
+  return out.slice(0, 2000);
+}
 
-  return capped;
+function normalizeSender(s: string) {
+  return (s || "").trim().toLowerCase();
+}
+
+/**
+ * Heuristic: decide if the sender is "me" (outbound) vs "them" (inbound).
+ * iMessage exports often use "You".
+ * You can expand this list later (Jordan, Jordan Kramer, etc).
+ */
+function isMeSender(senderRaw: string) {
+  const s = normalizeSender(senderRaw);
+  if (!s) return false;
+  const meSet = new Set([
+    "you",
+    "me",
+    "myself",
+    "jordan",
+    "jordan kramer",
+    "jk",
+  ]);
+  return meSet.has(s);
+}
+
+async function insertInChunks<T>(rows: T[], chunkSize = 500, inserter: (chunk: T[]) => Promise<void>) {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    // eslint-disable-next-line no-await-in-loop
+    await inserter(rows.slice(i, i + chunkSize));
+  }
 }
 
 export async function POST(req: Request) {
@@ -85,8 +103,6 @@ export async function POST(req: Request) {
     if (!rawText || rawText.length < 20) return NextResponse.json({ error: "raw_text is too short" }, { status: 400 });
 
     // 1) Store raw thread
-    // Create this table if you don’t have it yet:
-    //   text_threads(id uuid pk default gen_random_uuid(), user_id uuid, contact_id uuid null, title text null, raw_text text, source text, created_at timestamptz default now())
     const { data: threadRow, error: threadErr } = await supabaseAdmin
       .from("text_threads")
       .insert({
@@ -100,17 +116,12 @@ export async function POST(req: Request) {
       .single();
 
     if (threadErr || !threadRow) {
-      return NextResponse.json(
-        { error: threadErr?.message || "Failed to insert text_threads" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: threadErr?.message || "Failed to insert text_threads" }, { status: 500 });
     }
 
     const thread_id = threadRow.id as string;
 
     // 2) Parse + store messages
-    // Create this table if you don’t have it yet:
-    //   text_messages(id uuid pk default gen_random_uuid(), user_id uuid, contact_id uuid null, thread_id uuid, sender text, body text, created_at timestamptz default now())
     const parsed = parseIMessage(rawText);
 
     if (parsed.length === 0) {
@@ -118,31 +129,35 @@ export async function POST(req: Request) {
         ok: true,
         thread_id,
         inserted_messages: 0,
-        note: "Thread saved, but no messages were parsed. (Paste format didn’t match — still stored raw.)",
+        note: "Thread saved, but no messages were parsed. Raw stored.",
       });
     }
 
-    const toInsert = parsed.map((m) => ({
-      user_id: uid,
-      contact_id: contactId,
-      thread_id,
-      sender: m.sender,
-      body: m.text,
-    }));
+    const toInsert = parsed.map((m) => {
+      const outbound = isMeSender(m.sender);
+      return {
+        user_id: uid,
+        thread_id,
+        contact_id: contactId,
+        direction: outbound ? "outbound" : "inbound", // ✅ REQUIRED
+        occurred_at: null, // optional; add timestamp parsing later
+        body: m.text,       // ✅ matches schema
+        sender: m.sender,   // ✅ REQUIRED
+      };
+    });
 
-    const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(toInsert);
+    let inserted = 0;
 
-    if (msgErr) {
-      return NextResponse.json(
-        { error: msgErr.message, ok: false, thread_id, inserted_messages: 0 },
-        { status: 500 }
-      );
-    }
+    await insertInChunks(toInsert, 500, async (chunk) => {
+      const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(chunk);
+      if (msgErr) throw new Error(msgErr.message);
+      inserted += chunk.length;
+    });
 
     return NextResponse.json({
       ok: true,
       thread_id,
-      inserted_messages: toInsert.length,
+      inserted_messages: inserted,
       sample: toInsert.slice(0, 3),
     });
   } catch (e) {
