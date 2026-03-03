@@ -16,7 +16,12 @@ async function insertContactEmail(contactId: string, email: string) {
   });
 
   // ignore duplicates
-  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) {
+  if (
+    error &&
+    !String(error.message || "")
+      .toLowerCase()
+      .includes("duplicate")
+  ) {
     throw error;
   }
 }
@@ -24,12 +29,15 @@ async function insertContactEmail(contactId: string, email: string) {
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const uid = String(body.uid || "");
-  const email = String(body.email || "").toLowerCase().trim();
+  const email = String(body.email || "")
+    .toLowerCase()
+    .trim();
   const contactId = String(body.contact_id || "");
 
   if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
   if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
-  if (!isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
+  if (!isUuid(contactId))
+    return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
   // Add email to contact_emails (so Gmail sync matches going forward)
   await insertContactEmail(contactId, email);
@@ -37,7 +45,11 @@ export async function POST(req: Request) {
   // Mark unmatched recipient as linked
   const { error: uErr } = await supabaseAdmin
     .from("unmatched_recipients")
-    .update({ status: "linked", created_contact_id: contactId, last_seen_at: new Date().toISOString() })
+    .update({
+      status: "linked",
+      created_contact_id: contactId,
+      last_seen_at: new Date().toISOString(),
+    })
     .eq("email", email);
 
   if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });

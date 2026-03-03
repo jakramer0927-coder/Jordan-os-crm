@@ -15,8 +15,8 @@ function safeStr(s: string) {
 // Keep it simple: strip characters that can break the filter grammar.
 function sanitizeForOrValue(s: string) {
   return s
-    .replace(/[,%]/g, " ")      // commas break `.or(...)` list; % can be abused
-    .replace(/[()]/g, " ")      // avoid grouping chars
+    .replace(/[,%]/g, " ") // commas break `.or(...)` list; % can be abused
+    .replace(/[()]/g, " ") // avoid grouping chars
     .replace(/\s+/g, " ")
     .trim();
 }

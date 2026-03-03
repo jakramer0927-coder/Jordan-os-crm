@@ -36,12 +36,23 @@ function extractSignals(text: string) {
     hasExclamation: text.includes("!"),
     hasQuestion: text.includes("?"),
     hasEmDash: text.includes("—"),
-    hasWarm: /(hope you|hope you're|how (are|is) (everything|it going)|checking in|just wanted to)/i.test(text),
-    hasValue: /(sharing|sending|flagging|heads up|fyi|in case helpful|thought of you|wanted to pass along|looping in)/i.test(text),
-    hasSoftClose: /(no rush|no pressure|happy to|let me know|if helpful|when you have a sec)/i.test(text),
-    hasDirect: /(quick question|can you|are you open to|what’s your|what are you seeing)/i.test(text),
+    hasWarm:
+      /(hope you|hope you're|how (are|is) (everything|it going)|checking in|just wanted to)/i.test(
+        text,
+      ),
+    hasValue:
+      /(sharing|sending|flagging|heads up|fyi|in case helpful|thought of you|wanted to pass along|looping in)/i.test(
+        text,
+      ),
+    hasSoftClose: /(no rush|no pressure|happy to|let me know|if helpful|when you have a sec)/i.test(
+      text,
+    ),
+    hasDirect: /(quick question|can you|are you open to|what’s your|what are you seeing)/i.test(
+      text,
+    ),
     hasSalesy: /(amazing opportunity|act now|don’t miss|limited time|exclusive deal)/i.test(text),
-    mentionsMarket: /(pricing|demand|inventory|rates|market|comp|comps|closing|escrow|offer|counter)/i.test(text),
+    mentionsMarket:
+      /(pricing|demand|inventory|rates|market|comp|comps|closing|escrow|offer|counter)/i.test(text),
   };
 
   return signals;
@@ -64,11 +75,17 @@ function buildVoiceRules(stats: {
   rules.push("Default tone: confident, calm, not salesy; avoid hype language.");
 
   // Calibrate from stats
-  if (stats.percentEmDash >= 25) rules.push("Use an em dash (—) occasionally to keep it conversational.");
+  if (stats.percentEmDash >= 25)
+    rules.push("Use an em dash (—) occasionally to keep it conversational.");
   if (stats.percentQuestions >= 40) rules.push("Ask 1 clear question instead of multiple.");
-  if (stats.percentWarm >= 35) rules.push("Include a light check-in (“Quick check-in…”, “Hope you’re well…”) when appropriate.");
-  if (stats.percentValue >= 30) rules.push("Lead with value: a helpful update, context, or offer to share intel.");
-  if (stats.percentSoftClose >= 30) rules.push("Close with low-friction language (“No rush”, “Happy to help”).");
+  if (stats.percentWarm >= 35)
+    rules.push(
+      "Include a light check-in (“Quick check-in…”, “Hope you’re well…”) when appropriate.",
+    );
+  if (stats.percentValue >= 30)
+    rules.push("Lead with value: a helpful update, context, or offer to share intel.");
+  if (stats.percentSoftClose >= 30)
+    rules.push("Close with low-friction language (“No rush”, “Happy to help”).");
   if (stats.percentExclaim < 10) rules.push("Use exclamation sparingly (0–1 max).");
 
   // Structure
@@ -88,7 +105,9 @@ export async function GET(req: Request) {
     // Pull recent-ish examples; you can later add ordering by occurred_at if you want
     const { data, error } = await supabaseAdmin
       .from("user_voice_examples")
-      .select("id, channel, intent, contact_category, text, subject, snippet, occurred_at, created_at")
+      .select(
+        "id, channel, intent, contact_category, text, subject, snippet, occurred_at, created_at",
+      )
       .eq("user_id", uid)
       .order("occurred_at", { ascending: false })
       .limit(limit);

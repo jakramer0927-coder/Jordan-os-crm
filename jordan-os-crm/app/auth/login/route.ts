@@ -23,7 +23,7 @@ export async function GET(request: Request) {
           cookiesToSet.forEach((c) => pendingCookies.push(c));
         },
       },
-    }
+    },
   );
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 
   if (error || !data?.url) {
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error?.message || "OAuth start failed")}`, origin)
+      new URL(`/login?error=${encodeURIComponent(error?.message || "OAuth start failed")}`, origin),
     );
   }
 

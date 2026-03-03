@@ -63,11 +63,7 @@ export default function LoginPage() {
         Sign in with Google to access your private CRM.
       </p>
 
-      {error && (
-        <div style={{ color: "crimson", marginBottom: 14, fontWeight: 700 }}>
-          {error}
-        </div>
-      )}
+      {error && <div style={{ color: "crimson", marginBottom: 14, fontWeight: 700 }}>{error}</div>}
 
       <button
         onClick={signInWithGoogle}

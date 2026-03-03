@@ -23,7 +23,10 @@ export async function GET() {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ ok: false, env, error: error.message, details: error }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, env, error: error.message, details: error },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ ok: true, env, inserted_id: data?.id ?? null });

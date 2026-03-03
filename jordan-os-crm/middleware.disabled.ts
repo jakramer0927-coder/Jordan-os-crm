@@ -19,7 +19,7 @@ export default async function middleware(req: NextRequest) {
           });
         },
       },
-    }
+    },
   );
 
   const { data } = await supabase.auth.getSession();

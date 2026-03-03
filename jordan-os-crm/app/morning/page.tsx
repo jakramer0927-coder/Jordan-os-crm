@@ -244,13 +244,15 @@ function buildDraftWithVoice(opts: {
 
   // Intent tweaks (keep it subtle)
   if (opts.intent === "referral_ask") {
-    ask = cat === "agent"
-      ? "If you bump into anyone who needs a strong agent on the buy side, I’d really appreciate a quick intro."
-      : "If anyone comes up in your world who needs help buying or selling, I’d be grateful for an intro.";
+    ask =
+      cat === "agent"
+        ? "If you bump into anyone who needs a strong agent on the buy side, I’d really appreciate a quick intro."
+        : "If anyone comes up in your world who needs help buying or selling, I’d be grateful for an intro.";
   }
 
   if (opts.intent === "review_ask") {
-    ask = "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you’d think.";
+    ask =
+      "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you’d think.";
   }
 
   // Keep it Jordan-short: 2–4 sentences max
@@ -354,7 +356,9 @@ export default function MorningPage() {
     const ids = base.map((c) => c.id);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
-      .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
+      .select(
+        "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
+      )
       .in("contact_id", ids)
       .eq("direction", "outbound")
       .order("occurred_at", { ascending: false })
@@ -517,10 +521,15 @@ export default function MorningPage() {
     }
 
     const agentsNeeded = 2;
-    const agentPool = scored.filter((c) => (c.category || "").toLowerCase() === "agent" && !used.has(c.id));
+    const agentPool = scored.filter(
+      (c) => (c.category || "").toLowerCase() === "agent" && !used.has(c.id),
+    );
     const pickAgents = agentPool.slice(
       0,
-      Math.max(0, agentsNeeded - top.filter((x) => (x.category || "").toLowerCase() === "agent").length)
+      Math.max(
+        0,
+        agentsNeeded - top.filter((x) => (x.category || "").toLowerCase() === "agent").length,
+      ),
     );
     for (const a of pickAgents) {
       if (top.length >= 5) break;
@@ -591,8 +600,17 @@ export default function MorningPage() {
       </div>
 
       {(error || msg) && (
-        <div className="card cardPad" style={{ borderColor: error ? "rgba(160,0,0,0.25)" : undefined }}>
-          <div style={{ fontWeight: 900, color: error ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+        <div
+          className="card cardPad"
+          style={{ borderColor: error ? "rgba(160,0,0,0.25)" : undefined }}
+        >
+          <div
+            style={{
+              fontWeight: 900,
+              color: error ? "#8a0000" : "#0b6b2a",
+              whiteSpace: "pre-wrap",
+            }}
+          >
             {error || msg}
           </div>
         </div>
@@ -614,7 +632,8 @@ export default function MorningPage() {
 
         {!weekday ? (
           <div className="muted small" style={{ marginTop: 10 }}>
-            It’s the weekend — this still shows priorities, but your accountability focus is weekdays.
+            It’s the weekend — this still shows priorities, but your accountability focus is
+            weekdays.
           </div>
         ) : null}
       </div>
@@ -622,7 +641,9 @@ export default function MorningPage() {
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
           <div className="sectionTitle">Today’s Top 5</div>
-          <div className="sectionSub">Ranked by overdue + tier + category + days since outbound.</div>
+          <div className="sectionSub">
+            Ranked by overdue + tier + category + days since outbound.
+          </div>
         </div>
 
         <div className="stack">
@@ -632,9 +653,15 @@ export default function MorningPage() {
 
             return (
               <div key={c.id} className="card cardPad">
-                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div
+                  className="row"
+                  style={{ justifyContent: "space-between", alignItems: "flex-start" }}
+                >
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+                    <div
+                      className="row"
+                      style={{ justifyContent: "space-between", alignItems: "baseline" }}
+                    >
                       <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
                         <span className="badge" style={{ marginRight: 10 }}>
                           #{idx + 1}
@@ -697,7 +724,11 @@ export default function MorningPage() {
                         <div className="small muted bold" style={{ marginBottom: 6 }}>
                           Channel
                         </div>
-                        <select className="select" value={touchChannel} onChange={(e) => setTouchChannel(e.target.value as Touch["channel"])}>
+                        <select
+                          className="select"
+                          value={touchChannel}
+                          onChange={(e) => setTouchChannel(e.target.value as Touch["channel"])}
+                        >
                           <option value="email">email</option>
                           <option value="text">text</option>
                           <option value="call">call</option>
@@ -711,7 +742,11 @@ export default function MorningPage() {
                         <div className="small muted bold" style={{ marginBottom: 6 }}>
                           Intent
                         </div>
-                        <select className="select" value={touchIntent} onChange={(e) => setTouchIntent(e.target.value as TouchIntent)}>
+                        <select
+                          className="select"
+                          value={touchIntent}
+                          onChange={(e) => setTouchIntent(e.target.value as TouchIntent)}
+                        >
                           <option value="check_in">check_in</option>
                           <option value="referral_ask">referral_ask</option>
                           <option value="review_ask">review_ask</option>
@@ -726,7 +761,12 @@ export default function MorningPage() {
                         <div className="small muted bold" style={{ marginBottom: 6 }}>
                           Source
                         </div>
-                        <input className="input" value={touchSource} onChange={(e) => setTouchSource(e.target.value)} placeholder="manual / gmail / sms" />
+                        <input
+                          className="input"
+                          value={touchSource}
+                          onChange={(e) => setTouchSource(e.target.value)}
+                          placeholder="manual / gmail / sms"
+                        />
                       </div>
                     </div>
 
@@ -735,7 +775,12 @@ export default function MorningPage() {
                         <div className="small muted bold" style={{ marginBottom: 6 }}>
                           Link (optional)
                         </div>
-                        <input className="input" value={touchLink} onChange={(e) => setTouchLink(e.target.value)} placeholder="thread link / calendar link" />
+                        <input
+                          className="input"
+                          value={touchLink}
+                          onChange={(e) => setTouchLink(e.target.value)}
+                          placeholder="thread link / calendar link"
+                        />
                       </div>
                     </div>
 
@@ -743,16 +788,29 @@ export default function MorningPage() {
                       <div className="small muted bold" style={{ marginBottom: 6 }}>
                         Summary (optional)
                       </div>
-                      <textarea className="textarea" value={touchSummary} onChange={(e) => setTouchSummary(e.target.value)} placeholder="Quick note about what you sent / what happened" />
+                      <textarea
+                        className="textarea"
+                        value={touchSummary}
+                        onChange={(e) => setTouchSummary(e.target.value)}
+                        placeholder="Quick note about what you sent / what happened"
+                      />
                     </div>
 
                     <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
                       <div className="muted small">Outbound touches reset cadence.</div>
                       <div className="row">
-                        <button className="btn" onClick={() => setLoggingFor(null)} disabled={savingTouch}>
+                        <button
+                          className="btn"
+                          onClick={() => setLoggingFor(null)}
+                          disabled={savingTouch}
+                        >
                           Cancel
                         </button>
-                        <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+                        <button
+                          className="btn btnPrimary"
+                          onClick={saveTouch}
+                          disabled={savingTouch}
+                        >
                           {savingTouch ? "Saving…" : "Save"}
                         </button>
                       </div>

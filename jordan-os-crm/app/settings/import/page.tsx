@@ -50,13 +50,9 @@ export default function ImportsPage() {
       setLoading(false);
 
       if (!res.ok) {
-        const baseError =
-          parsed?.error ||
-          rawText ||
-          `Import failed (status ${res.status})`;
+        const baseError = parsed?.error || rawText || `Import failed (status ${res.status})`;
 
-        const details =
-          parsed?.details ? `\n\nDetails:\n${parsed.details}` : "";
+        const details = parsed?.details ? `\n\nDetails:\n${parsed.details}` : "";
 
         setErr(baseError + details);
         return;
@@ -75,7 +71,7 @@ export default function ImportsPage() {
           `skipped=${parsed.skipped}\n` +
           `agentsSkipped=${parsed.agentsSkipped}\n` +
           `allowedAgents=${parsed.allowedAgents}` +
-          (parsed.agentWarning ? `\n\nWarning:\n${parsed.agentWarning}` : "")
+          (parsed.agentWarning ? `\n\nWarning:\n${parsed.agentWarning}` : ""),
       );
     } catch (e: any) {
       setLoading(false);
@@ -85,9 +81,7 @@ export default function ImportsPage() {
 
   return (
     <div style={{ padding: 40, maxWidth: 900 }}>
-      <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>
-        Imports
-      </h1>
+      <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900 }}>Imports</h1>
 
       <div style={{ marginTop: 8, color: "#666" }}>
         Compass CSV import:
@@ -95,8 +89,7 @@ export default function ImportsPage() {
         • Imports all non-agent groups
         <br />
         • Imports ONLY agents listed in your Master Sheet
-        <br />
-        • Appends Compass notes (does not overwrite)
+        <br />• Appends Compass notes (does not overwrite)
       </div>
 
       {(err || msg) && (

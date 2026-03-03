@@ -1,4 +1,10 @@
-export type Channel = "email" | "text" | "call" | "in_person" | "social_dm" | "other";
+export type Channel =
+  | "email"
+  | "text"
+  | "call"
+  | "in_person"
+  | "social_dm"
+  | "other";
 
 export type TouchIntent =
   | "check_in"
@@ -61,7 +67,10 @@ function splitSentences(text: string) {
     .filter(Boolean);
 }
 
-function pickShortestNonFluff(examples: VoiceExample[], maxLen = 240): string[] {
+function pickShortestNonFluff(
+  examples: VoiceExample[],
+  maxLen = 240,
+): string[] {
   return examples
     .map((e) => norm(e.text))
     .filter((t) => t.length >= 20 && t.length <= maxLen)
@@ -85,7 +94,8 @@ function extractOpeners(examples: VoiceExample[]) {
     if (first.length <= 60) openers.push(first);
     // Or if it includes an em dash early
     const dashIdx = first.indexOf("—");
-    if (dashIdx > 0 && dashIdx < 30) openers.push(first.slice(0, dashIdx + 1).trim());
+    if (dashIdx > 0 && dashIdx < 30)
+      openers.push(first.slice(0, dashIdx + 1).trim());
   }
 
   // Dedup while preserving order
@@ -150,8 +160,8 @@ export function buildDraft(args: BuildDraftArgs): string {
     cat === "agent"
       ? `Quick one ${fn} —`
       : cat === "client"
-      ? `${fn} — quick check-in.`
-      : `Quick note ${fn} —`;
+        ? `${fn} — quick check-in.`
+        : `Quick note ${fn} —`;
 
   const openerFromExamples = choose(openers, defaultOpener);
 
@@ -159,8 +169,8 @@ export function buildDraft(args: BuildDraftArgs): string {
     cat === "agent"
       ? "Worth a quick call this week?"
       : cat === "client"
-      ? "Anything you need from me right now?"
-      : "Want to connect this week?";
+        ? "Anything you need from me right now?"
+        : "Want to connect this week?";
 
   const closerFromExamples = choose(closers, defaultCloser);
 
@@ -169,10 +179,10 @@ export function buildDraft(args: BuildDraftArgs): string {
     days == null
       ? ""
       : days >= 60
-      ? "It’s been a minute since we last connected."
-      : days >= 30
-      ? "Been meaning to reach out."
-      : "";
+        ? "It’s been a minute since we last connected."
+        : days >= 30
+          ? "Been meaning to reach out."
+          : "";
 
   // Channel tweak: texts should be shorter
   const isTexty = args.channel === "text" || args.channel === "social_dm";

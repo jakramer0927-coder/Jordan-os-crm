@@ -81,7 +81,7 @@ export default function IntegrationsPage() {
         sheet_url: sheetUrl.trim() ? sheetUrl.trim() : null,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "user_id" }
+      { onConflict: "user_id" },
     );
     setBusy(false);
 
@@ -106,7 +106,7 @@ export default function IntegrationsPage() {
 
     // Show full JSON if you want later; keep concise for now
     setMsg(
-      `Gmail sync complete.\nImported: ${j.imported}\nSkipped: ${j.skipped}\nUnmatched: ${j.unmatched}\nMessagesFetched: ${j.messagesFetched ?? "—"}`
+      `Gmail sync complete.\nImported: ${j.imported}\nSkipped: ${j.skipped}\nUnmatched: ${j.unmatched}\nMessagesFetched: ${j.messagesFetched ?? "—"}`,
     );
   }
 
@@ -147,7 +147,7 @@ export default function IntegrationsPage() {
     }
 
     setMsg(
-      `Voice sync complete.\nScanned: ${j.scanned}\nInserted: ${j.inserted}\nSkipped: ${j.skipped}\nQuery: ${j.usedQuery}`
+      `Voice sync complete.\nScanned: ${j.scanned}\nInserted: ${j.inserted}\nSkipped: ${j.skipped}\nQuery: ${j.usedQuery}`,
     );
   }
 
@@ -165,7 +165,10 @@ export default function IntegrationsPage() {
           <h1 className="h1">Integrations</h1>
           <div className="muted" style={{ marginTop: 8 }}>
             Google connection:{" "}
-            <span className="badge" style={{ borderColor: connected ? "rgba(11,107,42,0.35)" : "rgba(138,0,0,0.35)" }}>
+            <span
+              className="badge"
+              style={{ borderColor: connected ? "rgba(11,107,42,0.35)" : "rgba(138,0,0,0.35)" }}
+            >
               {connected ? "Connected" : "Not connected"}
             </span>
           </div>
@@ -185,8 +188,15 @@ export default function IntegrationsPage() {
       </div>
 
       {(err || msg) && (
-        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
-          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>{err || msg}</div>
+        <div
+          className="card cardPad"
+          style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}
+        >
+          <div
+            style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}
+          >
+            {err || msg}
+          </div>
         </div>
       )}
 
@@ -209,12 +219,22 @@ export default function IntegrationsPage() {
         <div className="stack">
           <label className="field">
             <div className="label">Gmail label names (comma separated)</div>
-            <input className="input" value={gmailLabels} onChange={(e) => setGmailLabels(e.target.value)} placeholder="Jordan OS, CRM Outbound" />
+            <input
+              className="input"
+              value={gmailLabels}
+              onChange={(e) => setGmailLabels(e.target.value)}
+              placeholder="Jordan OS, CRM Outbound"
+            />
           </label>
 
           <label className="field">
             <div className="label">Master Google Sheet URL (one-time import)</div>
-            <input className="input" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." />
+            <input
+              className="input"
+              value={sheetUrl}
+              onChange={(e) => setSheetUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+            />
           </label>
 
           <button className="btn" onClick={saveSettings} disabled={busy}>
@@ -242,7 +262,8 @@ export default function IntegrationsPage() {
         </div>
 
         <div className="muted small" style={{ marginTop: 10 }}>
-          “Voice Examples” are pulled from your Sent mail and used to make the recommended outreach sound like you over time.
+          “Voice Examples” are pulled from your Sent mail and used to make the recommended outreach
+          sound like you over time.
         </div>
       </div>
     </div>

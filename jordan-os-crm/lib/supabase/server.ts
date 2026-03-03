@@ -19,6 +19,6 @@ export async function createSupabaseServerClient() {
           // no-op in server components
         },
       },
-    }
+    },
   );
 }

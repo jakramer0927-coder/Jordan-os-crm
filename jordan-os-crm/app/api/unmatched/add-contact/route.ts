@@ -43,7 +43,8 @@ export async function POST(req: Request) {
     const email = normEmail(body?.email || "");
 
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-    if (!email || !email.includes("@")) return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+    if (!email || !email.includes("@"))
+      return NextResponse.json({ error: "Invalid email" }, { status: 400 });
 
     // 1) Create contact
     const display_name = displayFromEmail(email);
@@ -63,7 +64,10 @@ export async function POST(req: Request) {
       .single();
 
     if (insCErr || !insC) {
-      return NextResponse.json({ error: insCErr?.message || "Failed to create contact" }, { status: 500 });
+      return NextResponse.json(
+        { error: insCErr?.message || "Failed to create contact" },
+        { status: 500 },
+      );
     }
 
     const contactId = String((insC as { id: string }).id);
@@ -77,7 +81,10 @@ export async function POST(req: Request) {
 
     // If it errors due to duplicate, ignore
     if (ceErr && !/duplicate key/i.test(ceErr.message)) {
-      return NextResponse.json({ error: `contact_emails insert failed: ${ceErr.message}` }, { status: 500 });
+      return NextResponse.json(
+        { error: `contact_emails insert failed: ${ceErr.message}` },
+        { status: 500 },
+      );
     }
 
     // 3) Mark unmatched row as auto_created + attach created_contact_id
@@ -91,7 +98,10 @@ export async function POST(req: Request) {
       .eq("email", email);
 
     if (upErr) {
-      return NextResponse.json({ error: `unmatched update failed: ${upErr.message}` }, { status: 500 });
+      return NextResponse.json(
+        { error: `unmatched update failed: ${upErr.message}` },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ ok: true, contact_id: contactId, display_name });

@@ -154,7 +154,12 @@ export default function ContactsPage() {
       {err ? <div className="alert alertError">{err}</div> : null}
 
       <div className="card cardPad">
-        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" />
+        <input
+          className="input"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search contacts…"
+        />
         <div className="muted small" style={{ marginTop: 8 }}>
           Tip: leave blank to see your most recently updated contacts.
         </div>
@@ -163,7 +168,12 @@ export default function ContactsPage() {
       <div className="section" style={{ marginTop: 14 }}>
         <div className="stack">
           {rows.map((c) => (
-            <a key={c.id} className="card cardPad" href={`/contacts/${c.id}`} style={{ textDecoration: "none" }}>
+            <a
+              key={c.id}
+              className="card cardPad"
+              href={`/contacts/${c.id}`}
+              style={{ textDecoration: "none" }}
+            >
               <div className="rowBetween">
                 <div style={{ fontWeight: 900 }}>{c.display_name}</div>
                 <div className="muted small">

@@ -53,14 +53,55 @@ function classifyUnmatched(email: string, subject?: string | null, snippet?: str
   const text = `${subject || ""} ${snippet || ""}`.toLowerCase();
 
   const vendorHints = [
-    "escrow","title","lender","mortgage","loan","underwriting","appraisal","appraiser","inspection","inspector",
-    "staging","stager","contractor","plumber","electric","hvac","roof","pest","termite","photography","photographer",
-    "cleaning","cleaner","moving","mover","insurance","warranty",
+    "escrow",
+    "title",
+    "lender",
+    "mortgage",
+    "loan",
+    "underwriting",
+    "appraisal",
+    "appraiser",
+    "inspection",
+    "inspector",
+    "staging",
+    "stager",
+    "contractor",
+    "plumber",
+    "electric",
+    "hvac",
+    "roof",
+    "pest",
+    "termite",
+    "photography",
+    "photographer",
+    "cleaning",
+    "cleaner",
+    "moving",
+    "mover",
+    "insurance",
+    "warranty",
   ];
 
   const agentHints = [
-    "dre","realtor","real estate","broker","brokerage","listing","offer","open house","showing","mls",
-    "compass","sotheby","coldwell","kw","keller","bhhs","berkshire","douglas elliman","the agency",
+    "dre",
+    "realtor",
+    "real estate",
+    "broker",
+    "brokerage",
+    "listing",
+    "offer",
+    "open house",
+    "showing",
+    "mls",
+    "compass",
+    "sotheby",
+    "coldwell",
+    "kw",
+    "keller",
+    "bhhs",
+    "berkshire",
+    "douglas elliman",
+    "the agency",
   ];
 
   const vendorScore =
@@ -248,15 +289,17 @@ export default function UnmatchedPage() {
         </div>
 
         <div className="row">
-          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>Contacts</a>
-          <button className="btn" onClick={load} disabled={busy}>Refresh</button>
+          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>
+            Contacts
+          </a>
+          <button className="btn" onClick={load} disabled={busy}>
+            Refresh
+          </button>
         </div>
       </div>
 
       {(err || msg) && (
-        <div className={`alert ${err ? "alertError" : "alertOk"}`}>
-          {err || msg}
-        </div>
+        <div className={`alert ${err ? "alertError" : "alertOk"}`}>{err || msg}</div>
       )}
 
       {selectedEmail && (
@@ -284,7 +327,11 @@ export default function UnmatchedPage() {
 
             <div className="field" style={{ minWidth: 360, flex: 1 }}>
               <div className="label">Pick contact</div>
-              <select className="select" value={selectedContactId} onChange={(e) => setSelectedContactId(e.target.value)}>
+              <select
+                className="select"
+                value={selectedContactId}
+                onChange={(e) => setSelectedContactId(e.target.value)}
+              >
                 <option value="">Select a contact…</option>
                 {contactResults.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -296,7 +343,11 @@ export default function UnmatchedPage() {
               </select>
             </div>
 
-            <button className="btn btnPrimary" onClick={() => linkEmail(selectedEmail, selectedContactId)} disabled={busy || !selectedContactId}>
+            <button
+              className="btn btnPrimary"
+              onClick={() => linkEmail(selectedEmail, selectedContactId)}
+              disabled={busy || !selectedContactId}
+            >
               Link
             </button>
 
@@ -315,7 +366,8 @@ export default function UnmatchedPage() {
           </div>
 
           <div className="subtle" style={{ fontSize: 12 }}>
-            Linking will: (1) add this email to <code>contact_emails</code>, (2) mark unmatched as <code>linked</code>.
+            Linking will: (1) add this email to <code>contact_emails</code>, (2) mark unmatched as{" "}
+            <code>linked</code>.
           </div>
         </div>
       )}
@@ -327,7 +379,9 @@ export default function UnmatchedPage() {
             <div key={r.id} className="card cardPad">
               <div className="rowBetween" style={{ alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>{r.email}</div>
+                  <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                    {r.email}
+                  </div>
 
                   <div className="row" style={{ marginTop: 10 }}>
                     <span className="badge">Seen {r.seen_count}</span>
@@ -336,7 +390,9 @@ export default function UnmatchedPage() {
                     <span className="badge">
                       Guess {rec.label} ({Math.round(rec.confidence * 100)}%)
                     </span>
-                    {r.created_contact_id ? <span className="badge">Contact {r.created_contact_id.slice(0, 8)}…</span> : null}
+                    {r.created_contact_id ? (
+                      <span className="badge">Contact {r.created_contact_id.slice(0, 8)}…</span>
+                    ) : null}
                   </div>
 
                   {r.last_subject ? (
@@ -349,7 +405,9 @@ export default function UnmatchedPage() {
                   {r.last_snippet ? (
                     <div style={{ marginTop: 12 }}>
                       <div className="label">Snippet</div>
-                      <div className="subtle" style={{ color: "rgba(18,18,18,.78)" }}>{r.last_snippet}</div>
+                      <div className="subtle" style={{ color: "rgba(18,18,18,.78)" }}>
+                        {r.last_snippet}
+                      </div>
                     </div>
                   ) : null}
 
@@ -363,15 +421,27 @@ export default function UnmatchedPage() {
                 </div>
 
                 <div className="stack" style={{ minWidth: 220 }}>
-                  <button className="btn btnPrimary" onClick={() => setSelectedEmail(r.email)} disabled={busy}>
+                  <button
+                    className="btn btnPrimary"
+                    onClick={() => setSelectedEmail(r.email)}
+                    disabled={busy}
+                  >
                     Link to contact
                   </button>
 
-                  <button className="btn" onClick={() => createContact(r.email)} disabled={busy || !!r.created_contact_id}>
+                  <button
+                    className="btn"
+                    onClick={() => createContact(r.email)}
+                    disabled={busy || !!r.created_contact_id}
+                  >
                     {r.created_contact_id ? "Contact created" : "Create contact"}
                   </button>
 
-                  <button className="btn btnGhost" onClick={() => ignoreEmail(r.email)} disabled={busy}>
+                  <button
+                    className="btn btnGhost"
+                    onClick={() => ignoreEmail(r.email)}
+                    disabled={busy}
+                  >
                     Ignore
                   </button>
                 </div>

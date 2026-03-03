@@ -23,20 +23,20 @@ function extractInsights(messages: { body: string; direction: string }[]) {
   const insights: { kind: string; value: string }[] = [];
   const drafts: { intent: string; draft: string }[] = [];
 
-  const combined = messages.map(m => m.body).join("\n");
+  const combined = messages.map((m) => m.body).join("\n");
 
   // --- Heuristic open loop detection ---
-  const lastOutbound = [...messages].reverse().find(m => m.direction === "outbound");
+  const lastOutbound = [...messages].reverse().find((m) => m.direction === "outbound");
 
   if (lastOutbound && lastOutbound.body.trim().endsWith("?")) {
     insights.push({
       kind: "open_loop",
-      value: `Unanswered question: "${lastOutbound.body.slice(0, 120)}"`
+      value: `Unanswered question: "${lastOutbound.body.slice(0, 120)}"`,
     });
 
     drafts.push({
       intent: "check_in",
-      draft: `Hey — just wanted to circle back on this. Let me know what you ended up deciding.`
+      draft: `Hey — just wanted to circle back on this. Let me know what you ended up deciding.`,
     });
   }
 
@@ -44,12 +44,12 @@ function extractInsights(messages: { body: string; direction: string }[]) {
   if (/bosch|appliance|dishwasher|reno|remodel|costco/i.test(combined)) {
     insights.push({
       kind: "project",
-      value: "Discussed appliances / potential renovation decisions."
+      value: "Discussed appliances / potential renovation decisions.",
     });
 
     drafts.push({
       intent: "value",
-      draft: `If helpful, I can send over a couple solid appliance resources I've seen clients use recently.`
+      draft: `If helpful, I can send over a couple solid appliance resources I've seen clients use recently.`,
     });
   }
 
@@ -81,27 +81,27 @@ export async function POST(req: Request) {
     // 2️⃣ Insert insights
     if (insights.length > 0) {
       await supabaseAdmin.from("contact_insights").insert(
-        insights.map(i => ({
+        insights.map((i) => ({
           user_id: uid,
           contact_id,
           source_thread_id: thread_id,
           kind: i.kind,
           value: i.value,
-        }))
+        })),
       );
     }
 
     // 3️⃣ Insert drafts
     if (drafts.length > 0) {
       await supabaseAdmin.from("contact_drafts").insert(
-        drafts.map(d => ({
+        drafts.map((d) => ({
           user_id: uid,
           contact_id,
           source_thread_id: thread_id,
           channel: "text",
           intent: d.intent,
           draft: d.draft,
-        }))
+        })),
       );
     }
 

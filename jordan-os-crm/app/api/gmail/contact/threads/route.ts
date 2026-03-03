@@ -10,7 +10,10 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+function headerValue(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  name: string,
+): string | undefined {
   if (!headers) return undefined;
   const found = headers.find((h) => (h.name || "").toLowerCase() === name.toLowerCase());
   return found?.value || undefined;
@@ -31,7 +34,11 @@ export async function GET(req: Request) {
       .eq("user_id", uid)
       .single();
 
-    if (!tok?.refresh_token) return NextResponse.json({ error: "Google not connected (missing refresh token)" }, { status: 400 });
+    if (!tok?.refresh_token)
+      return NextResponse.json(
+        { error: "Google not connected (missing refresh token)" },
+        { status: 400 },
+      );
 
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
@@ -91,6 +98,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ email, q, threads: previews });
   } catch (e: any) {
     console.error("GMAIL_CONTACT_THREADS_ERROR", e?.message || e);
-    return NextResponse.json({ error: "Failed to search Gmail threads", details: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to search Gmail threads", details: String(e?.message || e) },
+      { status: 500 },
+    );
   }
 }

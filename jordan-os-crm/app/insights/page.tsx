@@ -151,7 +151,10 @@ export default function InsightsPage() {
 
   const wow = useMemo(() => deltaPct(out7, out7Prev), [out7, out7Prev]);
 
-  const weekdaysElapsed = useMemo(() => weekdaysElapsedThisWeek(new Date()), [wtdOutbound, wtdAgents, wtdReferralAsks]);
+  const weekdaysElapsed = useMemo(
+    () => weekdaysElapsedThisWeek(new Date()),
+    [wtdOutbound, wtdAgents, wtdReferralAsks],
+  );
   const expectedOutboundWTD = useMemo(() => weekdaysElapsed * 5, [weekdaysElapsed]);
   const expectedAgentsWTD = useMemo(() => weekdaysElapsed * 2, [weekdaysElapsed]);
 
@@ -212,17 +215,33 @@ export default function InsightsPage() {
     if (refAsks30 + reviewAsks30 === 0) {
       items.push({
         title: "No referral/review asks tracked (30 days)",
-        detail: "Tag at least 1 touch per week as referral_ask so Jordan OS can coach the behavior.",
+        detail:
+          "Tag at least 1 touch per week as referral_ask so Jordan OS can coach the behavior.",
       });
     }
 
     return items;
-  }, [wow, out7Prev, out7, agents7, aClientsTotal, aClientsDueOrOverdue, aClientsVeryOverdue, refAsks30, reviewAsks30]);
+  }, [
+    wow,
+    out7Prev,
+    out7,
+    agents7,
+    aClientsTotal,
+    aClientsDueOrOverdue,
+    aClientsVeryOverdue,
+    refAsks30,
+    reviewAsks30,
+  ]);
 
   const interventions: Intervention[] = useMemo(() => {
     const list: Intervention[] = [];
 
-    const suggest = (opts: { category?: string; tier?: string; limit?: number; onlyDue?: boolean }) => {
+    const suggest = (opts: {
+      category?: string;
+      tier?: string;
+      limit?: number;
+      onlyDue?: boolean;
+    }) => {
       const limit = opts.limit ?? 3;
       const cat = (opts.category || "").toLowerCase();
       const tier = (opts.tier || "").toUpperCase();
@@ -263,14 +282,20 @@ export default function InsightsPage() {
       return candidates;
     };
 
-    if (aClientsVeryOverdue > 0 || (aClientsTotal > 0 && aClientsDueOrOverdue / aClientsTotal >= 0.15)) {
+    if (
+      aClientsVeryOverdue > 0 ||
+      (aClientsTotal > 0 && aClientsDueOrOverdue / aClientsTotal >= 0.15)
+    ) {
       const pr = aClientsVeryOverdue > 0 ? 100 : 85;
       const suggested = suggest({ category: "client", tier: "A", limit: 5, onlyDue: true });
 
       list.push({
         key: "a_client_risk",
         priority: pr,
-        title: aClientsVeryOverdue > 0 ? "A-Client protection: urgent" : "A-Client protection: tighten cadence",
+        title:
+          aClientsVeryOverdue > 0
+            ? "A-Client protection: urgent"
+            : "A-Client protection: tighten cadence",
         summary:
           aClientsVeryOverdue > 0
             ? `${aClientsVeryOverdue} A-client(s) are >14 days beyond cadence.`
@@ -413,7 +438,10 @@ export default function InsightsPage() {
       setAgents7(0);
       setClients7(0);
     } else {
-      const { data: c7, error: ec7 } = await supabase.from("contacts").select("id, category").in("id", touchedIds7);
+      const { data: c7, error: ec7 } = await supabase
+        .from("contacts")
+        .select("id, category")
+        .in("id", touchedIds7);
       if (ec7) setError((prev) => prev ?? `Contacts (7d categories) error: ${ec7.message}`);
       else {
         const catById = new Map<string, string>();
@@ -451,7 +479,10 @@ export default function InsightsPage() {
       if (ids.length === 0) {
         setWtdAgents(0);
       } else {
-        const { data: cc, error: ecc } = await supabase.from("contacts").select("id, category").in("id", ids);
+        const { data: cc, error: ecc } = await supabase
+          .from("contacts")
+          .select("id, category")
+          .in("id", ids);
         if (ecc) {
           setError((prev) => prev ?? `WTD agent count error: ${ecc.message}`);
         } else {
@@ -491,7 +522,7 @@ export default function InsightsPage() {
     setClientsTotal(clients);
 
     const aClients = cs.filter(
-      (c) => (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A"
+      (c) => (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A",
     );
     setAClientsTotal(aClients.length);
 
@@ -670,12 +701,16 @@ export default function InsightsPage() {
               <div className="rowBetween" style={{ alignItems: "flex-start" }}>
                 <div>
                   <div style={{ fontWeight: 900, fontSize: 16 }}>{iv.title}</div>
-                  <div className="subtle" style={{ marginTop: 6 }}>{iv.summary}</div>
+                  <div className="subtle" style={{ marginTop: 6 }}>
+                    {iv.summary}
+                  </div>
                   <div style={{ marginTop: 8, fontWeight: 800 }}>{iv.target}</div>
                 </div>
                 <div className="subtle" style={{ fontSize: 12, minWidth: 110, textAlign: "right" }}>
                   priority
-                  <div style={{ fontWeight: 900, fontSize: 18, color: "var(--ink)" }}>{iv.priority}</div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: "var(--ink)" }}>
+                    {iv.priority}
+                  </div>
                 </div>
               </div>
 
@@ -685,7 +720,9 @@ export default function InsightsPage() {
                 </div>
 
                 {iv.suggested.length === 0 ? (
-                  <div className="subtle">No suggestions available yet (add more contacts / touches).</div>
+                  <div className="subtle">
+                    No suggestions available yet (add more contacts / touches).
+                  </div>
                 ) : (
                   <div className="stack">
                     {iv.suggested.map((s) => (
@@ -700,10 +737,16 @@ export default function InsightsPage() {
                             </div>
                             <div className="subtle" style={{ marginTop: 6 }}>
                               {s.why}
-                              {typeof s.days_since_outbound === "number" ? ` • ${s.days_since_outbound}d` : ""}
+                              {typeof s.days_since_outbound === "number"
+                                ? ` • ${s.days_since_outbound}d`
+                                : ""}
                             </div>
                           </div>
-                          <a className="btn" href="/morning" style={{ textDecoration: "none", whiteSpace: "nowrap" }}>
+                          <a
+                            className="btn"
+                            href="/morning"
+                            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+                          >
                             Go act →
                           </a>
                         </div>
@@ -720,16 +763,23 @@ export default function InsightsPage() {
       <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Database health</div>
         <div className="subtle" style={{ marginTop: 8 }}>
-          Contacts: <strong>{contactsTotal}</strong> • Clients: <strong>{clientsTotal}</strong> • Agents:{" "}
-          <strong>{agentsTotal}</strong>
+          Contacts: <strong>{contactsTotal}</strong> • Clients: <strong>{clientsTotal}</strong> •
+          Agents: <strong>{agentsTotal}</strong>
         </div>
 
         <div style={{ marginTop: 10 }}>
           <span className="badge">A-Clients: {aClientsTotal}</span>{" "}
           <span className="badge">A-Clients due/overdue: {aClientsDueOrOverdue}</span>{" "}
-          {!loadedHealth ? <span className="subtle" style={{ fontSize: 12 }}>loading…</span> : null}
+          {!loadedHealth ? (
+            <span className="subtle" style={{ fontSize: 12 }}>
+              loading…
+            </span>
+          ) : null}
           {aClientsVeryOverdue > 0 ? (
-            <span className="badge" style={{ borderColor: "rgba(220,20,60,.25)", background: "rgba(220,20,60,.06)" }}>
+            <span
+              className="badge"
+              style={{ borderColor: "rgba(220,20,60,.25)", background: "rgba(220,20,60,.06)" }}
+            >
               {aClientsVeryOverdue} very overdue
             </span>
           ) : null}
@@ -747,7 +797,9 @@ export default function InsightsPage() {
             {warnings.map((w, i) => (
               <div key={i} className="card cardPad">
                 <div style={{ fontWeight: 900 }}>{w.title}</div>
-                <div className="subtle" style={{ marginTop: 6 }}>{w.detail}</div>
+                <div className="subtle" style={{ marginTop: 6 }}>
+                  {w.detail}
+                </div>
               </div>
             ))}
           </div>

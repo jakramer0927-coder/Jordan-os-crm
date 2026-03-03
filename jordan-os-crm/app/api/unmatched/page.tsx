@@ -143,7 +143,16 @@ function looksInternalTeamEmail(email: string) {
   const lp = localPart(email);
 
   const internalDomains = new Set(["smithandberg.com"]);
-  const internalLocalParts = new Set(["team", "admin", "info", "hello", "support", "noreply", "no-reply", "office"]);
+  const internalLocalParts = new Set([
+    "team",
+    "admin",
+    "info",
+    "hello",
+    "support",
+    "noreply",
+    "no-reply",
+    "office",
+  ]);
 
   if (internalDomains.has(d)) return true;
   if (internalLocalParts.has(lp)) return true;
@@ -350,7 +359,9 @@ export default function UnmatchedPage() {
     }
 
     setBusy(false);
-    setMsg(`Ignored ${ok}/${internal.length} internal/team emails${fail ? ` (${fail} failed)` : ""}.`);
+    setMsg(
+      `Ignored ${ok}/${internal.length} internal/team emails${fail ? ` (${fail} failed)` : ""}.`,
+    );
     await load();
   }
 
@@ -363,7 +374,10 @@ export default function UnmatchedPage() {
 
   const visible = useMemo(() => rows.filter((r) => r.status !== "ignored"), [rows]);
 
-  const internalCount = useMemo(() => visible.filter((r) => looksInternalTeamEmail(r.email)).length, [visible]);
+  const internalCount = useMemo(
+    () => visible.filter((r) => looksInternalTeamEmail(r.email)).length,
+    [visible],
+  );
 
   if (!ready) return <div className="page">Loading…</div>;
 
@@ -373,8 +387,11 @@ export default function UnmatchedPage() {
         <div>
           <h1 className="h1">Unmatched</h1>
           <div className="muted" style={{ marginTop: 8 }}>
-            Review Sent recipients not tied to your CRM yet. <span className="badge">{visible.length} items</span>{" "}
-            {internalCount > 0 ? <span className="badge">{internalCount} look internal/team</span> : null}
+            Review Sent recipients not tied to your CRM yet.{" "}
+            <span className="badge">{visible.length} items</span>{" "}
+            {internalCount > 0 ? (
+              <span className="badge">{internalCount} look internal/team</span>
+            ) : null}
           </div>
         </div>
 
@@ -392,8 +409,13 @@ export default function UnmatchedPage() {
       </div>
 
       {(err || msg) && (
-        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
-          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+        <div
+          className="card cardPad"
+          style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}
+        >
+          <div
+            style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}
+          >
             {err || msg}
           </div>
         </div>
@@ -406,13 +428,18 @@ export default function UnmatchedPage() {
         </div>
 
         <div className="row">
-          <button className="btn" onClick={ignoreInternalBatch} disabled={busy || internalCount === 0}>
+          <button
+            className="btn"
+            onClick={ignoreInternalBatch}
+            disabled={busy || internalCount === 0}
+          >
             Ignore internal/team emails ({internalCount})
           </button>
         </div>
 
         <div className="muted small" style={{ marginTop: 10 }}>
-          Tip: “Ignore domain” is available on each row — use it for vendor systems / internal distribution lists.
+          Tip: “Ignore domain” is available on each row — use it for vendor systems / internal
+          distribution lists.
         </div>
       </div>
 
@@ -476,7 +503,8 @@ export default function UnmatchedPage() {
           </div>
 
           <div className="muted small" style={{ marginTop: 10 }}>
-            Linking will: add email → <code>contact_emails</code> and mark unmatched as <code>linked</code>.
+            Linking will: add email → <code>contact_emails</code> and mark unmatched as{" "}
+            <code>linked</code>.
           </div>
         </div>
       )}
@@ -496,22 +524,29 @@ export default function UnmatchedPage() {
             const suggested = internal
               ? "Suggested: ignore (internal/team)"
               : rec.label === "Likely Agent"
-              ? "Suggested: link to existing agent or create an Agent contact"
-              : rec.label === "Likely Vendor"
-              ? "Suggested: create Vendor contact (or ignore system address)"
-              : rec.label === "Likely Client/Lead"
-              ? "Suggested: create Client/Lead contact"
-              : "Suggested: link if it’s a real person; otherwise ignore";
+                ? "Suggested: link to existing agent or create an Agent contact"
+                : rec.label === "Likely Vendor"
+                  ? "Suggested: create Vendor contact (or ignore system address)"
+                  : rec.label === "Likely Client/Lead"
+                    ? "Suggested: create Client/Lead contact"
+                    : "Suggested: link if it’s a real person; otherwise ignore";
 
             return (
               <div key={r.id} className="card cardPad">
-                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                <div
+                  className="row"
+                  style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}
+                >
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>{r.email}</div>
+                    <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                      {r.email}
+                    </div>
 
                     <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
                       <span className="badge">Seen {r.seen_count}</span>
-                      <span className="badge">Last {new Date(r.last_seen_at).toLocaleString()}</span>
+                      <span className="badge">
+                        Last {new Date(r.last_seen_at).toLocaleString()}
+                      </span>
                       <span className="badge">Status {r.status}</span>
                       <span className="badge">
                         Guess {rec.label} ({Math.round(rec.confidence * 100)}%)
@@ -546,11 +581,19 @@ export default function UnmatchedPage() {
                   </div>
 
                   <div style={{ display: "grid", gap: 8, minWidth: 240 }}>
-                    <button className="btn" onClick={() => setSelectedEmail(r.email)} disabled={busy}>
+                    <button
+                      className="btn"
+                      onClick={() => setSelectedEmail(r.email)}
+                      disabled={busy}
+                    >
                       Link to contact
                     </button>
 
-                    <button className="btn" onClick={() => addContact(r.email)} disabled={busy || !!r.created_contact_id}>
+                    <button
+                      className="btn"
+                      onClick={() => addContact(r.email)}
+                      disabled={busy || !!r.created_contact_id}
+                    >
                       {r.created_contact_id ? "Contact created" : "Create contact"}
                     </button>
 

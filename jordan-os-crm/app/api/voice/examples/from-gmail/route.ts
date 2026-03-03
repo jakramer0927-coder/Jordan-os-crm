@@ -45,7 +45,10 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+function headerValue(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  name: string,
+): string | undefined {
   if (!headers) return undefined;
   const found = headers.find((h) => (h.name || "").toLowerCase() === name.toLowerCase());
   return found?.value || undefined;
@@ -89,7 +92,8 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
 
     const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ ok: false, error: "Invalid uid" }, { status: 400 });
+    if (!isUuid(uid))
+      return NextResponse.json({ ok: false, error: "Invalid uid" }, { status: 400 });
 
     // Options
     const days = clamp(parseIntOr(url.searchParams.get("days"), 365), 1, 3650);
@@ -98,12 +102,20 @@ export async function POST(req: Request) {
     const minLen = clamp(parseIntOr(url.searchParams.get("minLen"), 140), 0, 2000);
 
     // Sanity env checks (common 500 causes)
-    if (!process.env.SUPABASE_URL) return NextResponse.json({ ok: false, error: "Missing SUPABASE_URL" }, { status: 500 });
+    if (!process.env.SUPABASE_URL)
+      return NextResponse.json({ ok: false, error: "Missing SUPABASE_URL" }, { status: 500 });
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY)
-      return NextResponse.json({ ok: false, error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
-    if (!process.env.GOOGLE_CLIENT_ID) return NextResponse.json({ ok: false, error: "Missing GOOGLE_CLIENT_ID" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "Missing SUPABASE_SERVICE_ROLE_KEY" },
+        { status: 500 },
+      );
+    if (!process.env.GOOGLE_CLIENT_ID)
+      return NextResponse.json({ ok: false, error: "Missing GOOGLE_CLIENT_ID" }, { status: 500 });
     if (!process.env.GOOGLE_CLIENT_SECRET)
-      return NextResponse.json({ ok: false, error: "Missing GOOGLE_CLIENT_SECRET" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "Missing GOOGLE_CLIENT_SECRET" },
+        { status: 500 },
+      );
 
     // Load tokens
     const { data: tok, error: tokErr } = await supabaseAdmin
@@ -112,11 +124,15 @@ export async function POST(req: Request) {
       .eq("user_id", uid)
       .single();
 
-    if (tokErr || !tok) return NextResponse.json({ ok: false, error: "Google not connected" }, { status: 400 });
+    if (tokErr || !tok)
+      return NextResponse.json({ ok: false, error: "Google not connected" }, { status: 400 });
 
     const tokenRow = tok as GoogleTokenRow;
     if (!tokenRow.refresh_token) {
-      return NextResponse.json({ ok: false, error: "Missing refresh token (reconnect Google)" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: "Missing refresh token (reconnect Google)" },
+        { status: 400 },
+      );
     }
 
     // Load settings for optional label restriction
@@ -152,7 +168,7 @@ export async function POST(req: Request) {
       if (labelNames.length === 0) {
         return NextResponse.json(
           { ok: false, error: "requireLabels=true but no Gmail labels configured in settings." },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -173,8 +189,11 @@ export async function POST(req: Request) {
 
       if (usedLabelIds.length === 0) {
         return NextResponse.json(
-          { ok: false, error: `None of the configured labels were found in Gmail. Configured: ${labelNames.join(", ")}` },
-          { status: 400 }
+          {
+            ok: false,
+            error: `None of the configured labels were found in Gmail. Configured: ${labelNames.join(", ")}`,
+          },
+          { status: 400 },
         );
       }
     }
@@ -230,7 +249,9 @@ export async function POST(req: Request) {
         const snippet = cleanText(full.data.snippet || "");
 
         const internalDateMs = Number(full.data.internalDate || 0);
-        const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
+        const occurredAt = internalDateMs
+          ? new Date(internalDateMs).toISOString()
+          : new Date().toISOString();
 
         // Build text sample (keep it simple for now)
         // We want something that's clearly "your voice": snippet + subject is usually enough
@@ -331,7 +352,7 @@ export async function POST(req: Request) {
         details: se,
         details_message: se.message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

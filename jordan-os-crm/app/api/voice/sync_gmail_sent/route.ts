@@ -19,7 +19,10 @@ function safeErr(e: unknown) {
   };
 }
 
-function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+function headerValue(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  name: string,
+): string | undefined {
   if (!headers) return undefined;
   const found = headers.find((h) => (h.name || "").toLowerCase() === name.toLowerCase());
   return found?.value || undefined;
@@ -42,7 +45,9 @@ function extractTextFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
   };
   walk(payload);
 
-  const plain = parts.find((p) => (p.mimeType || "").toLowerCase() === "text/plain" && p.body?.data);
+  const plain = parts.find(
+    (p) => (p.mimeType || "").toLowerCase() === "text/plain" && p.body?.data,
+  );
   if (plain?.body?.data) return b64urlToUtf8(plain.body.data);
 
   const html = parts.find((p) => (p.mimeType || "").toLowerCase() === "text/html" && p.body?.data);
@@ -75,9 +80,10 @@ export async function POST(req: Request) {
     const uid = url.searchParams.get("uid") || "";
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({}) as any);
     const days = typeof body?.days === "number" ? Math.max(7, Math.min(3650, body.days)) : 365;
-    const maxMessages = typeof body?.maxMessages === "number" ? Math.max(50, Math.min(2000, body.maxMessages)) : 600;
+    const maxMessages =
+      typeof body?.maxMessages === "number" ? Math.max(50, Math.min(2000, body.maxMessages)) : 600;
 
     const { data: tok, error: tokErr } = await supabaseAdmin
       .from("google_tokens")
@@ -85,10 +91,15 @@ export async function POST(req: Request) {
       .eq("user_id", uid)
       .single();
 
-    if (tokErr || !tok) return NextResponse.json({ error: "Google not connected" }, { status: 400 });
+    if (tokErr || !tok)
+      return NextResponse.json({ error: "Google not connected" }, { status: 400 });
 
     const tokenRow = tok as GoogleTokenRow;
-    if (!tokenRow.refresh_token) return NextResponse.json({ error: "Missing refresh token (reconnect Google)" }, { status: 400 });
+    if (!tokenRow.refresh_token)
+      return NextResponse.json(
+        { error: "Missing refresh token (reconnect Google)" },
+        { status: 400 },
+      );
 
     const { data: settings, error: setErr } = await supabaseAdmin
       .from("user_settings")

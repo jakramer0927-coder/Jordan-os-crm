@@ -82,7 +82,8 @@ async function getAgentAllowListFromMasterSheet(uid: string): Promise<Set<string
   if (sErr) throw new Error(sErr.message);
 
   const sheetUrl = (settings?.sheet_url || "").trim();
-  if (!sheetUrl) throw new Error("Missing sheet_url in user_settings. Save it on Integrations page first.");
+  if (!sheetUrl)
+    throw new Error("Missing sheet_url in user_settings. Save it on Integrations page first.");
 
   const m = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const spreadsheetId = m ? m[1] : null;
@@ -124,13 +125,17 @@ async function getAgentAllowListFromMasterSheet(uid: string): Promise<Set<string
   const idxCat = header.findIndex((h) => h.toLowerCase() === "category (client/agent/developer)");
 
   if (idxName === -1 || idxCat === -1) {
-    throw new Error("Master sheet is missing required columns: Name and Category (Client/Agent/Developer).");
+    throw new Error(
+      "Master sheet is missing required columns: Name and Category (Client/Agent/Developer).",
+    );
   }
 
   const allow = new Set<string>();
   for (const r of rows.slice(1)) {
     const name = normName(r[idxName]);
-    const cat = String(r[idxCat] || "").trim().toLowerCase();
+    const cat = String(r[idxCat] || "")
+      .trim()
+      .toLowerCase();
     if (name && cat === "agent") allow.add(name.toLowerCase());
   }
   return allow;
@@ -180,7 +185,12 @@ async function insertContactEmail(contactId: string, email: string, isPrimary: b
   });
 
   // ignore duplicates
-  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) {
+  if (
+    error &&
+    !String(error.message || "")
+      .toLowerCase()
+      .includes("duplicate")
+  ) {
     throw error;
   }
 
@@ -195,7 +205,8 @@ export async function POST(req: Request) {
 
     const form = await req.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ error: "Missing file" }, { status: 400 });
+    if (!(file instanceof File))
+      return NextResponse.json({ error: "Missing file" }, { status: 400 });
 
     const csvText = await file.text();
 
@@ -209,7 +220,13 @@ export async function POST(req: Request) {
 
     const allowedAgents = await getAgentAllowListFromMasterSheet(uid);
 
-    const includeGroups = new Set(["Active clients", "Past clients", "Leads", "Sphere of influence", "Vendors"]);
+    const includeGroups = new Set([
+      "Active clients",
+      "Past clients",
+      "Leads",
+      "Sphere of influence",
+      "Vendors",
+    ]);
 
     let scanned = 0;
     let imported = 0;
@@ -222,7 +239,9 @@ export async function POST(req: Request) {
     for (const row of records) {
       scanned += 1;
 
-      const fullName = normName(row["Name"] || `${row["First Name"] || ""} ${row["Last Name"] || ""}`);
+      const fullName = normName(
+        row["Name"] || `${row["First Name"] || ""} ${row["Last Name"] || ""}`,
+      );
       if (!fullName) {
         skipped += 1;
         continue;
@@ -269,15 +288,17 @@ export async function POST(req: Request) {
           row["Mobile Phone"],
           row["Primary Work Phone"],
           row["Work Phone"],
-          row["Phone"]
-        )
+          row["Phone"],
+        ),
       );
 
       const company = pickFirstStr(row["Company"]);
       const address_primary = buildPrimaryAddress(row);
 
       const compassNotesRaw = [
-        row["Key Background Info"] ? `Key Background Info: ${String(row["Key Background Info"]).trim()}` : "",
+        row["Key Background Info"]
+          ? `Key Background Info: ${String(row["Key Background Info"]).trim()}`
+          : "",
         row["Tags"] ? `Tags: ${String(row["Tags"]).trim()}` : "",
         row["Status"] ? `Compass Status: ${String(row["Status"]).trim()}` : "",
       ]
@@ -294,14 +315,19 @@ export async function POST(req: Request) {
 
       const upsertEmails = async (contactId: string) => {
         for (const e of allEmails) {
-          const didInsert = await insertContactEmail(contactId, e, !!primaryEmail && e === primaryEmail);
+          const didInsert = await insertContactEmail(
+            contactId,
+            e,
+            !!primaryEmail && e === primaryEmail,
+          );
           if (didInsert) emailsInserted += 1;
         }
       };
 
       if (existing?.id) {
-        const nextNotes =
-          compassNotesRaw.trim() ? appendNotes(existing.notes ?? null, compassNotesRaw) : (existing.notes ?? null);
+        const nextNotes = compassNotesRaw.trim()
+          ? appendNotes(existing.notes ?? null, compassNotesRaw)
+          : (existing.notes ?? null);
 
         const { error: updErr } = await supabaseAdmin
           .from("contacts")
@@ -368,6 +394,9 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.error("COMPASS_IMPORT_ERROR", e?.message || e);
-    return NextResponse.json({ error: "Compass CSV import failed", details: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { error: "Compass CSV import failed", details: String(e?.message || e) },
+      { status: 500 },
+    );
   }
 }

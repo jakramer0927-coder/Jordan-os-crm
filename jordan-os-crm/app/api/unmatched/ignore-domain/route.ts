@@ -32,7 +32,8 @@ export async function POST(req: Request) {
     const domain = normDomain(body?.domain || "");
 
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-    if (!domain || !domain.includes(".")) return NextResponse.json({ error: "Invalid domain" }, { status: 400 });
+    if (!domain || !domain.includes("."))
+      return NextResponse.json({ error: "Invalid domain" }, { status: 400 });
 
     // email ilike "%@domain"
     const pattern = `%@${domain}`;

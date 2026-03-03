@@ -25,7 +25,10 @@ function parseEmails(headerVal?: string): string[] {
   return (matches ?? []).map((e) => e.toLowerCase().trim());
 }
 
-function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+function headerValue(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  name: string,
+): string | undefined {
   if (!headers) return undefined;
   const found = headers.find((h) => (h.name || "").toLowerCase() === name.toLowerCase());
   return found?.value || undefined;
@@ -67,11 +70,15 @@ export async function GET(req: Request) {
       .eq("user_id", uid)
       .single();
 
-    if (tokErr || !tok) return NextResponse.json({ error: "Google not connected" }, { status: 400 });
+    if (tokErr || !tok)
+      return NextResponse.json({ error: "Google not connected" }, { status: 400 });
 
     const tokenRow = tok as GoogleTokenRow;
     if (!tokenRow.refresh_token) {
-      return NextResponse.json({ error: "Missing refresh token (reconnect Google)" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing refresh token (reconnect Google)" },
+        { status: 400 },
+      );
     }
 
     const { data: settings, error: setErr } = await supabaseAdmin
@@ -86,7 +93,10 @@ export async function GET(req: Request) {
 
     const labelNames = splitCsv(sRow?.gmail_label_names);
     if (labelNames.length === 0) {
-      return NextResponse.json({ error: "No Gmail labels configured in settings." }, { status: 400 });
+      return NextResponse.json(
+        { error: "No Gmail labels configured in settings." },
+        { status: 400 },
+      );
     }
 
     const ignoreDomains = new Set(splitCsv(sRow?.gmail_ignore_domains));
@@ -118,8 +128,10 @@ export async function GET(req: Request) {
 
     if (labelIds.length === 0) {
       return NextResponse.json(
-        { error: `None of the configured labels were found in Gmail. Configured: ${labelNames.join(", ")}` },
-        { status: 400 }
+        {
+          error: `None of the configured labels were found in Gmail. Configured: ${labelNames.join(", ")}`,
+        },
+        { status: 400 },
       );
     }
 
@@ -157,15 +169,14 @@ export async function GET(req: Request) {
     const maxMessages = 400;
 
     while (messagesFetched < maxMessages) {
-      const listRes: gmail_v1.Schema$ListMessagesResponse =
-        (
-          await gmail.users.messages.list({
-            userId: "me",
-            labelIds: ["SENT"], // SENT only; label filter happens in query-like logic below
-            maxResults: Math.min(100, maxMessages - messagesFetched),
-            pageToken,
-          })
-        ).data;
+      const listRes: gmail_v1.Schema$ListMessagesResponse = (
+        await gmail.users.messages.list({
+          userId: "me",
+          labelIds: ["SENT"], // SENT only; label filter happens in query-like logic below
+          maxResults: Math.min(100, maxMessages - messagesFetched),
+          pageToken,
+        })
+      ).data;
 
       const msgs = listRes.messages ?? [];
       pageToken = listRes.nextPageToken ?? undefined;
@@ -226,7 +237,9 @@ export async function GET(req: Request) {
 
         const subject = headerValue(headers, "Subject") || "";
         const internalDateMs = Number(full.data.internalDate || 0);
-        const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
+        const occurredAt = internalDateMs
+          ? new Date(internalDateMs).toISOString()
+          : new Date().toISOString();
         const snippet = (full.data.snippet || "").trim();
 
         const matchedEmail = allRecipients.find((e) => contactIdByEmail.has(e));
@@ -248,7 +261,9 @@ export async function GET(req: Request) {
         }
 
         const threadId = full.data.threadId || "";
-        const link: string | null = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
+        const link: string | null = threadId
+          ? `https://mail.google.com/mail/u/0/#all/${threadId}`
+          : null;
 
         const messageId = m.id;
         const summary = (snippet || subject).trim() || null;
@@ -323,7 +338,7 @@ export async function GET(req: Request) {
     console.error("GMAIL_SYNC_CRASH", se);
     return NextResponse.json(
       { error: "Gmail sync crashed", details: se, details_json: JSON.stringify(se) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

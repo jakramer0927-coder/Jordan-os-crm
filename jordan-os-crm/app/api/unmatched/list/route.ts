@@ -48,7 +48,7 @@ export async function GET(req: Request) {
     let q = supabaseAdmin
       .from("unmatched_recipients")
       .select(
-        "id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id"
+        "id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id",
       )
       .order("last_seen_at", { ascending: false })
       .limit(limit);

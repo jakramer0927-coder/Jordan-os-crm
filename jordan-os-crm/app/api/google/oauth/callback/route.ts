@@ -10,7 +10,9 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
 
   if (!code || !state) {
-    return NextResponse.redirect(`${process.env.APP_BASE_URL}/settings/integrations?error=missing_code_or_state`);
+    return NextResponse.redirect(
+      `${process.env.APP_BASE_URL}/settings/integrations?error=missing_code_or_state`,
+    );
   }
 
   const { data: st, error: stErr } = await supabaseAdmin
@@ -20,7 +22,9 @@ export async function GET(req: Request) {
     .single();
 
   if (stErr || !st?.user_id) {
-    return NextResponse.redirect(`${process.env.APP_BASE_URL}/settings/integrations?error=bad_state`);
+    return NextResponse.redirect(
+      `${process.env.APP_BASE_URL}/settings/integrations?error=bad_state`,
+    );
   }
 
   const oauth2 = getGoogleOAuthClient();
@@ -37,14 +41,16 @@ export async function GET(req: Request) {
       expiry_date: tokens.expiry_date ?? null,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "user_id" }
+    { onConflict: "user_id" },
   );
 
   // Clean up state
   await supabaseAdmin.from("google_oauth_states").delete().eq("state", state);
 
   if (upErr) {
-    return NextResponse.redirect(`${process.env.APP_BASE_URL}/settings/integrations?error=token_save_failed`);
+    return NextResponse.redirect(
+      `${process.env.APP_BASE_URL}/settings/integrations?error=token_save_failed`,
+    );
   }
 
   return NextResponse.redirect(`${process.env.APP_BASE_URL}/settings/integrations?connected=1`);

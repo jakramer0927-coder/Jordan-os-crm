@@ -43,7 +43,7 @@ export async function GET(req: Request) {
           res.cookies.set({ name, value: "", ...options, maxAge: 0 });
         },
       },
-    }
+    },
   );
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);

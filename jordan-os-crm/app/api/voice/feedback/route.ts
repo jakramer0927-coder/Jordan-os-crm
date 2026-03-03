@@ -19,7 +19,8 @@ export async function POST(req: Request) {
     if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     const contact_id = body?.contact_id ? safeStr(body.contact_id, 100) : null;
-    if (contact_id && !isUuid(contact_id)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
+    if (contact_id && !isUuid(contact_id))
+      return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
     const channel = safeStr(body?.channel, 30);
     const intent = body?.intent ? safeStr(body.intent, 40) : null;
@@ -53,6 +54,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e || "Unknown error") }, { status: 500 });
+    return NextResponse.json(
+      { error: String(e?.message || e || "Unknown error") },
+      { status: 500 },
+    );
   }
 }

@@ -66,10 +66,15 @@ export async function GET(req: Request) {
     if (setErr) return NextResponse.json({ error: setErr.message }, { status: 500 });
 
     const sheetUrl = (settings?.sheet_url || "").trim();
-    if (!sheetUrl) return NextResponse.json({ error: "No sheet_url saved in settings." }, { status: 400 });
+    if (!sheetUrl)
+      return NextResponse.json({ error: "No sheet_url saved in settings." }, { status: 400 });
 
     const spreadsheetId = extractSpreadsheetId(sheetUrl);
-    if (!spreadsheetId) return NextResponse.json({ error: "Could not parse spreadsheet ID from sheet_url." }, { status: 400 });
+    if (!spreadsheetId)
+      return NextResponse.json(
+        { error: "Could not parse spreadsheet ID from sheet_url." },
+        { status: 400 },
+      );
 
     // Get Google tokens
     const { data: tok, error: tokErr } = await supabaseAdmin
@@ -78,8 +83,13 @@ export async function GET(req: Request) {
       .eq("user_id", uid)
       .single();
 
-    if (tokErr || !tok) return NextResponse.json({ error: "Google not connected" }, { status: 400 });
-    if (!tok.refresh_token) return NextResponse.json({ error: "Missing refresh token (reconnect Google)" }, { status: 400 });
+    if (tokErr || !tok)
+      return NextResponse.json({ error: "Google not connected" }, { status: 400 });
+    if (!tok.refresh_token)
+      return NextResponse.json(
+        { error: "Missing refresh token (reconnect Google)" },
+        { status: 400 },
+      );
 
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
@@ -93,7 +103,8 @@ export async function GET(req: Request) {
     // Read first tab
     const meta = await sheets.spreadsheets.get({ spreadsheetId });
     const firstSheetTitle = meta.data.sheets?.[0]?.properties?.title;
-    if (!firstSheetTitle) return NextResponse.json({ error: "Spreadsheet has no sheets/tabs." }, { status: 400 });
+    if (!firstSheetTitle)
+      return NextResponse.json({ error: "Spreadsheet has no sheets/tabs." }, { status: 400 });
 
     const range = `'${firstSheetTitle}'!A:Z`;
     const valuesRes = await sheets.spreadsheets.values.get({
@@ -104,7 +115,8 @@ export async function GET(req: Request) {
     });
 
     const rows = (valuesRes.data.values || []) as any[][];
-    if (rows.length < 2) return NextResponse.json({ error: "Sheet has no data rows." }, { status: 400 });
+    if (rows.length < 2)
+      return NextResponse.json({ error: "Sheet has no data rows." }, { status: 400 });
 
     const header = rows[0].map((h) => safeStr(h));
     const dataRows = rows.slice(1);
@@ -117,9 +129,15 @@ export async function GET(req: Request) {
     const iTier = idx("Tier (A/B/C)");
     const iLastContact = idx("Last Contact Date");
 
-    if (iName === -1) return NextResponse.json({ error: "Missing required column: Name" }, { status: 400 });
-    if (iCategory === -1) return NextResponse.json({ error: "Missing required column: Category (Client/Agent/Developer)" }, { status: 400 });
-    if (iTier === -1) return NextResponse.json({ error: "Missing required column: Tier (A/B/C)" }, { status: 400 });
+    if (iName === -1)
+      return NextResponse.json({ error: "Missing required column: Name" }, { status: 400 });
+    if (iCategory === -1)
+      return NextResponse.json(
+        { error: "Missing required column: Category (Client/Agent/Developer)" },
+        { status: 400 },
+      );
+    if (iTier === -1)
+      return NextResponse.json({ error: "Missing required column: Tier (A/B/C)" }, { status: 400 });
 
     let upserted = 0;
     let skipped = 0;
@@ -249,6 +267,9 @@ export async function GET(req: Request) {
     });
   } catch (e: any) {
     console.error("SHEETS_IMPORT_ERROR", e?.message || e);
-    return NextResponse.json({ error: "Sheets import failed", details: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { error: "Sheets import failed", details: String(e?.message || e) },
+      { status: 500 },
+    );
   }
 }

@@ -9,7 +9,10 @@ function isUuid(v: string): boolean {
 
 function displayNameFromEmail(email: string): string {
   const local = email.split("@")[0] || email;
-  const cleaned = local.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+  const cleaned = local
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const titled = cleaned
     .split(" ")
     .filter(Boolean)
@@ -26,13 +29,21 @@ async function insertContactEmail(contactId: string, email: string, isPrimary: b
     source: "unmatched_create",
   });
 
-  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) throw error;
+  if (
+    error &&
+    !String(error.message || "")
+      .toLowerCase()
+      .includes("duplicate")
+  )
+    throw error;
 }
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const uid = String(body.uid || "");
-  const email = String(body.email || "").toLowerCase().trim();
+  const email = String(body.email || "")
+    .toLowerCase()
+    .trim();
 
   if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
   if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
@@ -53,7 +64,8 @@ export async function POST(req: Request) {
     .select("id")
     .single();
 
-  if (cErr || !created?.id) return NextResponse.json({ error: cErr?.message || "Create failed" }, { status: 500 });
+  if (cErr || !created?.id)
+    return NextResponse.json({ error: cErr?.message || "Create failed" }, { status: 500 });
 
   await insertContactEmail(created.id, email, true);
 

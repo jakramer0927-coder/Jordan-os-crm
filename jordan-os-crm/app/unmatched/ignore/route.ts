@@ -10,7 +10,9 @@ function isUuid(v: string): boolean {
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const uid = String(body.uid || "");
-  const email = String(body.email || "").toLowerCase().trim();
+  const email = String(body.email || "")
+    .toLowerCase()
+    .trim();
 
   if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
   if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
