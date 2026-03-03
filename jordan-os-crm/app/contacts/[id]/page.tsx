@@ -106,13 +106,8 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       </div>
 
       {(err || msg) && (
-        <div
-          className="card cardPad"
-          style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}
-        >
-          <div
-            style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}
-          >
+        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
             {err || msg}
           </div>
         </div>
@@ -143,8 +138,8 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
         </div>
 
         <div className="muted small" style={{ marginTop: 10 }}>
-          Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing
-          isn’t perfect, the raw thread is saved.
+          Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
+          thread is saved.
         </div>
       </div>
     </div>
@@ -177,6 +172,8 @@ export default function ContactDetailPage() {
   const [logSource, setLogSource] = useState("manual");
   const [logLink, setLogLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
+
+  const [deleting, setDeleting] = useState(false);
 
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
@@ -221,9 +218,7 @@ export default function ContactDetailPage() {
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
-      .select(
-        "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
-      )
+      .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
       .eq("contact_id", id)
       .order("occurred_at", { ascending: false })
       .limit(500);
@@ -279,9 +274,7 @@ export default function ContactDetailPage() {
     setSavingTouch(true);
     setError(null);
 
-    const occurred_at = logOccurredAt
-      ? new Date(logOccurredAt).toISOString()
-      : new Date().toISOString();
+    const occurred_at = logOccurredAt ? new Date(logOccurredAt).toISOString() : new Date().toISOString();
 
     const { error } = await supabase.from("touches").insert({
       contact_id: contact.id,
@@ -303,6 +296,40 @@ export default function ContactDetailPage() {
 
     setLogOpen(false);
     await fetchAll();
+  }
+
+  async function deleteContact() {
+    if (!contact) return;
+
+    const ok = window.confirm(`Delete contact "${contact.display_name}"? This cannot be undone.`);
+    if (!ok) return;
+
+    setDeleting(true);
+    setError(null);
+
+    const { data } = await supabase.auth.getSession();
+    const uid = data.session?.user.id ?? null;
+
+    if (!uid) {
+      window.location.href = "/login";
+      return;
+    }
+
+    const res = await fetch("/api/contacts/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, contact_id: contact.id }),
+    });
+
+    const j = await res.json();
+    setDeleting(false);
+
+    if (!res.ok) {
+      setError(j?.error || "Delete failed");
+      return;
+    }
+
+    window.location.href = "/contacts";
   }
 
   useEffect(() => {
@@ -386,6 +413,9 @@ export default function ContactDetailPage() {
           <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
             {editing ? "Close edit" : "Edit"}
           </button>
+          <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
           <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
             Log touch
           </button>
@@ -406,11 +436,7 @@ export default function ContactDetailPage() {
 
             <div className="field" style={{ width: 220, minWidth: 180 }}>
               <div className="label">Category</div>
-              <select
-                className="select"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
+              <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
                 <option>Client</option>
                 <option>Agent</option>
                 <option>Developer</option>
@@ -421,11 +447,7 @@ export default function ContactDetailPage() {
 
             <div className="field" style={{ width: 140 }}>
               <div className="label">Tier</div>
-              <select
-                className="select"
-                value={tier}
-                onChange={(e) => setTier(e.target.value as any)}
-              >
+              <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
                 <option value="A">A</option>
                 <option value="B">B</option>
                 <option value="C">C</option>
@@ -444,11 +466,7 @@ export default function ContactDetailPage() {
           </div>
 
           <div className="rowResponsive">
-            <button
-              className="btn btnPrimary btnFullMobile"
-              onClick={saveContact}
-              disabled={savingContact}
-            >
+            <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
             <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
@@ -458,7 +476,10 @@ export default function ContactDetailPage() {
         </div>
       )}
 
-      {/* Text upload panel */}
+      {/* Jordan Voice FIRST */}
+      <VoiceDraftPanel contactId={contact.id} />
+
+      {/* Text upload NEXT */}
       <TextThreadUploadPanel contactId={contact.id} />
 
       <div className="card cardPad stack">
@@ -478,9 +499,7 @@ export default function ContactDetailPage() {
                   <div className="subtle">{new Date(t.occurred_at).toLocaleString()}</div>
                 </div>
 
-                {t.summary ? (
-                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
-                ) : null}
+                {t.summary ? <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div> : null}
 
                 <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
                   {t.source ? `source: ${t.source}` : ""}
@@ -530,11 +549,7 @@ export default function ContactDetailPage() {
             <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
               <div className="field" style={{ width: 160, minWidth: 160 }}>
                 <div className="label">Direction</div>
-                <select
-                  className="select"
-                  value={logDirection}
-                  onChange={(e) => setLogDirection(e.target.value as any)}
-                >
+                <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
                   <option value="outbound">outbound</option>
                   <option value="inbound">inbound</option>
                 </select>
@@ -542,11 +557,7 @@ export default function ContactDetailPage() {
 
               <div className="field" style={{ width: 160, minWidth: 160 }}>
                 <div className="label">Channel</div>
-                <select
-                  className="select"
-                  value={logChannel}
-                  onChange={(e) => setLogChannel(e.target.value as any)}
-                >
+                <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
                   <option value="email">email</option>
                   <option value="text">text</option>
                   <option value="call">call</option>
@@ -558,11 +569,7 @@ export default function ContactDetailPage() {
 
               <div className="field" style={{ width: 220, minWidth: 220 }}>
                 <div className="label">Intent</div>
-                <select
-                  className="select"
-                  value={logIntent}
-                  onChange={(e) => setLogIntent(e.target.value as any)}
-                >
+                <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
                   <option value="check_in">check_in</option>
                   <option value="referral_ask">referral_ask</option>
                   <option value="review_ask">review_ask</option>
@@ -615,11 +622,7 @@ export default function ContactDetailPage() {
             </div>
 
             <div className="rowResponsive" style={{ marginTop: 12 }}>
-              <button
-                className="btn btnPrimary btnFullMobile"
-                onClick={saveTouch}
-                disabled={savingTouch}
-              >
+              <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
                 {savingTouch ? "Saving…" : "Save touch"}
               </button>
               <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
