@@ -13,23 +13,25 @@ export async function GET(req: Request) {
   const q = (url.searchParams.get("q") || "").trim();
 
   if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-  if (!q) return NextResponse.json({ results: [] }, { status: 200 });
+  if (!q) return NextResponse.json({ results: [] });
 
-  // keep it snappy
-  const limit = Math.min(25, Math.max(5, Number(url.searchParams.get("limit") || 15)));
-
-  // Search across multiple fields (display_name, email, company)
-  // IMPORTANT: scope to user_id
-  const term = `%${q}%`;
+  // tiny guard to avoid hammering DB on 1-char searches
+  if (q.length < 2) return NextResponse.json({ results: [] });
 
   const { data, error } = await supabaseAdmin
     .from("contacts")
     .select("id, display_name, category, tier, email")
     .eq("user_id", uid)
-    .or(`display_name.ilike.${term},email.ilike.${term},company.ilike.${term}`)
-    .order("display_name", { ascending: true })
-    .limit(limit);
+    .or(
+      [
+        `display_name.ilike.%${q}%`,
+        `email.ilike.%${q}%`,
+        `company.ilike.%${q}%`,
+      ].join(",")
+    )
+    .order("updated_at", { ascending: false })
+    .limit(25);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ results: data ?? [] }, { status: 200 });
+  return NextResponse.json({ results: data ?? [] });
 }
