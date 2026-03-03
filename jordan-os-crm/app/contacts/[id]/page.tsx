@@ -21,6 +21,7 @@ type Contact = {
   tier: string | null;
   client_type: string | null;
   created_at: string;
+  user_id?: string; // optional in case you add it to selects later
 };
 
 type Touch = {
@@ -39,6 +40,29 @@ function prettyCategory(c: string) {
   const s = (c || "").trim();
   if (!s) return "Other";
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function fmtDT(v: string) {
+  try {
+    return new Date(v).toLocaleString();
+  } catch {
+    return v;
+  }
+}
+
+function dirPill(direction: Touch["direction"]) {
+  return direction === "outbound" ? "Outbound" : "Inbound";
+}
+
+function channelLabel(c: Touch["channel"]) {
+  switch (c) {
+    case "in_person":
+      return "In person";
+    case "social_dm":
+      return "Social DM";
+    default:
+      return c;
+  }
 }
 
 function TextThreadUploadPanel({ contactId }: { contactId: string }) {
@@ -85,7 +109,7 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       if (!res.ok) {
         setErr(j?.error || "Import failed");
       } else {
-        setMsg(`Imported thread ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
         setTitle("");
         setRaw("");
       }
@@ -101,43 +125,37 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       <div className="sectionTitleRow">
         <div className="sectionTitle">Upload text thread</div>
         <div className="sectionSub">
-          Paste iMessage thread text → attach to this contact → used for notes + better drafts.
+          Paste iMessage thread text → attach to this contact → improves Jordan Voice + keeps history.
         </div>
       </div>
 
-      {(err || msg) && (
-        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
-          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
-            {err || msg}
-          </div>
-        </div>
-      )}
+      {(err || msg) ? (
+        <div className={`alert ${err ? "alertError" : "alertOk"}`}>{err || msg}</div>
+      ) : null}
 
-      <div className="card cardPad">
-        <div className="rowResponsive" style={{ gap: 10 }}>
+      <div className="card cardPad stack">
+        <div className="rowResponsiveBetween">
           <input
             className="input"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder='Optional title (e.g., "Feb 2026 — renovation planning")'
-            style={{ flex: 1, minWidth: 260 }}
+            style={{ flex: 1, minWidth: 240 }}
           />
           <button className="btn btnPrimary btnFullMobile" onClick={upload} disabled={busy}>
             {busy ? "Importing…" : "Import"}
           </button>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <textarea
-            className="textarea"
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nRay: All good...`}
-            style={{ minHeight: 220 }}
-          />
-        </div>
+        <textarea
+          className="textarea"
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: Yeah, Bosch has a good one...`}
+          style={{ minHeight: 220 }}
+        />
 
-        <div className="muted small" style={{ marginTop: 10 }}>
+        <div className="muted small">
           Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
           thread is saved.
         </div>
@@ -152,6 +170,8 @@ export default function ContactDetailPage() {
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [uid, setUid] = useState<string | null>(null);
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [touches, setTouches] = useState<Touch[]>([]);
@@ -195,10 +215,15 @@ export default function ContactDetailPage() {
     const sess = await requireSession();
     if (!sess) return;
 
+    const myUid = sess.user.id;
+    setUid(myUid);
+
+    // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at")
+      .select("id, display_name, category, tier, client_type, created_at, user_id")
       .eq("id", id)
+      .eq("user_id", myUid)
       .single();
 
     if (cErr) {
@@ -221,7 +246,7 @@ export default function ContactDetailPage() {
       .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
       .eq("contact_id", id)
       .order("occurred_at", { ascending: false })
-      .limit(500);
+      .limit(200);
 
     if (tErr) {
       setError((prev) => prev ?? `Touches fetch error: ${tErr.message}`);
@@ -299,37 +324,33 @@ export default function ContactDetailPage() {
   }
 
   async function deleteContact() {
-    if (!contact) return;
+    if (!contact || !uid) return;
 
-    const ok = window.confirm(`Delete contact "${contact.display_name}"? This cannot be undone.`);
+    const ok = window.confirm(`Delete contact "${contact.display_name}"?\n\nThis will delete touches + imported texts too.`);
     if (!ok) return;
 
     setDeleting(true);
     setError(null);
 
-    const { data } = await supabase.auth.getSession();
-    const uid = data.session?.user.id ?? null;
+    try {
+      const res = await fetch("/api/contacts/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, contact_id: contact.id }),
+      });
 
-    if (!uid) {
-      window.location.href = "/login";
-      return;
+      const j = await res.json();
+      if (!res.ok) {
+        setError(j?.error || "Delete failed");
+        setDeleting(false);
+        return;
+      }
+
+      window.location.href = "/contacts";
+    } catch (e: any) {
+      setError(e?.message || "Delete failed");
+      setDeleting(false);
     }
-
-    const res = await fetch("/api/contacts/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, contact_id: contact.id }),
-    });
-
-    const j = await res.json();
-    setDeleting(false);
-
-    if (!res.ok) {
-      setError(j?.error || "Delete failed");
-      return;
-    }
-
-    window.location.href = "/contacts";
   }
 
   useEffect(() => {
@@ -337,15 +358,12 @@ export default function ContactDetailPage() {
 
     const init = async () => {
       const { data } = await supabase.auth.getSession();
-      const uid = data.session?.user.id ?? null;
+      const myUid = data.session?.user.id ?? null;
 
       if (!alive) return;
 
-      if (!uid) {
-        setTimeout(async () => {
-          const { data: d2 } = await supabase.auth.getSession();
-          if (!d2.session) window.location.href = "/login";
-        }, 250);
+      if (!myUid) {
+        window.location.href = "/login";
         return;
       }
 
@@ -354,8 +372,8 @@ export default function ContactDetailPage() {
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      const uid = session?.user.id ?? null;
-      if (!uid) window.location.href = "/login";
+      const myUid = session?.user.id ?? null;
+      if (!myUid) window.location.href = "/login";
     });
 
     init();
@@ -374,13 +392,11 @@ export default function ContactDetailPage() {
       <div className="stack">
         <div className="card cardPad">
           <div style={{ fontWeight: 900, fontSize: 18 }}>Contact not found</div>
-          {error ? (
-            <div className="alert alertError" style={{ marginTop: 10 }}>
-              {error}
-            </div>
-          ) : null}
+          {error ? <div className="alert alertError" style={{ marginTop: 10 }}>{error}</div> : null}
           <div style={{ marginTop: 12 }}>
-            <a href="/contacts">← Back to Contacts</a>
+            <a href="/contacts" style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>
+              ← Back to Contacts
+            </a>
           </div>
         </div>
       </div>
@@ -389,44 +405,54 @@ export default function ContactDetailPage() {
 
   return (
     <div className="stack">
-      <div className="rowResponsiveBetween">
-        <div style={{ minWidth: 0 }}>
-          <div className="rowResponsive" style={{ alignItems: "baseline" }}>
-            <h1 className="h1" style={{ margin: 0 }}>
-              {contact.display_name}
-            </h1>
-            <span className="subtle">
-              {prettyCategory(contact.category)} {contact.tier ? `• Tier ${contact.tier}` : ""}{" "}
-              {contact.client_type ? `• ${contact.client_type}` : ""}
-            </span>
+      {/* Header */}
+      <div className="card cardPad">
+        <div className="rowResponsiveBetween">
+          <div style={{ minWidth: 0 }}>
+            <div className="rowResponsive" style={{ alignItems: "baseline" }}>
+              <h1 className="h1" style={{ margin: 0 }}>
+                {contact.display_name}
+              </h1>
+              <span className="subtle">
+                {prettyCategory(contact.category)}
+                {contact.tier ? ` • Tier ${contact.tier}` : ""}
+                {contact.client_type ? ` • ${contact.client_type}` : ""}
+              </span>
+            </div>
+
+            <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
+              Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+            </div>
           </div>
 
-          <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
-            Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+          <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
+            <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
+              Contacts
+            </a>
+            <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
+              {editing ? "Close edit" : "Edit"}
+            </button>
+            <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
+              Log touch
+            </button>
           </div>
         </div>
 
-        <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
-          <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
-            Contacts
-          </a>
-          <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
-            {editing ? "Close edit" : "Edit"}
-          </button>
-          <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
-            {deleting ? "Deleting…" : "Delete"}
-          </button>
-          <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
-            Log touch
-          </button>
-        </div>
+        {error ? <div className="alert alertError" style={{ marginTop: 12 }}>{error}</div> : null}
       </div>
 
-      {error ? <div className="alert alertError">{error}</div> : null}
-
+      {/* Edit (clean, with danger zone) */}
       {editing && (
         <div className="card cardPad stack">
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
+          <div className="rowResponsiveBetween">
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
+              <div className="subtle" style={{ marginTop: 4 }}>Keep it tight. No busy work.</div>
+            </div>
+            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
+              Close
+            </button>
+          </div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
             <div className="field" style={{ flex: 1, minWidth: 240 }}>
@@ -469,8 +495,17 @@ export default function ContactDetailPage() {
             <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
-            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
-              Cancel
+          </div>
+
+          <div className="hr" />
+
+          <div className="stack">
+            <div style={{ fontWeight: 900 }}>Danger zone</div>
+            <div className="subtle" style={{ fontSize: 12 }}>
+              Deletes touches + imported texts attached to this contact.
+            </div>
+            <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete contact"}
             </button>
           </div>
         </div>
@@ -482,43 +517,51 @@ export default function ContactDetailPage() {
       {/* Text upload NEXT */}
       <TextThreadUploadPanel contactId={contact.id} />
 
-      <div className="card cardPad stack">
-        <div style={{ fontWeight: 900, fontSize: 16 }}>Touch history</div>
+      {/* Touch history: collapsed + calm */}
+      <details className="card cardPad" open={false}>
+        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none" as any }}>
+          Touch history <span className="subtle">({touches.length})</span>
+        </summary>
 
-        {touches.length === 0 ? (
-          <div className="subtle">No touches yet.</div>
-        ) : (
-          <div className="stack">
-            {touches.map((t) => (
+        <div className="stack" style={{ marginTop: 12 }}>
+          {touches.length === 0 ? (
+            <div className="subtle">No touches yet.</div>
+          ) : (
+            touches.map((t) => (
               <div key={t.id} className="card cardPad">
                 <div className="rowResponsiveBetween">
                   <div style={{ fontWeight: 900 }}>
-                    {t.direction.toUpperCase()} • {t.channel}
+                    {dirPill(t.direction)} • {channelLabel(t.channel)}
                     {t.intent ? <span className="subtle"> • {t.intent}</span> : null}
                   </div>
-                  <div className="subtle">{new Date(t.occurred_at).toLocaleString()}</div>
+                  <div className="subtle">{fmtDT(t.occurred_at)}</div>
                 </div>
 
-                {t.summary ? <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div> : null}
+                {t.summary ? (
+                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
+                ) : null}
 
-                <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
-                  {t.source ? `source: ${t.source}` : ""}
-                  {t.source_link ? (
-                    <>
-                      {" "}
-                      •{" "}
-                      <a href={t.source_link} target="_blank" rel="noreferrer">
-                        open link
-                      </a>
-                    </>
-                  ) : null}
-                </div>
+                {(t.source || t.source_link) ? (
+                  <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
+                    {t.source ? `source: ${t.source}` : ""}
+                    {t.source_link ? (
+                      <>
+                        {" "}
+                        •{" "}
+                        <a href={t.source_link} target="_blank" rel="noreferrer">
+                          open link
+                        </a>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      </details>
 
+      {/* Log touch modal (kept functional but less noisy text) */}
       {logOpen && (
         <div
           className="modalSheet"
@@ -537,9 +580,7 @@ export default function ContactDetailPage() {
             <div className="rowResponsiveBetween">
               <div>
                 <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
-                <div className="subtle" style={{ marginTop: 4 }}>
-                  {contact.display_name}
-                </div>
+                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
               </div>
               <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
                 Close
@@ -589,7 +630,9 @@ export default function ContactDetailPage() {
                   onChange={(e) => setLogOccurredAt(e.target.value)}
                 />
               </div>
+            </div>
 
+            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
               <div className="field" style={{ flex: 1, minWidth: 220 }}>
                 <div className="label">Source</div>
                 <input
@@ -628,10 +671,6 @@ export default function ContactDetailPage() {
               <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
                 Cancel
               </button>
-            </div>
-
-            <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
-              Note: outbound resets cadence. inbound is tracked but doesn’t reset cadence.
             </div>
           </div>
         </div>

@@ -205,7 +205,12 @@ export async function POST(req: Request) {
                     : "It can be longer, but still crisp and skimmable.";
 
         const system = [
-            "You write outbound client/agent/vendor messages in Jordan Kramer’s style.",
+            "You write outbound client, agent, and vendor messages in Jordan Kramer’s style.",
+            "Jordan is a luxury Los Angeles real estate advisor.",
+            "His tone: warm, calm, confident, intelligent, concise, modern.",
+            "Never overly salesy. Never hype-y. No exclamation spam.",
+            "For TEXT: conversational, tight, 1-4 sentences max.",
+            "For EMAIL: structured, crisp, skimmable, polished.",
             "Jordan’s style: warm, direct, confident, low-fluff, helpful, modern, no salesy language, no exclamation spam.",
             "Use natural contractions. Avoid corporate buzzwords. Avoid emojis unless it truly fits (default: none).",
             "Never invent facts. Use only provided context.",
@@ -215,6 +220,22 @@ export async function POST(req: Request) {
         const user = [
             `TASK: Draft a ${channel.toUpperCase()} message.`,
             `Intent: ${intent}`,
+            `Intent guidance:`,
+            intent === "check_in"
+                ? "- Warm relationship touchpoint. Light. No pressure."
+                : intent === "follow_up"
+                    ? "- Follow up on something previously discussed."
+                    : intent === "scheduling"
+                        ? "- Coordinate time/date. Be clear and concise."
+                        : intent === "deal_update"
+                            ? "- Provide update related to a transaction or home process."
+                            : intent === "vendor_coordination"
+                                ? "- Coordinate logistics with contractor/vendor."
+                                : intent === "referral_ask"
+                                    ? "- Soft referral positioning. Never pushy."
+                                    : intent === "review_ask"
+                                        ? "- Ask for a review politely and briefly."
+                                        : "- General purpose communication.",
             "",
             "CONSTRAINTS:",
             `- ${lengthRule}`,

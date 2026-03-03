@@ -4,15 +4,18 @@
 * {
   box-sizing: border-box;
 }
+
 html,
 body {
   margin: 0;
   padding: 0;
 }
+
 img {
   max-width: 100%;
   height: auto;
 }
+
 code {
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
@@ -68,6 +71,7 @@ main a {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
 .nav a {
   text-decoration: none !important;
 }
@@ -88,6 +92,7 @@ main a {
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line2);
 }
+
 .topbarInner {
   max-width: 1100px;
   margin: 0 auto;
@@ -98,28 +103,33 @@ main a {
   gap: 14px;
   flex-wrap: wrap;
 }
+
 .brandRow {
   display: flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
 }
+
 .brandName {
   font-weight: 900;
   letter-spacing: 0.2px;
 }
+
 .brandSub {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
   margin-top: 2px;
 }
+
 .nav {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
 }
+
 .navLink {
   display: inline-flex;
   align-items: center;
@@ -136,14 +146,142 @@ main a {
     border-color 120ms ease,
     background 120ms ease;
 }
+
 .navLink:hover {
   transform: translateY(-1px);
   border-color: rgba(18, 18, 18, 0.18);
 }
+
 .topbarRight {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+/* ===== Sections / typography helpers ===== */
+.section {
+  margin-top: 14px;
+}
+
+.sectionTitleRow {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: -0.1px;
+}
+
+.sectionSub {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.bold {
+  font-weight: 900;
+}
+
+/* ===== Premium controls ===== */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .8);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.segBtn {
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.segBtnActive {
+  background: #121212;
+  color: #fff;
+}
+
+/* ===== Draft preview ===== */
+.preview {
+  border: 1px solid var(--line2);
+  background: rgba(247, 244, 238, .55);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.previewHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.previewTitle {
+  font-weight: 900;
+}
+
+.previewBody {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  font-size: 14px;
+}
+
+/* ===== Compact helper ===== */
+.kicker {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+/* ===== Collapsible "Advanced" ===== */
+.details {
+  border: 1px solid var(--line2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .7);
+  padding: 12px;
+}
+
+.detailsSummary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.detailsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.detailsHint {
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
 }
 
 /* ===== UI primitives ===== */
@@ -153,16 +291,19 @@ main a {
   font-weight: 900;
   letter-spacing: -0.2px;
 }
+
 .subtle {
   color: var(--muted);
   font-weight: 700;
 }
+
 .row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
 }
+
 .rowBetween {
   display: flex;
   justify-content: space-between;
@@ -170,6 +311,7 @@ main a {
   gap: 12px;
   flex-wrap: wrap;
 }
+
 .stack {
   display: grid;
   gap: 10px;
@@ -181,6 +323,7 @@ main a {
   background: var(--paper);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
 }
+
 .cardPad {
   padding: 14px;
 }
@@ -221,10 +364,12 @@ main a {
     border-color 120ms ease,
     background 120ms ease;
 }
+
 .btn:hover {
   transform: translateY(-1px);
   border-color: rgba(18, 18, 18, 0.18);
 }
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -236,6 +381,7 @@ main a {
   color: #fff;
   border-color: #121212;
 }
+
 .btnPrimary:hover {
   border-color: #121212;
   background: #1b1b1b;
@@ -260,11 +406,13 @@ main a {
   display: grid;
   gap: 6px;
 }
+
 .label {
   font-size: 12px;
   color: var(--muted);
   font-weight: 800;
 }
+
 .input,
 .select,
 .textarea {
@@ -277,10 +425,12 @@ main a {
   padding: 10px 12px;
   outline: none;
 }
+
 .textarea {
   min-height: 90px;
   resize: vertical;
 }
+
 .input:focus,
 .select:focus,
 .textarea:focus {
@@ -297,11 +447,13 @@ main a {
   font-weight: 800;
   white-space: pre-wrap;
 }
+
 .alertError {
   border-color: rgba(220, 20, 60, 0.25);
   background: rgba(220, 20, 60, 0.06);
   color: #b1122a;
 }
+
 .alertOk {
   border-color: rgba(0, 128, 0, 0.2);
   background: rgba(0, 128, 0, 0.06);
@@ -313,17 +465,21 @@ main a {
   width: 100%;
   border-collapse: collapse;
 }
+
 .table th,
 .table td {
   text-align: left;
   padding: 10px 10px;
   border-bottom: 1px solid var(--line2);
 }
+
 .table th {
   font-size: 12px;
   color: var(--muted);
   font-weight: 900;
-} /* --- Mobile helpers --- */
+}
+
+/* --- Mobile helpers --- */
 .rowResponsive {
   display: flex;
   gap: 10px;
