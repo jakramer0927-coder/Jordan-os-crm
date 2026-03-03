@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import VoiceDraftPanel from "./VoiceDraftPanel";
 
 type TouchIntent =
   | "check_in"
@@ -34,60 +35,19 @@ type Touch = {
   source_link: string | null;
 };
 
-type ContactLite = {
-  id: string;
-  display_name: string;
-  category: string;
-  tier: string | null;
-  email: string | null;
-};
-
 function prettyCategory(c: string) {
   const s = (c || "").trim();
   if (!s) return "Other";
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-function toDatetimeLocalValue(d: Date) {
-  // yyyy-MM-ddTHH:mm (local)
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const mm = pad(d.getMonth() + 1);
-  const dd = pad(d.getDate());
-  const hh = pad(d.getHours());
-  const mi = pad(d.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-}
-
-function fromDatetimeLocalValue(v: string) {
-  // interprets as local time
-  const dt = new Date(v);
-  return isNaN(dt.getTime()) ? null : dt;
-}
-
-// -------------------- Text Thread Upload Panel --------------------
-
-function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; contactName: string }) {
+function TextThreadUploadPanel({ contactId }: { contactId: string }) {
   const [uid, setUid] = useState<string | null>(null);
-
   const [title, setTitle] = useState("");
   const [raw, setRaw] = useState("");
-
-  // optional: re-attach to a different contact quickly
-  const [attachToId, setAttachToId] = useState<string>(contactId);
-  const [attachToQuery, setAttachToQuery] = useState("");
-  const [attachResults, setAttachResults] = useState<ContactLite[]>([]);
-  const [attachBusy, setAttachBusy] = useState(false);
-
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    setAttachToId(contactId);
-  }, [contactId]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -100,43 +60,12 @@ function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; 
     });
   }, []);
 
-  async function searchContacts(q: string) {
-    if (!uid) return;
-    const term = q.trim();
-    if (term.length < 2) {
-      setAttachResults([]);
-      return;
-    }
-
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    setAttachBusy(true);
-
-    try {
-      const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(term)}`, { signal: ac.signal });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setAttachResults([]);
-        return;
-      }
-      setAttachResults((j.results || []) as ContactLite[]);
-    } catch (e: any) {
-      if (e?.name !== "AbortError") setAttachResults([]);
-    } finally {
-      setAttachBusy(false);
-    }
-  }
-
   async function upload() {
     setErr(null);
     setMsg(null);
 
     if (!uid) return setErr("Not signed in.");
     if (!raw.trim() || raw.trim().length < 20) return setErr("Paste a longer text thread.");
-    if (!attachToId) return setErr("Missing contact id to attach to.");
-
     setBusy(true);
 
     try {
@@ -145,13 +74,13 @@ function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           uid,
-          contact_id: attachToId,
+          contact_id: contactId,
           title: title.trim() || null,
           raw_text: raw,
         }),
       });
 
-      const j = await res.json().catch(() => ({}));
+      const j = await res.json();
 
       if (!res.ok) {
         setErr(j?.error || "Import failed");
@@ -171,65 +100,34 @@ function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; 
     <div className="section" style={{ marginTop: 18 }}>
       <div className="sectionTitleRow">
         <div className="sectionTitle">Upload text thread</div>
-        <div className="sectionSub">Paste iMessage thread text → attach → used for notes + better drafts.</div>
+        <div className="sectionSub">
+          Paste iMessage thread text → attach to this contact → used for notes + better drafts.
+        </div>
       </div>
 
       {(err || msg) && (
-        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
-          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+        <div
+          className="card cardPad"
+          style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}
+        >
+          <div
+            style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}
+          >
             {err || msg}
           </div>
         </div>
       )}
 
       <div className="card cardPad">
-        <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <div className="label">Attach to</div>
-            <div className="muted small" style={{ marginBottom: 6 }}>
-              Default: <strong>{contactName}</strong>
-            </div>
-            <input
-              className="input"
-              value={attachToQuery}
-              onChange={(e) => {
-                const v = e.target.value;
-                setAttachToQuery(v);
-                searchContacts(v);
-              }}
-              placeholder="(Optional) Search contact to attach to…"
-            />
-            {attachBusy ? <div className="muted small" style={{ marginTop: 6 }}>Searching…</div> : null}
-            {attachResults.length > 0 ? (
-              <select
-                className="select"
-                value={attachToId}
-                onChange={(e) => setAttachToId(e.target.value)}
-                style={{ marginTop: 8, width: "100%" }}
-              >
-                <option value={contactId}>{contactName} (current)</option>
-                {attachResults.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.display_name} • {c.category}
-                    {c.tier ? ` • ${c.tier}` : ""}
-                    {c.email ? ` • ${c.email}` : ""}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-          </div>
-
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <div className="label">Title (optional)</div>
-            <input
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder='e.g., "Appliance convo — March 2026"'
-            />
-          </div>
-
-          <button className="btn btnPrimary" onClick={upload} disabled={busy}>
+        <div className="rowResponsive" style={{ gap: 10 }}>
+          <input
+            className="input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder='Optional title (e.g., "Feb 2026 — renovation planning")'
+            style={{ flex: 1, minWidth: 260 }}
+          />
+          <button className="btn btnPrimary btnFullMobile" onClick={upload} disabled={busy}>
             {busy ? "Importing…" : "Import"}
           </button>
         </div>
@@ -239,20 +137,19 @@ function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; 
             className="textarea"
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: All good...`}
+            placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nRay: All good...`}
             style={{ minHeight: 220 }}
           />
         </div>
 
         <div className="muted small" style={{ marginTop: 10 }}>
-          Tip: iPhone → Messages → open thread → select text → copy → paste here.
+          Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing
+          isn’t perfect, the raw thread is saved.
         </div>
       </div>
     </div>
   );
 }
-
-// -------------------- Page --------------------
 
 export default function ContactDetailPage() {
   const params = useParams();
@@ -275,10 +172,10 @@ export default function ContactDetailPage() {
   const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
   const [logDirection, setLogDirection] = useState<Touch["direction"]>("outbound");
   const [logIntent, setLogIntent] = useState<TouchIntent>("check_in");
+  const [logOccurredAt, setLogOccurredAt] = useState<string>("");
   const [logSummary, setLogSummary] = useState("");
   const [logSource, setLogSource] = useState("manual");
   const [logLink, setLogLink] = useState("");
-  const [logWhen, setLogWhen] = useState<string>(toDatetimeLocalValue(new Date()));
   const [savingTouch, setSavingTouch] = useState(false);
 
   const lastOutbound = useMemo(() => {
@@ -324,7 +221,9 @@ export default function ContactDetailPage() {
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
-      .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
+      .select(
+        "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
+      )
       .eq("contact_id", id)
       .order("occurred_at", { ascending: false })
       .limit(500);
@@ -372,7 +271,7 @@ export default function ContactDetailPage() {
     setLogSummary("");
     setLogSource("manual");
     setLogLink("");
-    setLogWhen(toDatetimeLocalValue(new Date()));
+    setLogOccurredAt(new Date().toISOString().slice(0, 16)); // yyyy-mm-ddThh:mm
   }
 
   async function saveTouch() {
@@ -380,14 +279,16 @@ export default function ContactDetailPage() {
     setSavingTouch(true);
     setError(null);
 
-    const when = fromDatetimeLocalValue(logWhen) ?? new Date();
+    const occurred_at = logOccurredAt
+      ? new Date(logOccurredAt).toISOString()
+      : new Date().toISOString();
 
     const { error } = await supabase.from("touches").insert({
       contact_id: contact.id,
       channel: logChannel,
       direction: logDirection,
       intent: logIntent,
-      occurred_at: when.toISOString(),
+      occurred_at,
       summary: logSummary.trim() ? logSummary.trim() : null,
       source: logSource.trim() ? logSource.trim() : null,
       source_link: logLink.trim() ? logLink.trim() : null,
@@ -446,7 +347,11 @@ export default function ContactDetailPage() {
       <div className="stack">
         <div className="card cardPad">
           <div style={{ fontWeight: 900, fontSize: 18 }}>Contact not found</div>
-          {error ? <div className="alert alertError" style={{ marginTop: 10 }}>{error}</div> : null}
+          {error ? (
+            <div className="alert alertError" style={{ marginTop: 10 }}>
+              {error}
+            </div>
+          ) : null}
           <div style={{ marginTop: 12 }}>
             <a href="/contacts">← Back to Contacts</a>
           </div>
@@ -457,10 +362,12 @@ export default function ContactDetailPage() {
 
   return (
     <div className="stack">
-      <div className="rowBetween">
-        <div>
-          <div className="row" style={{ alignItems: "baseline" }}>
-            <h1 className="h1">{contact.display_name}</h1>
+      <div className="rowResponsiveBetween">
+        <div style={{ minWidth: 0 }}>
+          <div className="rowResponsive" style={{ alignItems: "baseline" }}>
+            <h1 className="h1" style={{ margin: 0 }}>
+              {contact.display_name}
+            </h1>
             <span className="subtle">
               {prettyCategory(contact.category)} {contact.tier ? `• Tier ${contact.tier}` : ""}{" "}
               {contact.client_type ? `• ${contact.client_type}` : ""}
@@ -472,14 +379,14 @@ export default function ContactDetailPage() {
           </div>
         </div>
 
-        <div className="row">
-          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>
+        <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
+          <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
             Contacts
           </a>
-          <button className="btn" onClick={() => setEditing((v) => !v)}>
+          <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
             {editing ? "Close edit" : "Edit"}
           </button>
-          <button className="btn btnPrimary" onClick={openLog}>
+          <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
             Log touch
           </button>
         </div>
@@ -491,7 +398,7 @@ export default function ContactDetailPage() {
         <div className="card cardPad stack">
           <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
 
-          <div className="row" style={{ alignItems: "flex-end" }}>
+          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
             <div className="field" style={{ flex: 1, minWidth: 240 }}>
               <div className="label">Name</div>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
@@ -499,7 +406,11 @@ export default function ContactDetailPage() {
 
             <div className="field" style={{ width: 220, minWidth: 180 }}>
               <div className="label">Category</div>
-              <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <select
+                className="select"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              >
                 <option>Client</option>
                 <option>Agent</option>
                 <option>Developer</option>
@@ -510,7 +421,11 @@ export default function ContactDetailPage() {
 
             <div className="field" style={{ width: 140 }}>
               <div className="label">Tier</div>
-              <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
+              <select
+                className="select"
+                value={tier}
+                onChange={(e) => setTier(e.target.value as any)}
+              >
                 <option value="A">A</option>
                 <option value="B">B</option>
                 <option value="C">C</option>
@@ -528,19 +443,23 @@ export default function ContactDetailPage() {
             />
           </div>
 
-          <div className="row">
-            <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
+          <div className="rowResponsive">
+            <button
+              className="btn btnPrimary btnFullMobile"
+              onClick={saveContact}
+              disabled={savingContact}
+            >
               {savingContact ? "Saving…" : "Save"}
             </button>
-            <button className="btn" onClick={() => setEditing(false)}>
+            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      {/* Upload texts */}
-      <TextThreadUploadPanel contactId={contact.id} contactName={contact.display_name} />
+      {/* Text upload panel */}
+      <TextThreadUploadPanel contactId={contact.id} />
 
       <div className="card cardPad stack">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Touch history</div>
@@ -551,7 +470,7 @@ export default function ContactDetailPage() {
           <div className="stack">
             {touches.map((t) => (
               <div key={t.id} className="card cardPad">
-                <div className="rowBetween">
+                <div className="rowResponsiveBetween">
                   <div style={{ fontWeight: 900 }}>
                     {t.direction.toUpperCase()} • {t.channel}
                     {t.intent ? <span className="subtle"> • {t.intent}</span> : null}
@@ -559,7 +478,9 @@ export default function ContactDetailPage() {
                   <div className="subtle">{new Date(t.occurred_at).toLocaleString()}</div>
                 </div>
 
-                {t.summary ? <div style={{ marginTop: 10 }}>{t.summary}</div> : null}
+                {t.summary ? (
+                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
+                ) : null}
 
                 <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
                   {t.source ? `source: ${t.source}` : ""}
@@ -581,6 +502,7 @@ export default function ContactDetailPage() {
 
       {logOpen && (
         <div
+          className="modalSheet"
           style={{
             position: "fixed",
             inset: 0,
@@ -592,34 +514,39 @@ export default function ContactDetailPage() {
             zIndex: 999,
           }}
         >
-          <div className="card cardPad" style={{ width: "min(860px, 100%)" }}>
-            <div className="rowBetween">
+          <div className="card cardPad modalSheetCard" style={{ width: "min(860px, 100%)" }}>
+            <div className="rowResponsiveBetween">
               <div>
                 <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
-                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
+                <div className="subtle" style={{ marginTop: 4 }}>
+                  {contact.display_name}
+                </div>
               </div>
-              <button className="btn" onClick={() => setLogOpen(false)}>
+              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
                 Close
               </button>
             </div>
 
-            <div className="row" style={{ marginTop: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div className="field" style={{ width: 220 }}>
-                <div className="label">When</div>
-                <input className="input" type="datetime-local" value={logWhen} onChange={(e) => setLogWhen(e.target.value)} />
-              </div>
-
-              <div className="field" style={{ width: 160 }}>
+            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
+              <div className="field" style={{ width: 160, minWidth: 160 }}>
                 <div className="label">Direction</div>
-                <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
+                <select
+                  className="select"
+                  value={logDirection}
+                  onChange={(e) => setLogDirection(e.target.value as any)}
+                >
                   <option value="outbound">outbound</option>
                   <option value="inbound">inbound</option>
                 </select>
               </div>
 
-              <div className="field" style={{ width: 160 }}>
+              <div className="field" style={{ width: 160, minWidth: 160 }}>
                 <div className="label">Channel</div>
-                <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
+                <select
+                  className="select"
+                  value={logChannel}
+                  onChange={(e) => setLogChannel(e.target.value as any)}
+                >
                   <option value="email">email</option>
                   <option value="text">text</option>
                   <option value="call">call</option>
@@ -629,9 +556,13 @@ export default function ContactDetailPage() {
                 </select>
               </div>
 
-              <div className="field" style={{ width: 220 }}>
+              <div className="field" style={{ width: 220, minWidth: 220 }}>
                 <div className="label">Intent</div>
-                <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
+                <select
+                  className="select"
+                  value={logIntent}
+                  onChange={(e) => setLogIntent(e.target.value as any)}
+                >
                   <option value="check_in">check_in</option>
                   <option value="referral_ask">referral_ask</option>
                   <option value="review_ask">review_ask</option>
@@ -642,27 +573,56 @@ export default function ContactDetailPage() {
                 </select>
               </div>
 
+              <div className="field" style={{ width: 220, minWidth: 220 }}>
+                <div className="label">Occurred at</div>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={logOccurredAt}
+                  onChange={(e) => setLogOccurredAt(e.target.value)}
+                />
+              </div>
+
               <div className="field" style={{ flex: 1, minWidth: 220 }}>
                 <div className="label">Source</div>
-                <input className="input" value={logSource} onChange={(e) => setLogSource(e.target.value)} placeholder="manual / gmail / sms" />
+                <input
+                  className="input"
+                  value={logSource}
+                  onChange={(e) => setLogSource(e.target.value)}
+                  placeholder="manual / gmail / sms"
+                />
               </div>
 
               <div className="field" style={{ flex: 1, minWidth: 260 }}>
                 <div className="label">Link (optional)</div>
-                <input className="input" value={logLink} onChange={(e) => setLogLink(e.target.value)} placeholder="thread link / calendar link" />
+                <input
+                  className="input"
+                  value={logLink}
+                  onChange={(e) => setLogLink(e.target.value)}
+                  placeholder="thread link / calendar link"
+                />
               </div>
             </div>
 
             <div className="field" style={{ marginTop: 10 }}>
               <div className="label">Summary (optional)</div>
-              <textarea className="textarea" value={logSummary} onChange={(e) => setLogSummary(e.target.value)} placeholder="Quick note about what happened" />
+              <textarea
+                className="textarea"
+                value={logSummary}
+                onChange={(e) => setLogSummary(e.target.value)}
+                placeholder="Quick note about what happened"
+              />
             </div>
 
-            <div className="row" style={{ marginTop: 12 }}>
-              <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
+            <div className="rowResponsive" style={{ marginTop: 12 }}>
+              <button
+                className="btn btnPrimary btnFullMobile"
+                onClick={saveTouch}
+                disabled={savingTouch}
+              >
                 {savingTouch ? "Saving…" : "Save touch"}
               </button>
-              <button className="btn" onClick={() => setLogOpen(false)}>
+              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
                 Cancel
               </button>
             </div>
