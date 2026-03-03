@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
@@ -34,12 +34,12 @@ type Touch = {
   source_link: string | null;
 };
 
-type TextThreadRow = {
+type ContactLite = {
   id: string;
-  title: string | null;
-  summary: string | null;
-  last_activity_at: string | null;
-  created_at: string;
+  display_name: string;
+  category: string;
+  tier: string | null;
+  email: string | null;
 };
 
 function prettyCategory(c: string) {
@@ -49,24 +49,216 @@ function prettyCategory(c: string) {
 }
 
 function toDatetimeLocalValue(d: Date) {
-  // datetime-local expects local "YYYY-MM-DDTHH:MM"
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  // yyyy-MM-ddTHH:mm (local)
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
 
-function parseDatetimeLocalToISO(v: string) {
-  // v like "2026-03-02T10:30" interpreted as local time
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+function fromDatetimeLocalValue(v: string) {
+  // interprets as local time
+  const dt = new Date(v);
+  return isNaN(dt.getTime()) ? null : dt;
 }
+
+// -------------------- Text Thread Upload Panel --------------------
+
+function TextThreadUploadPanel({ contactId, contactName }: { contactId: string; contactName: string }) {
+  const [uid, setUid] = useState<string | null>(null);
+
+  const [title, setTitle] = useState("");
+  const [raw, setRaw] = useState("");
+
+  // optional: re-attach to a different contact quickly
+  const [attachToId, setAttachToId] = useState<string>(contactId);
+  const [attachToQuery, setAttachToQuery] = useState("");
+  const [attachResults, setAttachResults] = useState<ContactLite[]>([]);
+  const [attachBusy, setAttachBusy] = useState(false);
+
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setAttachToId(contactId);
+  }, [contactId]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user ?? null;
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+      setUid(user.id);
+    });
+  }, []);
+
+  async function searchContacts(q: string) {
+    if (!uid) return;
+    const term = q.trim();
+    if (term.length < 2) {
+      setAttachResults([]);
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    setAttachBusy(true);
+
+    try {
+      const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(term)}`, { signal: ac.signal });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAttachResults([]);
+        return;
+      }
+      setAttachResults((j.results || []) as ContactLite[]);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setAttachResults([]);
+    } finally {
+      setAttachBusy(false);
+    }
+  }
+
+  async function upload() {
+    setErr(null);
+    setMsg(null);
+
+    if (!uid) return setErr("Not signed in.");
+    if (!raw.trim() || raw.trim().length < 20) return setErr("Paste a longer text thread.");
+    if (!attachToId) return setErr("Missing contact id to attach to.");
+
+    setBusy(true);
+
+    try {
+      const res = await fetch("/api/text/imessage/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          contact_id: attachToId,
+          title: title.trim() || null,
+          raw_text: raw,
+        }),
+      });
+
+      const j = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErr(j?.error || "Import failed");
+      } else {
+        setMsg(`Imported thread ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+        setTitle("");
+        setRaw("");
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="section" style={{ marginTop: 18 }}>
+      <div className="sectionTitleRow">
+        <div className="sectionTitle">Upload text thread</div>
+        <div className="sectionSub">Paste iMessage thread text → attach → used for notes + better drafts.</div>
+      </div>
+
+      {(err || msg) && (
+        <div className="card cardPad" style={{ borderColor: err ? "rgba(160,0,0,0.25)" : undefined }}>
+          <div style={{ fontWeight: 900, color: err ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
+            {err || msg}
+          </div>
+        </div>
+      )}
+
+      <div className="card cardPad">
+        <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div className="label">Attach to</div>
+            <div className="muted small" style={{ marginBottom: 6 }}>
+              Default: <strong>{contactName}</strong>
+            </div>
+            <input
+              className="input"
+              value={attachToQuery}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAttachToQuery(v);
+                searchContacts(v);
+              }}
+              placeholder="(Optional) Search contact to attach to…"
+            />
+            {attachBusy ? <div className="muted small" style={{ marginTop: 6 }}>Searching…</div> : null}
+            {attachResults.length > 0 ? (
+              <select
+                className="select"
+                value={attachToId}
+                onChange={(e) => setAttachToId(e.target.value)}
+                style={{ marginTop: 8, width: "100%" }}
+              >
+                <option value={contactId}>{contactName} (current)</option>
+                {attachResults.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.display_name} • {c.category}
+                    {c.tier ? ` • ${c.tier}` : ""}
+                    {c.email ? ` • ${c.email}` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div className="label">Title (optional)</div>
+            <input
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder='e.g., "Appliance convo — March 2026"'
+            />
+          </div>
+
+          <button className="btn btnPrimary" onClick={upload} disabled={busy}>
+            {busy ? "Importing…" : "Import"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <textarea
+            className="textarea"
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: All good...`}
+            style={{ minHeight: 220 }}
+          />
+        </div>
+
+        <div className="muted small" style={{ marginTop: 10 }}>
+          Tip: iPhone → Messages → open thread → select text → copy → paste here.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -------------------- Page --------------------
 
 export default function ContactDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || "";
 
   const [ready, setReady] = useState(false);
-  const [uid, setUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [contact, setContact] = useState<Contact | null>(null);
@@ -86,19 +278,8 @@ export default function ContactDetailPage() {
   const [logSummary, setLogSummary] = useState("");
   const [logSource, setLogSource] = useState("manual");
   const [logLink, setLogLink] = useState("");
-  const [logOccurredAt, setLogOccurredAt] = useState<string>(() => toDatetimeLocalValue(new Date()));
+  const [logWhen, setLogWhen] = useState<string>(toDatetimeLocalValue(new Date()));
   const [savingTouch, setSavingTouch] = useState(false);
-
-  // Text thread upload
-  const [threadTitle, setThreadTitle] = useState("");
-  const [threadRaw, setThreadRaw] = useState("");
-  const [importBusy, setImportBusy] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [importErr, setImportErr] = useState<string | null>(null);
-
-  // Recent imported threads (optional display)
-  const [threads, setThreads] = useState<TextThreadRow[]>([]);
-  const [loadingThreads, setLoadingThreads] = useState(false);
 
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
@@ -107,13 +288,11 @@ export default function ContactDetailPage() {
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
-    const user = data.session?.user ?? null;
-    if (!user) {
+    if (!data.session) {
       window.location.href = "/login";
       return null;
     }
-    setUid(user.id);
-    return data.session!;
+    return data.session;
   }
 
   async function fetchAll() {
@@ -159,28 +338,6 @@ export default function ContactDetailPage() {
     setTouches((tData ?? []) as Touch[]);
   }
 
-  async function fetchThreads() {
-    if (!uid) return;
-    setLoadingThreads(true);
-
-    const { data, error } = await supabase
-      .from("text_threads")
-      .select("id, title, summary, last_activity_at, created_at")
-      .eq("user_id", uid)
-      .eq("contact_id", id)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    setLoadingThreads(false);
-
-    if (error) {
-      // Keep it non-blocking; threads list is optional UI
-      return;
-    }
-
-    setThreads((data ?? []) as TextThreadRow[]);
-  }
-
   async function saveContact() {
     if (!contact) return;
     setSavingContact(true);
@@ -215,7 +372,7 @@ export default function ContactDetailPage() {
     setLogSummary("");
     setLogSource("manual");
     setLogLink("");
-    setLogOccurredAt(toDatetimeLocalValue(new Date()));
+    setLogWhen(toDatetimeLocalValue(new Date()));
   }
 
   async function saveTouch() {
@@ -223,14 +380,14 @@ export default function ContactDetailPage() {
     setSavingTouch(true);
     setError(null);
 
-    const occurredISO = parseDatetimeLocalToISO(logOccurredAt) || new Date().toISOString();
+    const when = fromDatetimeLocalValue(logWhen) ?? new Date();
 
     const { error } = await supabase.from("touches").insert({
       contact_id: contact.id,
       channel: logChannel,
       direction: logDirection,
       intent: logIntent,
-      occurred_at: occurredISO,
+      occurred_at: when.toISOString(),
       summary: logSummary.trim() ? logSummary.trim() : null,
       source: logSource.trim() ? logSource.trim() : null,
       source_link: logLink.trim() ? logLink.trim() : null,
@@ -247,55 +404,16 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
-  async function importThread() {
-    setImportErr(null);
-    setImportMsg(null);
-
-    if (!uid) return setImportErr("Not signed in.");
-    if (!contact) return setImportErr("No contact loaded.");
-    if (!threadRaw.trim() || threadRaw.trim().length < 20) return setImportErr("Paste a longer iMessage thread.");
-
-    setImportBusy(true);
-
-    try {
-      const res = await fetch("/api/text/imessage/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid,
-          contact_id: contact.id,
-          title: threadTitle.trim() || null,
-          raw_text: threadRaw,
-        }),
-      });
-
-      const j = await res.json();
-
-      if (!res.ok) {
-        setImportErr(j?.error || "Import failed");
-      } else {
-        setImportMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
-        setThreadTitle("");
-        setThreadRaw("");
-        await fetchThreads();
-      }
-    } catch (e: any) {
-      setImportErr(e?.message || "Import failed");
-    } finally {
-      setImportBusy(false);
-    }
-  }
-
   useEffect(() => {
     let alive = true;
 
     const init = async () => {
       const { data } = await supabase.auth.getSession();
-      const user = data.session?.user ?? null;
+      const uid = data.session?.user.id ?? null;
 
       if (!alive) return;
 
-      if (!user) {
+      if (!uid) {
         setTimeout(async () => {
           const { data: d2 } = await supabase.auth.getSession();
           if (!d2.session) window.location.href = "/login";
@@ -303,14 +421,13 @@ export default function ContactDetailPage() {
         return;
       }
 
-      setUid(user.id);
       setReady(true);
       await fetchAll();
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      const user = session?.user ?? null;
-      if (!user) window.location.href = "/login";
+      const uid = session?.user.id ?? null;
+      if (!uid) window.location.href = "/login";
     });
 
     init();
@@ -321,12 +438,6 @@ export default function ContactDetailPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  useEffect(() => {
-    if (!uid) return;
-    fetchThreads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, id]);
 
   if (!ready) return <div className="card cardPad">Loading…</div>;
 
@@ -428,86 +539,9 @@ export default function ContactDetailPage() {
         </div>
       )}
 
-      {/* Upload text thread */}
-      <div className="section" style={{ marginTop: 18 }}>
-        <div className="sectionTitleRow">
-          <div className="sectionTitle">Upload text thread</div>
-          <div className="sectionSub">Paste iMessage thread text → attach to this contact → used for notes + better drafts.</div>
-        </div>
+      {/* Upload texts */}
+      <TextThreadUploadPanel contactId={contact.id} contactName={contact.display_name} />
 
-        {(importErr || importMsg) && (
-          <div className="card cardPad" style={{ borderColor: importErr ? "rgba(160,0,0,0.25)" : undefined }}>
-            <div style={{ fontWeight: 900, color: importErr ? "#8a0000" : "#0b6b2a", whiteSpace: "pre-wrap" }}>
-              {importErr || importMsg}
-            </div>
-          </div>
-        )}
-
-        <div className="card cardPad">
-          <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-            <input
-              className="input"
-              value={threadTitle}
-              onChange={(e) => setThreadTitle(e.target.value)}
-              placeholder='Optional title (e.g., "Feb 2026 — appliance planning")'
-              style={{ flex: 1, minWidth: 260 }}
-            />
-            <button className="btn btnPrimary" onClick={importThread} disabled={importBusy}>
-              {importBusy ? "Importing…" : "Import"}
-            </button>
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <textarea
-              className="textarea"
-              value={threadRaw}
-              onChange={(e) => setThreadRaw(e.target.value)}
-              placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: All good...`}
-              style={{ minHeight: 220 }}
-            />
-          </div>
-
-          <div className="muted small" style={{ marginTop: 10 }}>
-            Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw thread is saved.
-          </div>
-        </div>
-
-        {/* Recent threads list */}
-        <div className="card cardPad" style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 900, fontSize: 14 }}>Recent imports</div>
-          {loadingThreads ? (
-            <div className="muted" style={{ marginTop: 8 }}>Loading…</div>
-          ) : threads.length === 0 ? (
-            <div className="muted" style={{ marginTop: 8 }}>No imported threads yet.</div>
-          ) : (
-            <div className="stack" style={{ marginTop: 10 }}>
-              {threads.map((t) => (
-                <div key={t.id} className="cardSoft cardPad">
-                  <div className="rowBetween" style={{ gap: 10 }}>
-                    <div style={{ fontWeight: 900, minWidth: 0 }}>
-                      {t.title || "Untitled thread"}
-                      <div className="muted small" style={{ marginTop: 4 }}>
-                        {t.last_activity_at ? `Last activity: ${new Date(t.last_activity_at).toLocaleString()}` : `Imported: ${new Date(t.created_at).toLocaleString()}`}
-                      </div>
-                    </div>
-                  </div>
-                  {t.summary ? (
-                    <div className="small" style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                      {t.summary}
-                    </div>
-                  ) : (
-                    <div className="muted small" style={{ marginTop: 10 }}>
-                      No summary saved (optional columns may not exist yet).
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Touch history */}
       <div className="card cardPad stack">
         <div style={{ fontWeight: 900, fontSize: 16 }}>Touch history</div>
 
@@ -545,7 +579,6 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* Log touch modal */}
       {logOpen && (
         <div
           style={{
@@ -559,13 +592,11 @@ export default function ContactDetailPage() {
             zIndex: 999,
           }}
         >
-          <div className="card cardPad" style={{ width: "min(900px, 100%)" }}>
+          <div className="card cardPad" style={{ width: "min(860px, 100%)" }}>
             <div className="rowBetween">
               <div>
                 <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
-                <div className="subtle" style={{ marginTop: 4 }}>
-                  {contact.display_name}
-                </div>
+                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
               </div>
               <button className="btn" onClick={() => setLogOpen(false)}>
                 Close
@@ -575,12 +606,7 @@ export default function ContactDetailPage() {
             <div className="row" style={{ marginTop: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div className="field" style={{ width: 220 }}>
                 <div className="label">When</div>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={logOccurredAt}
-                  onChange={(e) => setLogOccurredAt(e.target.value)}
-                />
+                <input className="input" type="datetime-local" value={logWhen} onChange={(e) => setLogWhen(e.target.value)} />
               </div>
 
               <div className="field" style={{ width: 160 }}>
@@ -612,40 +638,24 @@ export default function ContactDetailPage() {
                   <option value="deal_followup">deal_followup</option>
                   <option value="collaboration">collaboration</option>
                   <option value="event_invite">event_invite</option>
-                  <option value="event_invite">event_invite</option>
                   <option value="other">other</option>
                 </select>
               </div>
 
               <div className="field" style={{ flex: 1, minWidth: 220 }}>
                 <div className="label">Source</div>
-                <input
-                  className="input"
-                  value={logSource}
-                  onChange={(e) => setLogSource(e.target.value)}
-                  placeholder="manual / gmail / sms"
-                />
+                <input className="input" value={logSource} onChange={(e) => setLogSource(e.target.value)} placeholder="manual / gmail / sms" />
               </div>
 
               <div className="field" style={{ flex: 1, minWidth: 260 }}>
                 <div className="label">Link (optional)</div>
-                <input
-                  className="input"
-                  value={logLink}
-                  onChange={(e) => setLogLink(e.target.value)}
-                  placeholder="thread link / calendar link"
-                />
+                <input className="input" value={logLink} onChange={(e) => setLogLink(e.target.value)} placeholder="thread link / calendar link" />
               </div>
             </div>
 
             <div className="field" style={{ marginTop: 10 }}>
               <div className="label">Summary (optional)</div>
-              <textarea
-                className="textarea"
-                value={logSummary}
-                onChange={(e) => setLogSummary(e.target.value)}
-                placeholder="Quick note about what happened"
-              />
+              <textarea className="textarea" value={logSummary} onChange={(e) => setLogSummary(e.target.value)} placeholder="Quick note about what happened" />
             </div>
 
             <div className="row" style={{ marginTop: 12 }}>

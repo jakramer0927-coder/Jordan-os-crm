@@ -9,6 +9,7 @@ type ContactLite = {
   category: string;
   tier: string | null;
   email: string | null;
+  company?: string | null;
 };
 
 export default function ContactsPage() {
@@ -21,7 +22,6 @@ export default function ContactsPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
-  const reqSeq = useRef(0);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -34,80 +34,100 @@ export default function ContactsPage() {
     return user;
   }
 
-  async function search(query: string) {
-    if (!uid) return;
+  async function loadRecent(userId: string) {
+    setBusy(true);
+    setErr(null);
 
-    const term = query.trim();
-    if (term.length < 2) {
-      // don’t spam DB for 0–1 chars
+    // Uses RLS via supabase client. If you don’t have RLS policies, this will fail — but most setups do.
+    const { data, error } = await supabase
+      .from("contacts")
+      .select("id, display_name, category, tier, email, company")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(50);
+
+    setBusy(false);
+
+    if (error) {
+      setErr(`Load contacts failed: ${error.message}`);
       setRows([]);
-      setBusy(false);
-      setErr(null);
       return;
     }
 
-    // cancel previous
+    setRows((data ?? []) as ContactLite[]);
+  }
+
+  async function search(term: string) {
+    if (!uid) return;
+
+    const qRaw = term.trim();
+    if (!qRaw) {
+      // empty search -> show recent
+      await loadRecent(uid);
+      return;
+    }
+
+    // guard to keep it snappy
+    if (qRaw.length < 2) return;
+
+    // cancel in-flight request
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
-
-    const mySeq = ++reqSeq.current;
 
     setBusy(true);
     setErr(null);
 
     try {
-      const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(term)}`, {
+      const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(qRaw)}`, {
         signal: ac.signal,
       });
 
-      const j = await res.json();
-
-      // if a newer request started, ignore this response
-      if (mySeq !== reqSeq.current) return;
+      const j = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setErr(j?.error || "Search failed");
         setRows([]);
-        setBusy(false);
         return;
       }
 
       setRows((j.results || []) as ContactLite[]);
-      setBusy(false);
     } catch (e: any) {
-      if (e?.name === "AbortError") return; // expected
-      if (mySeq !== reqSeq.current) return;
-
-      setErr(e?.message || "Search failed");
-      setRows([]);
+      // ignore abort errors
+      if (e?.name !== "AbortError") setErr(e?.message || "Search failed");
+    } finally {
       setBusy(false);
     }
   }
 
-  // debounce (a bit slower + safer)
-  useEffect(() => {
-    if (!uid) return;
-    const t = setTimeout(() => search(q), 280);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, uid]);
-
+  // init
   useEffect(() => {
     requireSession().then((u) => {
-      if (u) setReady(true);
+      if (!u) return;
+      setReady(true);
+      loadRecent(u.id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // debounce search
+  useEffect(() => {
+    if (!uid) return;
+    const t = setTimeout(() => {
+      search(q);
+    }, 220);
+
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, uid]);
+
   const hint = useMemo(() => {
-    const term = q.trim();
-    if (!term) return "Type at least 2 characters…";
-    if (term.length < 2) return "Keep typing…";
+    const qt = q.trim();
+    if (!qt) return busy ? "Loading recent…" : `${rows.length} recent`;
+    if (qt.length < 2) return "Type 2+ characters…";
     if (busy) return "Searching…";
-    if (err) return "Search error";
     return `${rows.length} result(s)`;
-  }, [q, busy, rows.length, err]);
+  }, [q, busy, rows.length]);
 
   if (!ready) return <div className="page">Loading…</div>;
 
@@ -122,22 +142,21 @@ export default function ContactsPage() {
         </div>
 
         <div className="row">
-          <a className="btn" href="/morning">Morning</a>
-          <a className="btn" href="/unmatched">Unmatched</a>
+          <a className="btn" href="/morning">
+            Morning
+          </a>
+          <a className="btn" href="/unmatched">
+            Unmatched
+          </a>
         </div>
       </div>
 
       {err ? <div className="alert alertError">{err}</div> : null}
 
       <div className="card cardPad">
-        <input
-          className="input"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search name, email, company, phone…"
-        />
+        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" />
         <div className="muted small" style={{ marginTop: 8 }}>
-          Tip: name searches are prefix-based (fast). Email/phone searches match anywhere.
+          Tip: leave blank to see your most recently updated contacts.
         </div>
       </div>
 
@@ -148,15 +167,16 @@ export default function ContactsPage() {
               <div className="rowBetween">
                 <div style={{ fontWeight: 900 }}>{c.display_name}</div>
                 <div className="muted small">
-                  {c.category}{c.tier ? ` • ${c.tier}` : ""}{c.email ? ` • ${c.email}` : ""}
+                  {c.category}
+                  {c.tier ? ` • ${c.tier}` : ""}
+                  {c.company ? ` • ${c.company}` : ""}
+                  {c.email ? ` • ${c.email}` : ""}
                 </div>
               </div>
             </a>
           ))}
 
-          {q.trim().length >= 2 && !busy && rows.length === 0 ? (
-            <div className="muted">No matches.</div>
-          ) : null}
+          {!busy && rows.length === 0 ? <div className="muted">No matches.</div> : null}
         </div>
       </div>
     </div>
