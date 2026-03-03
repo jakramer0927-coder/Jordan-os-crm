@@ -198,4 +198,12 @@ export async function POST(req: Request) {
     console.error("IMESSAGE_IMPORT_CRASH", se);
     return NextResponse.json({ error: "iMessage import crashed", details: se }, { status: 500 });
   }
-}
+}await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/contacts/insights/from-thread`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    uid,
+    contact_id: contactId,
+    thread_id,
+  }),
+});
