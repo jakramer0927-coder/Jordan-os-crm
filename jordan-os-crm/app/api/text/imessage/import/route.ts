@@ -23,9 +23,32 @@ type Body = {
   raw_text: string;
 };
 
-type Parsed = { senderRaw: string; text: string };
+type ParsedLine = {
+  sender_raw: string; // original name in transcript
+  sender: "me" | "them";
+  direction: "outbound" | "inbound";
+  body: string; // message text
+  occurred_at: string | null; // we’re not parsing timestamps yet
+};
 
-function parseIMessage(raw: string): Parsed[] {
+function normalizeSender(name: string): { sender: "me" | "them"; direction: "outbound" | "inbound" } {
+  const n = (name || "").trim().toLowerCase();
+
+  // common “me” patterns from iMessage exports/pastes
+  const meNames = new Set(["you", "me", "jordan", "jordan kramer"]);
+
+  if (meNames.has(n) || n.includes("you")) return { sender: "me", direction: "outbound" };
+
+  return { sender: "them", direction: "inbound" };
+}
+
+/**
+ * Minimal parser for iMessage pasted transcripts.
+ * Format we support best:
+ *   Name: message
+ * continuation lines appended until next Name:
+ */
+function parseIMessage(raw: string): ParsedLine[] {
   const lines = raw
     .split(/\r?\n/)
     .map((l) => l.trimEnd())
@@ -33,75 +56,51 @@ function parseIMessage(raw: string): Parsed[] {
 
   const msgStart = /^(.{1,60}):\s*(.*)$/;
 
-  const out: Parsed[] = [];
-  let current: Parsed | null = null;
+  let current: { sender_raw: string; text: string } | null = null;
+  const out: ParsedLine[] = [];
+
+  function flush() {
+    if (!current) return;
+    const text = current.text.trim();
+    if (!text) return;
+
+    const norm = normalizeSender(current.sender_raw);
+    // preserve original speaker label in body prefix (helps later)
+    const body = `[${current.sender_raw}] ${text}`;
+
+    out.push({
+      sender_raw: current.sender_raw,
+      sender: norm.sender,
+      direction: norm.direction,
+      occurred_at: null,
+      body,
+    });
+  }
 
   for (const line of lines) {
     const m = line.match(msgStart);
     if (m) {
-      if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
-      current = { senderRaw: m[1]!.trim(), text: (m[2] || "").trim() };
+      flush();
+      current = { sender_raw: m[1]!.trim(), text: (m[2] || "").trim() };
     } else {
-      if (!current) current = { senderRaw: "Unknown", text: line.trim() };
+      if (!current) current = { sender_raw: "Unknown", text: line.trim() };
       else current.text += `\n${line.trim()}`;
     }
   }
-  if (current && current.text.trim()) out.push({ ...current, text: current.text.trim() });
 
+  flush();
+
+  // protect against absurd pastes
   return out.slice(0, 2000);
 }
 
-function guessDirectionAndSender(senderRaw: string) {
-  const s = (senderRaw || "").toLowerCase().trim();
-
-  // Common paste patterns
-  const meAliases = new Set(["you", "me", "jordan", "jordan kramer", "jk"]);
-  const themAliases = new Set(["them", "other"]);
-
-  // sender constrained by DB check constraint
-  let sender: "me" | "them" = "them";
-  let direction: "outbound" | "inbound" = "inbound";
-
-  if (meAliases.has(s)) {
-    sender = "me";
-    direction = "outbound";
-  } else if (themAliases.has(s)) {
-    sender = "them";
-    direction = "inbound";
-  } else {
-    // default: treat unknown names as "them"
-    sender = "them";
-    direction = "inbound";
+async function insertInChunks<T extends object>(table: string, rows: T[], chunkSize = 200) {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    // eslint-disable-next-line no-await-in-loop
+    const { error } = await supabaseAdmin.from(table).insert(chunk);
+    if (error) throw new Error(error.message);
   }
-
-  return { sender, direction };
-}
-
-function chunk<T>(arr: T[], size: number) {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-function makeSummary(messages: Array<{ sender: "me" | "them"; body: string }>) {
-  const lastInbound = [...messages].reverse().find((m) => m.sender === "them")?.body || "";
-  const lastOutbound = [...messages].reverse().find((m) => m.sender === "me")?.body || "";
-
-  const openQuestion =
-    [...messages]
-      .reverse()
-      .find((m) => m.sender === "me" && m.body.includes("?"))
-      ?.body.split("\n")[0]
-      .slice(0, 180) || null;
-
-  const topicGuess = (lastInbound || lastOutbound).slice(0, 200);
-
-  return [
-    `Topic: ${topicGuess || "—"}`,
-    openQuestion ? `Open loop: ${openQuestion}` : `Open loop: —`,
-    lastInbound ? `Last inbound: ${lastInbound.slice(0, 180)}` : `Last inbound: —`,
-    lastOutbound ? `Last outbound: ${lastOutbound.slice(0, 180)}` : `Last outbound: —`,
-  ].join("\n");
 }
 
 export async function POST(req: Request) {
@@ -109,7 +108,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as Body;
 
     const uid = body?.uid || "";
-    const contactId = body?.contact_id || null;
+    const contactId = body?.contact_id ?? null;
     const title = (body?.title || "").trim() || null;
     const rawText = (body?.raw_text || "").trim();
 
@@ -117,7 +116,7 @@ export async function POST(req: Request) {
     if (contactId && !isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
     if (!rawText || rawText.length < 20) return NextResponse.json({ error: "raw_text is too short" }, { status: 400 });
 
-    // 1) Insert thread
+    // 1) Save thread
     const { data: threadRow, error: threadErr } = await supabaseAdmin
       .from("text_threads")
       .insert({
@@ -136,7 +135,7 @@ export async function POST(req: Request) {
 
     const thread_id = threadRow.id as string;
 
-    // 2) Parse + normalize + insert messages
+    // 2) Parse + insert messages
     const parsed = parseIMessage(rawText);
 
     if (parsed.length === 0) {
@@ -144,66 +143,35 @@ export async function POST(req: Request) {
         ok: true,
         thread_id,
         inserted_messages: 0,
-        note: "Thread saved, but no messages were parsed. Raw stored.",
+        note: "Thread saved, but no messages were parsed. Raw thread still stored.",
       });
     }
 
-    const toInsert = parsed.map((m) => {
-      const g = guessDirectionAndSender(m.senderRaw);
-      return {
-        user_id: uid,
-        thread_id,
-        contact_id: contactId,
-        sender: g.sender, // "me" | "them" satisfies sender check
-        direction: g.direction, // satisfies direction NOT NULL
-        occurred_at: null,
-        body: `[${m.senderRaw}] ${m.text}`,
-      };
-    });
+    const nowIso = new Date().toISOString();
 
-    const chunks = chunk(toInsert, 250);
-    let inserted = 0;
+    const toInsert = parsed.map((m) => ({
+      user_id: uid,
+      thread_id,
+      contact_id: contactId,
+      sender: m.sender, // must satisfy DB check constraint
+      direction: m.direction,
+      occurred_at: m.occurred_at,
+      body: m.body,
+      created_at: nowIso,
+    }));
 
-    for (const ch of chunks) {
-      // eslint-disable-next-line no-await-in-loop
-      const { error: msgErr } = await supabaseAdmin.from("text_messages").insert(ch);
-      if (msgErr) {
-        return NextResponse.json(
-          { ok: false, error: msgErr.message, thread_id, inserted_messages: inserted },
-          { status: 500 }
-        );
-      }
-      inserted += ch.length;
-    }
-
-    // 3) Auto-summary (deterministic)
-    const summary = makeSummary(toInsert.map((x) => ({ sender: x.sender, body: x.body })));
-
-    // Best-effort update; if columns don't exist yet, you’ll see the error in response.
-    const { error: sumErr } = await supabaseAdmin
-      .from("text_threads")
-      .update({ summary, last_activity_at: new Date().toISOString() })
-      .eq("id", thread_id);
+    await insertInChunks("text_messages", toInsert, 200);
 
     return NextResponse.json({
       ok: true,
       thread_id,
-      inserted_messages: inserted,
-      summary_saved: !sumErr,
-      summary_error: sumErr ? sumErr.message : null,
+      inserted_messages: toInsert.length,
       sample: toInsert.slice(0, 3),
+      note: "sender normalized to satisfy DB constraint; original sender preserved in body prefix.",
     });
   } catch (e) {
     const se = safeErr(e);
     console.error("IMESSAGE_IMPORT_CRASH", se);
     return NextResponse.json({ error: "iMessage import crashed", details: se }, { status: 500 });
   }
-}await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/contacts/insights/from-thread`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    uid,
-    contact_id: contactId,
-    thread_id,
-  }),
-});
+}
