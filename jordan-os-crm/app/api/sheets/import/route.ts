@@ -178,6 +178,7 @@ export async function GET(req: Request) {
         const { error: updErr } = await supabaseAdmin
           .from("contacts")
           .update({
+            user_id: uid,
             display_name: name,
             category,
             tier,
@@ -194,6 +195,7 @@ export async function GET(req: Request) {
         const { data: ins, error: insErr } = await supabaseAdmin
           .from("contacts")
           .insert({
+            user_id: uid,
             display_name: name,
             category,
             tier,
