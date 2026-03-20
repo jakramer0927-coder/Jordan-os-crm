@@ -77,7 +77,7 @@ function daysSince(iso: string): number {
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
   } catch {
     return iso;
   }
@@ -154,12 +154,11 @@ function buildDraftWithVoice(opts: {
   const cat = (c.category || "").toLowerCase();
   const name = firstName(c.display_name);
 
-  // “Jordan voice” scaffolding: opener → value/ask → soft close
   const openers = [
     `Hey ${name} — quick one.`,
     `Hey ${name} — quick check-in.`,
     `Hi ${name} — quick note.`,
-    `Hey ${name} — hope you’re doing well.`,
+    `Hey ${name} — hope you're doing well.`,
   ];
 
   const softCloses = [
@@ -170,21 +169,21 @@ function buildDraftWithVoice(opts: {
   ];
 
   const agentValues = [
-    "I’ve got an active buyer in the market right now and I’m keeping my eyes open.",
-    "I’m seeing a little shift in buyer sensitivity — curious what you’re noticing.",
-    "I’m comparing a few pockets right now — always interested in anything quiet/off-market.",
+    "I've got an active buyer in the market right now and I'm keeping my eyes open.",
+    "I'm seeing a little shift in buyer sensitivity — curious what you're noticing.",
+    "I'm comparing a few pockets right now — always interested in anything quiet/off-market.",
   ];
 
   const agentAsks = [
     "Do you have anything coming up (or off-market) that I should know about?",
     "What are you seeing right now on pricing + demand?",
-    "Any inventory you’re watching that feels like it’s about to trade?",
+    "Any inventory you're watching that feels like it's about to trade?",
   ];
 
   const clientValues = [
-    "Just checking in and making sure everything’s going smoothly on your end.",
-    "Wanted to say hi — it’s been a minute and I figured I’d reach out.",
-    "Quick pulse check — I’ve been watching the market closely and thought of you.",
+    "Just checking in and making sure everything's going smoothly on your end.",
+    "Wanted to say hi — it's been a minute and I figured I'd reach out.",
+    "Quick pulse check — I've been watching the market closely and thought of you.",
   ];
 
   const clientAsks = [
@@ -194,30 +193,29 @@ function buildDraftWithVoice(opts: {
   ];
 
   const devValues = [
-    "Checking in — curious what you’re seeing on absorption + buyer feedback right now.",
-    "Wanted to reconnect and see what’s in the pipeline.",
-    "Quick note — I’m tracking a few new-build comps and would love to compare notes.",
+    "Checking in — curious what you're seeing on absorption + buyer feedback right now.",
+    "Wanted to reconnect and see what's in the pipeline.",
+    "Quick note — I'm tracking a few new-build comps and would love to compare notes.",
   ];
 
   const devAsks = [
     "Anything upcoming that fits the current moment?",
-    "What’s your read on pricing strategy this quarter?",
+    "What's your read on pricing strategy this quarter?",
     "Are you seeing more pushback on finishes or layout lately?",
   ];
 
   const vendorValues = [
     "Quick check-in — hope business is good on your side.",
-    "Wanted to stay in touch — I’ve got a few projects moving and may need help soon.",
-    "Quick note — I’m tightening up my vendor bench and making sure I’ve got the right partners queued.",
+    "Wanted to stay in touch — I've got a few projects moving and may need help soon.",
+    "Quick note — I'm tightening up my vendor bench and making sure I've got the right partners queued.",
   ];
 
   const vendorAsks = [
-    "What’s your schedule look like over the next couple weeks?",
+    "What's your schedule look like over the next couple weeks?",
     "Any changes to pricing or lead times I should be aware of?",
-    "If I loop you in on something, what’s the fastest way to get it on your radar?",
+    "If I loop you in on something, what's the fastest way to get it on your radar?",
   ];
 
-  // If we have voice profile, nudge opener/close choices toward the phrases you actually use
   const voice = opts.voice;
   let opener = choose(openers, `Hey ${name} — quick one.`);
   let close = choose(softCloses, "No rush — just let me know.");
@@ -225,7 +223,6 @@ function buildDraftWithVoice(opts: {
   if (voice?.topPhrases?.some((p) => p.phrase === "no rush")) close = "No rush — just let me know.";
   if (voice?.topPhrases?.some((p) => p.phrase === "quick one")) opener = `Hey ${name} — quick one.`;
 
-  // Build by category
   let value = "";
   let ask = "";
 
@@ -243,21 +240,18 @@ function buildDraftWithVoice(opts: {
     ask = choose(clientAsks, clientAsks[0]);
   }
 
-  // Intent tweaks (keep it subtle)
   if (opts.intent === "referral_ask") {
     ask =
       cat === "agent"
-        ? "If you bump into anyone who needs a strong agent on the buy side, I’d really appreciate a quick intro."
-        : "If anyone comes up in your world who needs help buying or selling, I’d be grateful for an intro.";
+        ? "If you bump into anyone who needs a strong agent on the buy side, I'd really appreciate a quick intro."
+        : "If anyone comes up in your world who needs help buying or selling, I'd be grateful for an intro.";
   }
 
   if (opts.intent === "review_ask") {
     ask =
-      "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you’d think.";
+      "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you'd think.";
   }
 
-  // Keep it Jordan-short: 2–4 sentences max
-  // Email can be slightly longer; text should be tighter.
   const isText = opts.channel === "text";
   const body = isText
     ? `${opener} ${value} ${ask} ${close}`
@@ -297,6 +291,10 @@ export default function MorningPage() {
   const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
+  // stable list + completed tracking
+  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
     const user = data.session?.user ?? null;
@@ -329,10 +327,8 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) return;
 
-    // Load voice once
     if (!voiceLoaded) await loadVoiceProfile(user.id);
 
-    // Contacts
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, client_type, email, created_at")
@@ -353,7 +349,6 @@ export default function MorningPage() {
       return;
     }
 
-    // Outbound touches only
     const ids = base.map((c) => c.id);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -431,9 +426,10 @@ export default function MorningPage() {
       return;
     }
 
-    setMsg("Touch saved.");
+    // Mark as completed — do NOT reload (this is what caused reshuffling)
+    setCompletedIds((prev) => new Set([...prev, loggingFor]));
+    setMsg("Touch logged ✓");
     setLoggingFor(null);
-    await load();
   }
 
   useEffect(() => {
@@ -498,7 +494,6 @@ export default function MorningPage() {
 
       const suggested_channel = pickChannel(c);
 
-      // Here’s the key: voice-based drafts
       const suggested_draft = buildDraftWithVoice({
         contact: c,
         intent: "check_in",
@@ -547,6 +542,21 @@ export default function MorningPage() {
 
     return top;
   }, [contacts, voice]);
+
+  // Lock the initial 5 IDs after first load to prevent reshuffling
+  useEffect(() => {
+    if (lockedIds === null && recs.length > 0) {
+      setLockedIds(recs.map((r) => r.id));
+    }
+  }, [recs]);
+
+  // Stable display list — always shows the same 5 contacts from first load
+  const displayRecs = useMemo<Recommendation[]>(() => {
+    if (lockedIds === null) return recs;
+    return lockedIds
+      .map((id) => recs.find((r) => r.id === id))
+      .filter((r): r is Recommendation => r != null);
+  }, [lockedIds, recs]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
@@ -633,7 +643,7 @@ export default function MorningPage() {
 
         {!weekday ? (
           <div className="muted small" style={{ marginTop: 10 }}>
-            It’s the weekend — this still shows priorities, but your accountability focus is
+            It's the weekend — this still shows priorities, but your accountability focus is
             weekdays.
           </div>
         ) : null}
@@ -641,19 +651,29 @@ export default function MorningPage() {
 
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
-          <div className="sectionTitle">Today’s Top 5</div>
+          <div className="sectionTitle">Today's Top 5</div>
           <div className="sectionSub">
             Ranked by overdue + tier + category + days since outbound.
           </div>
         </div>
 
         <div className="stack">
-          {recs.map((c, idx) => {
+          {displayRecs.map((c, idx) => {
+            const completed = completedIds.has(c.id);
             const agent = (c.category || "").toLowerCase() === "agent";
             const overdue = c.overdue;
 
             return (
-              <div key={c.id} className="card cardPad">
+              <div
+                key={c.id}
+                className="card cardPad"
+                style={completed ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+              >
+                {completed && (
+                  <div className="small bold" style={{ color: "#0b6b2a", marginBottom: 8 }}>
+                    ✓ Logged today
+                  </div>
+                )}
                 <div
                   className="row"
                   style={{ justifyContent: "space-between", alignItems: "flex-start" }}
@@ -822,7 +842,7 @@ export default function MorningPage() {
             );
           })}
 
-          {recs.length === 0 ? (
+          {displayRecs.length === 0 ? (
             <div className="card cardPad">
               <div className="muted">No contacts found yet — add a few on Contacts first.</div>
             </div>
