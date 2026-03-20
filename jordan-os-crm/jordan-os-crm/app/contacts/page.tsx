@@ -43,7 +43,8 @@ export default function ContactsPage() {
     const { data, error } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, email, company")
-      .order("created_at", { ascending: false })
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
       .limit(50);
 
     setBusy(false);

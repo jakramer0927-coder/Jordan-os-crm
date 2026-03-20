@@ -1,0 +1,521 @@
+/* app/globals.css */
+
+/* ===== Reset ===== */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+code {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+}
+
+/* ===== Smith & Berg-ish tokens ===== */
+:root {
+  --bg: #ffffff;
+  --paper: #ffffff;
+
+  /* warm neutral header tint */
+  --sand: #f7f4ee;
+
+  --ink: #121212;
+  --muted: rgba(18, 18, 18, 0.64);
+  --muted2: rgba(18, 18, 18, 0.48);
+
+  --line: rgba(18, 18, 18, 0.12);
+  --line2: rgba(18, 18, 18, 0.08);
+
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+
+  --radius: 14px;
+  --radiusSm: 12px;
+}
+
+/* ===== Base typography ===== */
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Helvetica,
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
+  line-height: 1.25;
+}
+
+/* ===== Links (SAFE defaults) ===== */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* underline ONLY in main content, never in nav */
+main a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.nav a {
+  text-decoration: none !important;
+}
+
+/* ===== App shell ===== */
+.appShell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 16px 40px;
+}
+
+/* ===== Header / Nav ===== */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(247, 244, 238, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line2);
+}
+
+.topbarInner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.brandName {
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
+.brandSub {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.navLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.86);
+  font-weight: 900;
+  font-size: 13px;
+  color: var(--ink);
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.navLink:hover {
+  transform: translateY(-1px);
+  border-color: rgba(18, 18, 18, 0.18);
+}
+
+.topbarRight {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+/* ===== Sections / typography helpers ===== */
+.section {
+  margin-top: 14px;
+}
+
+.sectionTitleRow {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: -0.1px;
+}
+
+.sectionSub {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.bold {
+  font-weight: 900;
+}
+
+/* ===== Premium controls ===== */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .8);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.segBtn {
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.segBtnActive {
+  background: #121212;
+  color: #fff;
+}
+
+/* ===== Draft preview ===== */
+.preview {
+  border: 1px solid var(--line2);
+  background: rgba(247, 244, 238, .55);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.previewHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.previewTitle {
+  font-weight: 900;
+}
+
+.previewBody {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  font-size: 14px;
+}
+
+/* ===== Compact helper ===== */
+.kicker {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+/* ===== Collapsible "Advanced" ===== */
+.details {
+  border: 1px solid var(--line2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .7);
+  padding: 12px;
+}
+
+.detailsSummary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.detailsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.detailsHint {
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+/* ===== UI primitives ===== */
+.h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.subtle {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.rowBetween {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  border: 1px solid var(--line2);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+}
+
+.cardPad {
+  padding: 14px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.hr {
+  border: 0;
+  border-top: 1px solid var(--line2);
+  margin: 12px 0;
+}
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(18, 18, 18, 0.18);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btnPrimary {
+  background: #121212;
+  color: #fff;
+  border-color: #121212;
+}
+
+.btnPrimary:hover {
+  border-color: #121212;
+  background: #1b1b1b;
+}
+
+.btnGhost {
+  background: transparent;
+}
+
+.btnLink {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-weight: 900;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ===== Inputs ===== */
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radiusSm);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: rgba(18, 18, 18, 0.28);
+  box-shadow: 0 0 0 4px rgba(18, 18, 18, 0.06);
+}
+
+/* ===== Alerts ===== */
+.alert {
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  border: 1px solid var(--line2);
+  background: rgba(247, 244, 238, 0.7);
+  font-weight: 800;
+  white-space: pre-wrap;
+}
+
+.alertError {
+  border-color: rgba(220, 20, 60, 0.25);
+  background: rgba(220, 20, 60, 0.06);
+  color: #b1122a;
+}
+
+.alertOk {
+  border-color: rgba(0, 128, 0, 0.2);
+  background: rgba(0, 128, 0, 0.06);
+  color: #0a6b1a;
+}
+
+/* ===== Tables (for future) ===== */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--line2);
+}
+
+.table th {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+/* --- Mobile helpers --- */
+.rowResponsive {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.rowResponsiveBetween {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .btnFullMobile {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .fieldGridMobile {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .modalSheet {
+    align-items: flex-end !important;
+    padding: 12px !important;
+  }
+
+  .modalSheetCard {
+    width: 100% !important;
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 85vh;
+    overflow: auto;
+  }
+}
