@@ -325,7 +325,7 @@ export default function MorningPage() {
     setLoading(true);
 
     const user = await requireSession();
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
 
     if (!voiceLoaded) await loadVoiceProfile(user.id);
 
