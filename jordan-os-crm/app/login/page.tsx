@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+const supabase = createSupabaseBrowserClient();
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,7 @@ export default function LoginPage() {
       // Determine base URL (works local + production)
       const base =
         process.env.NEXT_PUBLIC_APP_BASE_URL &&
-        process.env.NEXT_PUBLIC_APP_BASE_URL.startsWith("http")
+          process.env.NEXT_PUBLIC_APP_BASE_URL.startsWith("http")
           ? process.env.NEXT_PUBLIC_APP_BASE_URL
           : window.location.origin;
 

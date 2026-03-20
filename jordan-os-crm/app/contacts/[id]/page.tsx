@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+const supabase = createSupabaseBrowserClient();
 import VoiceDraftPanel from "./VoiceDraftPanel";
 
 type TouchIntent =

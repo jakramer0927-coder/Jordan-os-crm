@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+const supabase = createSupabaseBrowserClient();
 
 export default function ImportsPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -65,13 +66,13 @@ export default function ImportsPage() {
 
       setMsg(
         `Done.\n\n` +
-          `scanned=${parsed.scanned}\n` +
-          `imported=${parsed.imported}\n` +
-          `updated=${parsed.updated}\n` +
-          `skipped=${parsed.skipped}\n` +
-          `agentsSkipped=${parsed.agentsSkipped}\n` +
-          `allowedAgents=${parsed.allowedAgents}` +
-          (parsed.agentWarning ? `\n\nWarning:\n${parsed.agentWarning}` : ""),
+        `scanned=${parsed.scanned}\n` +
+        `imported=${parsed.imported}\n` +
+        `updated=${parsed.updated}\n` +
+        `skipped=${parsed.skipped}\n` +
+        `agentsSkipped=${parsed.agentsSkipped}\n` +
+        `allowedAgents=${parsed.allowedAgents}` +
+        (parsed.agentWarning ? `\n\nWarning:\n${parsed.agentWarning}` : ""),
       );
     } catch (e: any) {
       setLoading(false);
