@@ -349,13 +349,11 @@ export default function MorningPage() {
       return;
     }
 
-    const ids = base.map((c) => c.id).slice(0, 200);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
       .select(
         "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
       )
-      .in("contact_id", ids)
       .eq("direction", "outbound")
       .order("occurred_at", { ascending: false })
       .limit(4000);
