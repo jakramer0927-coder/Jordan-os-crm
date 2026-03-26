@@ -38,6 +38,7 @@ type Touch = {
 type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
+  last_outbound_summary: string | null;
   days_since_outbound: number | null;
 };
 
@@ -380,6 +381,7 @@ export default function MorningPage() {
         ...c,
         last_outbound_at: last ? last.occurred_at : null,
         last_outbound_channel: last ? last.channel : null,
+        last_outbound_summary: last ? last.summary : null,
         days_since_outbound: last ? daysSince(last.occurred_at) : null,
       };
     });
@@ -691,13 +693,19 @@ export default function MorningPage() {
                       <span className="badge">{categoryBadge(c)}</span>
                       <span className="badge">Cadence {c.cadence}d</span>
                       {c.days_since_outbound == null ? (
-                        <span className="badge">Never outbound</span>
+                        <span className="badge">Never reached out</span>
                       ) : (
-                        <span className="badge">{c.days_since_outbound}d since</span>
+                        <span className="badge">{c.days_since_outbound}d ago</span>
                       )}
                       <span className="badge">{overdue ? "Overdue" : "On track"}</span>
-                      {agent ? <span className="badge">Agent touch</span> : null}
                     </div>
+
+                    {c.last_outbound_summary && (
+                      <div style={{ marginTop: 10, fontSize: 13, color: "#555", lineHeight: 1.45 }}>
+                        <span className="muted" style={{ fontWeight: 700, marginRight: 6 }}>Last note:</span>
+                        {c.last_outbound_summary}
+                      </div>
+                    )}
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
                       <div className="small muted bold" style={{ marginBottom: 6 }}>
