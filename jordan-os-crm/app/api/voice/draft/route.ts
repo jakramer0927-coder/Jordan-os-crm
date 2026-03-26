@@ -51,10 +51,9 @@ async function openaiDraft(args: {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
-    // Use Responses API style call (works well on Vercel Node runtime)
-    const model = args.model || process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const model = args.model || process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    const res = await fetch("https://api.openai.com/v1/responses", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -62,7 +61,7 @@ async function openaiDraft(args: {
         },
         body: JSON.stringify({
             model,
-            input: [
+            messages: [
                 { role: "system", content: args.system },
                 { role: "user", content: args.user },
             ],
@@ -77,18 +76,8 @@ async function openaiDraft(args: {
         throw new Error(msg);
     }
 
-    // responses API returns output_text convenience in many SDKs; here we’ll extract manually
-    const out = j?.output ?? [];
-    for (const item of out) {
-        const content = item?.content ?? [];
-        for (const c of content) {
-            if (c?.type === "output_text" && typeof c?.text === "string") return c.text.trim();
-        }
-    }
-
-    // fallback
-    const t = j?.output_text;
-    if (typeof t === "string" && t.trim()) return t.trim();
+    const text = j?.choices?.[0]?.message?.content;
+    if (typeof text === "string" && text.trim()) return text.trim();
 
     throw new Error("OpenAI returned no text");
 }
