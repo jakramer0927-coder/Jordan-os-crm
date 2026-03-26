@@ -224,7 +224,6 @@ export default function ContactDetailPage() {
       .from("contacts")
       .select("id, display_name, category, tier, client_type, created_at, user_id")
       .eq("id", id)
-      .eq("user_id", myUid)
       .single();
 
     if (cErr) {
