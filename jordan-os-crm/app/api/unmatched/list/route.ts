@@ -54,6 +54,7 @@ export async function GET(req: Request) {
       .limit(limit);
 
     if (!includeIgnored) q = q.neq("status", "ignored");
+    q = q.gte("seen_count", 2); // filter one-offs
     if (cursor) q = q.lt("last_seen_at", cursor);
 
     const { data, error } = await q;

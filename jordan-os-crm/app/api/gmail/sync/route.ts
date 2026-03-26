@@ -34,6 +34,42 @@ function headerValue(
   return found?.value || undefined;
 }
 
+// Domains that generate transactional/automated email — never useful as unmatched contacts
+const BUILTIN_IGNORE_DOMAINS = new Set([
+  // Brokerages
+  "compass.com", "elliman.com", "douglaselliman.com", "sothebysrealty.com",
+  "corcoran.com", "kwrealty.com", "kw.com", "coldwellbanker.com", "bhhs.com",
+  "berkshirehathawayhs.com", "theagencyre.com", "century21.com", "remax.com",
+  "remaxrealty.com", "christiesrealestate.com", "halstead.com", "brownharrisstevens.com",
+  "windermere.com", "longandfoster.com", "betterhomesandgardens.com",
+  // Automated / transactional
+  "notifications.google.com", "accounts.google.com", "mail.google.com",
+  "docusign.net", "docusign.com", "echosign.com", "hellosign.com",
+  "dropbox.com", "box.com", "zoom.us", "calendly.com",
+  "noreply.github.com", "mailchimp.com", "constantcontact.com",
+  "sendgrid.net", "amazonses.com", "mailgun.org",
+]);
+
+// Local-part patterns that indicate automated/no-reply senders
+const NOREPLY_PATTERNS = [
+  "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+  "notifications", "notification", "newsletter", "mailer", "bounce", "bounces",
+  "automated", "automailer", "auto-reply", "autoreply",
+  "support", "helpdesk", "help", "info", "hello", "team", "admin",
+  "billing", "invoices", "receipts", "updates", "alerts",
+];
+
+function shouldIgnoreForUnmatched(email: string): boolean {
+  const [local, domain] = email.toLowerCase().split("@");
+  if (!local || !domain) return true;
+  if (BUILTIN_IGNORE_DOMAINS.has(domain)) return true;
+  // Domain contains known brokerage/automated keywords
+  if (/realt(y|or)|brokerage|mls|escrow|titleco|titlecompany/.test(domain)) return true;
+  // Local part matches no-reply patterns
+  if (NOREPLY_PATTERNS.some((p) => local === p || local.startsWith(p + "-") || local.startsWith(p + "_") || local.startsWith(p + "+"))) return true;
+  return false;
+}
+
 function splitCsv(v: string | null | undefined): string[] {
   return (v || "")
     .split(",")
@@ -246,6 +282,7 @@ export async function GET(req: Request) {
           const threadId = full.data.threadId || "";
           const threadLink = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
           for (const e of allRecipients) {
+            if (shouldIgnoreForUnmatched(e)) continue;
             unmatchedCounts.set(e, (unmatchedCounts.get(e) || 0) + 1);
             if (!unmatchedMeta.has(e)) {
               unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
