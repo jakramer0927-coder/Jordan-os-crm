@@ -362,6 +362,7 @@ export default function MorningPage() {
         ...c,
         last_outbound_at: null,
         last_outbound_channel: null,
+        last_outbound_summary: null,
         days_since_outbound: null,
       }));
       setContacts(mergedFail);
