@@ -285,10 +285,7 @@ export default function MorningPage() {
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
-  const [touchIntent, setTouchIntent] = useState<TouchIntent>("check_in");
   const [touchSummary, setTouchSummary] = useState("");
-  const [touchSource, setTouchSource] = useState("manual");
-  const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
   // stable list + completed tracking
@@ -394,10 +391,7 @@ export default function MorningPage() {
   function openLog(c: Recommendation) {
     setLoggingFor(c.id);
     setTouchChannel(c.suggested_channel);
-    setTouchIntent("check_in");
     setTouchSummary("");
-    setTouchSource("manual");
-    setTouchLink("");
   }
 
   async function saveTouch() {
@@ -410,11 +404,10 @@ export default function MorningPage() {
       contact_id: loggingFor,
       channel: touchChannel,
       direction: "outbound",
-      intent: touchIntent,
+      intent: "check_in",
       occurred_at: new Date().toISOString(),
       summary: touchSummary.trim() ? touchSummary.trim() : null,
-      source: touchSource.trim() ? touchSource.trim() : null,
-      source_link: touchLink.trim() ? touchLink.trim() : null,
+      source: "manual",
     });
 
     setSavingTouch(false);
@@ -708,11 +701,11 @@ export default function MorningPage() {
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
                       <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Suggested outreach (Jordan voice)
+                        Suggested outreach
                       </div>
                       <div className="row">
-                        <span className="badge">Channel: {c.suggested_channel}</span>
-                        <span className="badge">Intent: check_in</span>
+                        <span className="badge">via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}</span>
+                        <span className="badge">Check-in</span>
                       </div>
 
                       <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
@@ -726,7 +719,7 @@ export default function MorningPage() {
                       Open contact
                     </a>
                     <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                      Log outbound touch
+                      Reached out
                     </button>
                   </div>
                 </div>
@@ -734,105 +727,53 @@ export default function MorningPage() {
                 {loggingFor === c.id && (
                   <div className="section" style={{ marginTop: 12 }}>
                     <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
-                      <div className="sectionTitle">Log outbound touch</div>
-                      <div className="sectionSub">{c.display_name}</div>
+                      <div className="sectionTitle">Log outreach — {c.display_name}</div>
                     </div>
 
-                    <div className="row">
-                      <div style={{ width: 200, minWidth: 180 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Channel
-                        </div>
+                    <div className="row" style={{ alignItems: "flex-end" }}>
+                      <div style={{ width: 180, minWidth: 160 }}>
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>How</div>
                         <select
                           className="select"
                           value={touchChannel}
                           onChange={(e) => setTouchChannel(e.target.value as Touch["channel"])}
                         >
-                          <option value="email">email</option>
-                          <option value="text">text</option>
-                          <option value="call">call</option>
-                          <option value="in_person">in_person</option>
-                          <option value="social_dm">social_dm</option>
-                          <option value="other">other</option>
-                        </select>
-                      </div>
-
-                      <div style={{ width: 260, minWidth: 220 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Intent
-                        </div>
-                        <select
-                          className="select"
-                          value={touchIntent}
-                          onChange={(e) => setTouchIntent(e.target.value as TouchIntent)}
-                        >
-                          <option value="check_in">check_in</option>
-                          <option value="referral_ask">referral_ask</option>
-                          <option value="review_ask">review_ask</option>
-                          <option value="deal_followup">deal_followup</option>
-                          <option value="collaboration">collaboration</option>
-                          <option value="event_invite">event_invite</option>
-                          <option value="other">other</option>
+                          <option value="text">Text</option>
+                          <option value="email">Email</option>
+                          <option value="call">Call</option>
+                          <option value="in_person">In person</option>
+                          <option value="social_dm">Social DM</option>
+                          <option value="other">Other</option>
                         </select>
                       </div>
 
                       <div style={{ flex: 1, minWidth: 220 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Source
-                        </div>
-                        <input
-                          className="input"
-                          value={touchSource}
-                          onChange={(e) => setTouchSource(e.target.value)}
-                          placeholder="manual / gmail / sms"
+                        <div className="small muted bold" style={{ marginBottom: 6 }}>Note (optional)</div>
+                        <textarea
+                          className="textarea"
+                          value={touchSummary}
+                          onChange={(e) => setTouchSummary(e.target.value)}
+                          placeholder="What did you say / what came up?"
+                          style={{ minHeight: 64 }}
                         />
                       </div>
                     </div>
 
-                    <div className="row" style={{ marginTop: 10 }}>
-                      <div style={{ flex: 1, minWidth: 260 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Link (optional)
-                        </div>
-                        <input
-                          className="input"
-                          value={touchLink}
-                          onChange={(e) => setTouchLink(e.target.value)}
-                          placeholder="thread link / calendar link"
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: 10 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Summary (optional)
-                      </div>
-                      <textarea
-                        className="textarea"
-                        value={touchSummary}
-                        onChange={(e) => setTouchSummary(e.target.value)}
-                        placeholder="Quick note about what you sent / what happened"
-                      />
-                    </div>
-
-                    <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
-                      <div className="muted small">Outbound touches reset cadence.</div>
-                      <div className="row">
-                        <button
-                          className="btn"
-                          onClick={() => setLoggingFor(null)}
-                          disabled={savingTouch}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          className="btn btnPrimary"
-                          onClick={saveTouch}
-                          disabled={savingTouch}
-                        >
-                          {savingTouch ? "Saving…" : "Save"}
-                        </button>
-                      </div>
+                    <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                      <button
+                        className="btn"
+                        onClick={() => setLoggingFor(null)}
+                        disabled={savingTouch}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btnPrimary"
+                        onClick={saveTouch}
+                        disabled={savingTouch}
+                      >
+                        {savingTouch ? "Saving…" : "Save"}
+                      </button>
                     </div>
                   </div>
                 )}
