@@ -349,7 +349,7 @@ export default function MorningPage() {
       return;
     }
 
-    const ids = base.map((c) => c.id);
+    const ids = base.map((c) => c.id).slice(0, 200);
     const { data: tData, error: tErr } = await supabase
       .from("touches")
       .select(
@@ -358,7 +358,7 @@ export default function MorningPage() {
       .in("contact_id", ids)
       .eq("direction", "outbound")
       .order("occurred_at", { ascending: false })
-      .limit(8000);
+      .limit(4000);
 
     if (tErr) {
       setError(`Touches fetch error: ${tErr.message}`);
