@@ -163,6 +163,7 @@ export async function GET(req: Request) {
     let ignoredByEmail = 0;
 
     const unmatchedCounts = new Map<string, number>();
+    const unmatchedMeta = new Map<string, { subject: string | null; snippet: string | null; threadLink: string | null }>();
     const uniqueRecipients = new Set<string>();
 
     let pageToken: string | undefined = undefined;
@@ -245,9 +246,13 @@ export async function GET(req: Request) {
         const matchedEmail = allRecipients.find((e) => contactIdByEmail.has(e));
         if (!matchedEmail) {
           unmatched += 1;
-          // Count all recipients as potential unmatched candidates
+          const threadId = full.data.threadId || "";
+          const threadLink = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
           for (const e of allRecipients) {
             unmatchedCounts.set(e, (unmatchedCounts.get(e) || 0) + 1);
+            if (!unmatchedMeta.has(e)) {
+              unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
+            }
           }
           continue;
         }
@@ -307,6 +312,32 @@ export async function GET(req: Request) {
       }
 
       if (!pageToken) break;
+    }
+
+    // Persist unmatched emails to unmatched_recipients table
+    if (unmatchedCounts.size > 0) {
+      const now = new Date().toISOString();
+      const upsertRows = Array.from(unmatchedCounts.entries()).map(([email, count]) => {
+        const meta = unmatchedMeta.get(email);
+        return {
+          email,
+          user_id: uid,
+          first_seen_at: now,
+          last_seen_at: now,
+          seen_count: count,
+          last_subject: meta?.subject ?? null,
+          last_snippet: meta?.snippet ?? null,
+          last_thread_link: meta?.threadLink ?? null,
+          status: "new",
+        };
+      });
+
+      // Upsert in batches of 50; on conflict update everything except first_seen_at
+      for (let i = 0; i < upsertRows.length; i += 50) {
+        await supabaseAdmin
+          .from("unmatched_recipients")
+          .upsert(upsertRows.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: false });
+      }
     }
 
     const topUnmatchedRecipients = Array.from(unmatchedCounts.entries())
