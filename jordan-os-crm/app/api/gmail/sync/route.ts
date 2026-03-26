@@ -197,12 +197,8 @@ export async function GET(req: Request) {
           metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
         });
 
-        // Require the configured labels on the message (server-side)
         const msgLabelIds = full.data.labelIds ?? [];
         const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
-        if (!hasAnyConfiguredLabel) {
-          continue;
-        }
 
         messagesParsed += 1;
 
@@ -245,6 +241,7 @@ export async function GET(req: Request) {
 
         const matchedEmail = allRecipients.find((e) => contactIdByEmail.has(e));
         if (!matchedEmail) {
+          // Track unmatched for ALL sent messages, regardless of label
           unmatched += 1;
           const threadId = full.data.threadId || "";
           const threadLink = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
@@ -254,6 +251,11 @@ export async function GET(req: Request) {
               unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
             }
           }
+          continue;
+        }
+
+        // Only create touches for messages with the configured label
+        if (!hasAnyConfiguredLabel) {
           continue;
         }
 
