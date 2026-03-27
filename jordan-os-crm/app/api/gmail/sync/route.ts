@@ -375,7 +375,6 @@ export async function GET(req: Request) {
         const meta = unmatchedMeta.get(email);
         return {
           email,
-          user_id: uid,
           first_seen_at: now,
           last_seen_at: now,
           seen_count: count,
@@ -388,9 +387,10 @@ export async function GET(req: Request) {
 
       // Upsert in batches of 50; on conflict update everything except first_seen_at
       for (let i = 0; i < upsertRows.length; i += 50) {
-        await supabaseAdmin
+        const { error: upsertErr } = await supabaseAdmin
           .from("unmatched_recipients")
           .upsert(upsertRows.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: false });
+        if (upsertErr) console.error("UNMATCHED_UPSERT_ERROR", upsertErr.message, upsertErr);
       }
     }
 
