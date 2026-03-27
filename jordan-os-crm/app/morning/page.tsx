@@ -288,6 +288,8 @@ export default function MorningPage() {
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
   const [touchSummary, setTouchSummary] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
+  // quick log (no note) — shows "add note" option after
+  const [quickLoggedFor, setQuickLoggedFor] = useState<string | null>(null);
 
   // stable list + completed tracking
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
@@ -395,6 +397,32 @@ export default function MorningPage() {
     setLoggingFor(c.id);
     setTouchChannel(c.suggested_channel);
     setTouchSummary("");
+    setQuickLoggedFor(null);
+  }
+
+  async function quickLog(c: Recommendation) {
+    setSavingTouch(true);
+    setError(null);
+
+    const { error: insErr } = await supabase.from("touches").insert({
+      contact_id: c.id,
+      channel: c.suggested_channel,
+      direction: "outbound",
+      intent: "check_in",
+      occurred_at: new Date().toISOString(),
+      summary: null,
+      source: "manual",
+    });
+
+    setSavingTouch(false);
+
+    if (insErr) {
+      setError(`Insert touch error: ${insErr.message}`);
+      return;
+    }
+
+    setCompletedIds((prev) => new Set([...prev, c.id]));
+    setQuickLoggedFor(c.id);
   }
 
   async function saveTouch() {
@@ -420,10 +448,10 @@ export default function MorningPage() {
       return;
     }
 
-    // Mark as completed — do NOT reload (this is what caused reshuffling)
     setCompletedIds((prev) => new Set([...prev, loggingFor]));
-    setMsg("Touch logged ✓");
+    setMsg("Logged ✓");
     setLoggingFor(null);
+    setQuickLoggedFor(null);
   }
 
   useEffect(() => {
@@ -670,66 +698,96 @@ export default function MorningPage() {
                 )}
                 <div
                   className="row"
-                  style={{ justifyContent: "space-between", alignItems: "flex-start" }}
+                  style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}
                 >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      className="row"
-                      style={{ justifyContent: "space-between", alignItems: "baseline" }}
-                    >
-                      <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
-                        <span className="badge" style={{ marginRight: 10 }}>
-                          #{idx + 1}
-                        </span>
-                        <a href={`/contacts/${c.id}`}>{c.display_name}</a>
-                      </div>
+                  {/* Left: days counter */}
+                  <div style={{ textAlign: "center", minWidth: 64, paddingTop: 2 }}>
+                    <div style={{
+                      fontSize: 28,
+                      fontWeight: 900,
+                      lineHeight: 1,
+                      color: overdue ? "#b91c1c" : "#15803d",
+                    }}>
+                      {c.days_since_outbound == null ? "∞" : c.days_since_outbound}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 3, fontWeight: 600 }}>
+                      {c.days_since_outbound == null ? "never" : "days ago"}
+                    </div>
+                    <div style={{ fontSize: 11, marginTop: 4, fontWeight: 700, color: overdue ? "#b91c1c" : "#15803d" }}>
+                      {overdue ? "overdue" : "on track"}
+                    </div>
+                  </div>
 
-                      <div className="muted small">
-                        Last outbound: <span className="bold">{fmtDate(c.last_outbound_at)}</span>
-                        {c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}
-                      </div>
+                  {/* Center: contact info */}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
+                      <span className="badge" style={{ marginRight: 8 }}>#{idx + 1}</span>
+                      <a href={`/contacts/${c.id}`}>{c.display_name}</a>
                     </div>
 
-                    <div className="row" style={{ marginTop: 10 }}>
+                    <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
                       <span className="badge">{categoryBadge(c)}</span>
                       <span className="badge">Cadence {c.cadence}d</span>
-                      {c.days_since_outbound == null ? (
-                        <span className="badge">Never reached out</span>
-                      ) : (
-                        <span className="badge">{c.days_since_outbound}d ago</span>
+                      {c.last_outbound_at && (
+                        <span className="badge muted">Last: {fmtDate(c.last_outbound_at)}{c.last_outbound_channel ? ` • ${c.last_outbound_channel}` : ""}</span>
                       )}
-                      <span className="badge">{overdue ? "Overdue" : "On track"}</span>
                     </div>
 
                     {c.last_outbound_summary && (
-                      <div style={{ marginTop: 10, fontSize: 13, color: "#555", lineHeight: 1.45 }}>
-                        <span className="muted" style={{ fontWeight: 700, marginRight: 6 }}>Last note:</span>
+                      <div style={{ marginTop: 8, fontSize: 13, color: "#555", lineHeight: 1.45 }}>
+                        <span style={{ fontWeight: 700, color: "#888", marginRight: 5 }}>Last note:</span>
                         {c.last_outbound_summary}
                       </div>
                     )}
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Suggested outreach
+                      <div className="small muted bold" style={{ marginBottom: 4 }}>Suggested outreach</div>
+                      <div className="badge" style={{ marginBottom: 8 }}>
+                        via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}
                       </div>
-                      <div className="row">
-                        <span className="badge">via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}</span>
-                        <span className="badge">Check-in</span>
-                      </div>
-
-                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 13 }}>
                         {c.suggested_draft}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ width: 280, display: "grid", gap: 10 }}>
-                    <a className="btn" href={`/contacts/${c.id}`}>
+                  {/* Right: actions */}
+                  <div style={{ display: "grid", gap: 8, minWidth: 160 }}>
+                    {quickLoggedFor === c.id ? (
+                      <>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
+                          ✓ Logged via {c.suggested_channel}
+                        </div>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 13 }}
+                          onClick={() => { setQuickLoggedFor(null); openLog(c); }}
+                        >
+                          Add note
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="btn btnPrimary"
+                          onClick={() => quickLog(c)}
+                          disabled={savingTouch}
+                        >
+                          Reached out
+                        </button>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 13 }}
+                          onClick={() => openLog(c)}
+                          disabled={savingTouch}
+                        >
+                          Log with note
+                        </button>
+                      </>
+                    )}
+                    <a className="btn" href={`/contacts/${c.id}`} style={{ textDecoration: "none", textAlign: "center", fontSize: 13 }}>
                       Open contact
                     </a>
-                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                      Reached out
-                    </button>
                   </div>
                 </div>
 
