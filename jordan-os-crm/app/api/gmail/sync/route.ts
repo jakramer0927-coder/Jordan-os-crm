@@ -415,6 +415,7 @@ export async function GET(req: Request) {
       imported,
       skipped,
       unmatched,
+      unmatchedEmailsQueued: unmatchedCounts.size,
       messagesFetched,
       messagesParsed,
       matchedRecipients,
