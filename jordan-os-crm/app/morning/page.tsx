@@ -298,13 +298,8 @@ export default function MorningPage() {
   const [quickNote, setQuickNote] = useState("");
 
   // stable list + completed tracking
-  const todayKey = `morning-locked-${new Date().toISOString().slice(0, 10)}`;
-  const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
-    try {
-      const stored = localStorage.getItem(todayKey);
-      return stored ? JSON.parse(stored) : null;
-    } catch { return null; }
-  });
+  const todayKey = `morning-locked-${new Date().toLocaleDateString("en-CA")}`; // YYYY-MM-DD local
+  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   async function requireSession() {
@@ -596,6 +591,15 @@ export default function MorningPage() {
 
     return top;
   }, [contacts, voice]);
+
+  // Restore locked IDs from localStorage on mount (client-only)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(todayKey);
+      if (stored) setLockedIds(JSON.parse(stored));
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Lock the initial 5 IDs after first load to prevent reshuffling — persist for the day
   useEffect(() => {
