@@ -87,6 +87,7 @@ type UserSettingsRow = {
   gmail_label_names: string | null;
   gmail_ignore_domains: string | null;
   gmail_ignore_emails: string | null;
+  last_gmail_sync_at: string | null;
 };
 
 type ContactEmailRow = {
@@ -119,7 +120,7 @@ export async function GET(req: Request) {
 
     const { data: settings, error: setErr } = await supabaseAdmin
       .from("user_settings")
-      .select("gmail_label_names, gmail_ignore_domains, gmail_ignore_emails")
+      .select("gmail_label_names, gmail_ignore_domains, gmail_ignore_emails, last_gmail_sync_at")
       .eq("user_id", uid)
       .maybeSingle();
 
@@ -202,14 +203,23 @@ export async function GET(req: Request) {
     const unmatchedMeta = new Map<string, { subject: string | null; snippet: string | null; threadLink: string | null }>();
     const uniqueRecipients = new Set<string>();
 
+    // Incremental sync: only fetch messages newer than last sync
+    const lastSyncAt = sRow?.last_gmail_sync_at ?? null;
+    const afterDate = lastSyncAt
+      ? new Date(lastSyncAt)
+      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); // first sync: last 90 days
+    const afterStr = `${afterDate.getFullYear()}/${afterDate.getMonth() + 1}/${afterDate.getDate()}`;
+
     let pageToken: string | undefined = undefined;
-    const maxMessages = 400;
+    const maxMessages = 500;
+    const BATCH = 10; // parallel fetches per round
 
     while (messagesFetched < maxMessages) {
       const listRes: gmail_v1.Schema$ListMessagesResponse = (
         await gmail.users.messages.list({
           userId: "me",
-          labelIds: ["SENT"], // SENT only; label filter happens in query-like logic below
+          labelIds: ["SENT"],
+          q: `after:${afterStr}`,
           maxResults: Math.min(100, maxMessages - messagesFetched),
           pageToken,
         })
@@ -219,19 +229,23 @@ export async function GET(req: Request) {
       pageToken = listRes.nextPageToken ?? undefined;
 
       if (msgs.length === 0) break;
-
-      // We fetched N message IDs
       messagesFetched += msgs.length;
 
-      for (const m of msgs) {
-        if (!m.id) continue;
+      // Fetch metadata in parallel batches of BATCH
+      for (let i = 0; i < msgs.length; i += BATCH) {
+        const batch = msgs.slice(i, i + BATCH).filter((m) => !!m.id);
+        const fulls = await Promise.all(
+          batch.map((m) =>
+            gmail.users.messages.get({
+              userId: "me",
+              id: m.id!,
+              format: "metadata",
+              metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
+            })
+          )
+        );
 
-        const full = await gmail.users.messages.get({
-          userId: "me",
-          id: m.id,
-          format: "metadata",
-          metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
-        });
+      for (const full of fulls) {
 
         const msgLabelIds = full.data.labelIds ?? [];
         const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
@@ -309,7 +323,7 @@ export async function GET(req: Request) {
           ? `https://mail.google.com/mail/u/0/#all/${threadId}`
           : null;
 
-        const messageId = m.id;
+        const messageId = full.data.id ?? "";
         const summary = (snippet || subject).trim() || null;
 
         // Dedupe by messageId
@@ -348,7 +362,8 @@ export async function GET(req: Request) {
         }
 
         imported += 1;
-      }
+      } // end for (full of fulls)
+      } // end batch loop
 
       if (!pageToken) break;
     }
@@ -378,6 +393,11 @@ export async function GET(req: Request) {
           .upsert(upsertRows.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: false });
       }
     }
+
+    // Save sync timestamp for incremental sync next run
+    await supabaseAdmin
+      .from("user_settings")
+      .upsert({ user_id: uid, last_gmail_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
 
     const topUnmatchedRecipients = Array.from(unmatchedCounts.entries())
       .map(([email, count]) => ({ email, count }))
