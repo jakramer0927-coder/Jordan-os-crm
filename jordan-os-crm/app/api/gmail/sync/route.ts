@@ -204,7 +204,14 @@ export async function GET(req: Request) {
     const uniqueRecipients = new Set<string>();
 
     // Incremental sync: only fetch messages newer than last sync
-    const lastSyncAt = sRow?.last_gmail_sync_at ?? null;
+    // Pass ?reset=true to clear the cursor and re-process the full 90-day window
+    const resetSync = url.searchParams.get("reset") === "true";
+    if (resetSync) {
+      await supabaseAdmin
+        .from("user_settings")
+        .upsert({ user_id: uid, last_gmail_sync_at: null }, { onConflict: "user_id" });
+    }
+    const lastSyncAt = resetSync ? null : (sRow?.last_gmail_sync_at ?? null);
     const afterDate = lastSyncAt
       ? new Date(lastSyncAt)
       : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); // first sync: last 90 days
