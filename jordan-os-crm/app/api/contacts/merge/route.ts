@@ -30,11 +30,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Target contact not found" }, { status: 404 });
 
   // Move all touches from source → target
-  const { count: touchesMoved, error: tErr } = await supabaseAdmin
+  const { data: movedTouches, error: tErr } = await supabaseAdmin
     .from("touches")
     .update({ contact_id: target_id })
     .eq("contact_id", source_id)
-    .select("id", { count: "exact", head: true });
+    .select("id");
+  const touchesMoved = movedTouches?.length ?? 0;
 
   if (tErr) return NextResponse.json({ error: `Touch reassign failed: ${tErr.message}` }, { status: 500 });
 
