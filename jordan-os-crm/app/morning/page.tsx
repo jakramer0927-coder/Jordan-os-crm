@@ -293,11 +293,18 @@ export default function MorningPage() {
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
   const [touchSummary, setTouchSummary] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
-  // quick log (no note) — shows "add note" option after
   const [quickLoggedFor, setQuickLoggedFor] = useState<string | null>(null);
+  const [quickNoteFor, setQuickNoteFor] = useState<string | null>(null);
+  const [quickNote, setQuickNote] = useState("");
 
   // stable list + completed tracking
-  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
+  const todayKey = `morning-locked-${new Date().toISOString().slice(0, 10)}`;
+  const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
+    try {
+      const stored = localStorage.getItem(todayKey);
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  });
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   async function requireSession() {
@@ -355,6 +362,20 @@ export default function MorningPage() {
       return;
     }
 
+    // Mark contacts already touched today so they show as completed on return
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const { data: todayData } = await supabase
+      .from("touches")
+      .select("contact_id")
+      .eq("direction", "outbound")
+      .gte("occurred_at", todayStart.toISOString());
+
+    if (todayData && todayData.length > 0) {
+      setCompletedIds(new Set(todayData.map((t: any) => t.contact_id)));
+    }
+
     const { data: tData, error: tErr } = await supabase
       .from("touches")
       .select(
@@ -404,9 +425,11 @@ export default function MorningPage() {
     setTouchChannel(c.suggested_channel);
     setTouchSummary("");
     setQuickLoggedFor(null);
+    setQuickNoteFor(null);
+    setQuickNote("");
   }
 
-  async function quickLog(c: Recommendation) {
+  async function quickLog(c: Recommendation, note?: string) {
     setSavingTouch(true);
     setError(null);
 
@@ -416,7 +439,7 @@ export default function MorningPage() {
       direction: "outbound",
       intent: "check_in",
       occurred_at: new Date().toISOString(),
-      summary: null,
+      summary: note?.trim() || null,
       source: "manual",
     });
 
@@ -428,6 +451,8 @@ export default function MorningPage() {
     }
 
     setCompletedIds((prev) => new Set([...prev, c.id]));
+    setQuickNoteFor(null);
+    setQuickNote("");
     setQuickLoggedFor(c.id);
   }
 
@@ -572,10 +597,12 @@ export default function MorningPage() {
     return top;
   }, [contacts, voice]);
 
-  // Lock the initial 5 IDs after first load to prevent reshuffling
+  // Lock the initial 5 IDs after first load to prevent reshuffling — persist for the day
   useEffect(() => {
     if (lockedIds === null && recs.length > 0) {
-      setLockedIds(recs.map((r) => r.id));
+      const ids = recs.map((r) => r.id);
+      setLockedIds(ids);
+      try { localStorage.setItem(todayKey, JSON.stringify(ids)); } catch { /* ignore */ }
     }
   }, [recs]);
 
@@ -761,36 +788,47 @@ export default function MorningPage() {
                   {/* Right: actions */}
                   <div style={{ display: "grid", gap: 8, minWidth: 160 }}>
                     {quickLoggedFor === c.id ? (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
+                        ✓ Logged via {c.suggested_channel}
+                      </div>
+                    ) : quickNoteFor === c.id ? (
                       <>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
-                          ✓ Logged via {c.suggested_channel}
-                        </div>
-                        <button
-                          className="btn"
-                          style={{ fontSize: 13 }}
-                          onClick={() => { setQuickLoggedFor(null); openLog(c); }}
-                        >
-                          Add note
-                        </button>
-                      </>
-                    ) : (
-                      <>
+                        <textarea
+                          className="textarea"
+                          autoFocus
+                          value={quickNote}
+                          onChange={(e) => setQuickNote(e.target.value)}
+                          placeholder="What did you send?"
+                          style={{ minHeight: 72, fontSize: 13, resize: "vertical" }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) quickLog(c, quickNote);
+                            if (e.key === "Escape") { setQuickNoteFor(null); setQuickNote(""); }
+                          }}
+                        />
                         <button
                           className="btn btnPrimary"
+                          onClick={() => quickLog(c, quickNote)}
+                          disabled={savingTouch}
+                        >
+                          {savingTouch ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 12 }}
                           onClick={() => quickLog(c)}
                           disabled={savingTouch}
                         >
-                          Reached out
-                        </button>
-                        <button
-                          className="btn"
-                          style={{ fontSize: 13 }}
-                          onClick={() => openLog(c)}
-                          disabled={savingTouch}
-                        >
-                          Log with note
+                          Skip note
                         </button>
                       </>
+                    ) : (
+                      <button
+                        className="btn btnPrimary"
+                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); }}
+                        disabled={savingTouch}
+                      >
+                        Reached out
+                      </button>
                     )}
                     <a className="btn" href={`/contacts/${c.id}`} style={{ textDecoration: "none", textAlign: "center", fontSize: 13 }}>
                       Open contact

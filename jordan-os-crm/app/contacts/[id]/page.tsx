@@ -206,6 +206,14 @@ export default function ContactDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
+  // merge
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeQ, setMergeQ] = useState("");
+  const [mergeResults, setMergeResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
+  const [mergeTarget, setMergeTarget] = useState<{ id: string; display_name: string } | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState<string | null>(null);
+
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
     return t ? new Date(t.occurred_at) : null;
@@ -344,6 +352,28 @@ export default function ContactDetailPage() {
 
     setLogOpen(false);
     await fetchAll();
+  }
+
+  async function searchMergeContacts(q: string) {
+    if (!uid || q.trim().length < 2) { setMergeResults([]); return; }
+    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setMergeResults((j.results || []).filter((r: any) => r.id !== id));
+  }
+
+  async function mergeIntoTarget() {
+    if (!mergeTarget || !uid) return;
+    setMerging(true);
+    setMergeMsg(null);
+    const res = await fetch("/api/contacts/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, source_id: id, target_id: mergeTarget.id }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setMerging(false);
+    if (!res.ok) { setMergeMsg(`Error: ${j?.error || "Merge failed"}`); return; }
+    window.location.href = `/contacts/${mergeTarget.id}`;
   }
 
   async function archiveContact() {
@@ -604,6 +634,69 @@ export default function ContactDetailPage() {
             </button>
           </div>
           <div className="muted small">Archive hides from all lists. Delete removes all data permanently.</div>
+
+          <div className="hr" />
+          <div style={{ fontWeight: 900, fontSize: 13, color: "#555" }}>Merge into another contact</div>
+          <div className="muted small">Moves all touches from this contact into another, then archives this one.</div>
+          {!mergeOpen ? (
+            <button className="btn" style={{ alignSelf: "flex-start" }} onClick={() => setMergeOpen(true)}>
+              Merge contact…
+            </button>
+          ) : (
+            <div className="stack">
+              {mergeTarget ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(0,0,0,0.04)", borderRadius: 6 }}>
+                  <div style={{ flex: 1, fontWeight: 700 }}>
+                    Merge into: <span style={{ color: "#1d4ed8" }}>{mergeTarget.display_name}</span>
+                  </div>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setMergeTarget(null)}>Change</button>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    className="input"
+                    placeholder="Search for target contact…"
+                    value={mergeQ}
+                    onChange={(e) => { setMergeQ(e.target.value); searchMergeContacts(e.target.value); }}
+                    autoFocus
+                  />
+                  {mergeResults.length > 0 && (
+                    <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {mergeResults.map((r) => (
+                        <div
+                          key={r.id}
+                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.06)", fontSize: 13 }}
+                          onClick={() => { setMergeTarget(r); setMergeQ(""); setMergeResults([]); }}
+                        >
+                          <span style={{ fontWeight: 700 }}>{r.display_name}</span>
+                          <span className="muted" style={{ marginLeft: 8 }}>{r.category}{r.tier ? ` · ${r.tier}` : ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {mergeMsg && (
+                <div style={{ fontSize: 13, fontWeight: 700, color: mergeMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>{mergeMsg}</div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                {mergeTarget && (
+                  <button
+                    className="btn btnPrimary"
+                    onClick={mergeIntoTarget}
+                    disabled={merging}
+                  >
+                    {merging ? "Merging…" : `Merge into ${mergeTarget.display_name}`}
+                  </button>
+                )}
+                <button className="btn" onClick={() => { setMergeOpen(false); setMergeTarget(null); setMergeQ(""); setMergeResults([]); setMergeMsg(null); }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
