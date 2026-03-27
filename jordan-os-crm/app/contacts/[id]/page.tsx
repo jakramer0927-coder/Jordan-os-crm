@@ -190,6 +190,9 @@ export default function ContactDetailPage() {
   const [notes, setNotes] = useState("");
   const [company, setCompany] = useState("");
   const [savingContact, setSavingContact] = useState(false);
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesValue, setNotesValue] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
   const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
@@ -288,6 +291,19 @@ export default function ContactDetailPage() {
     }
 
     setEditing(false);
+    await fetchAll();
+  }
+
+  async function saveNotes() {
+    if (!contact) return;
+    setSavingNotes(true);
+    const { error } = await supabase
+      .from("contacts")
+      .update({ notes: notesValue.trim() || null })
+      .eq("id", contact.id);
+    setSavingNotes(false);
+    if (error) { setError(`Notes save error: ${error.message}`); return; }
+    setEditingNotes(false);
     await fetchAll();
   }
 
@@ -408,218 +424,264 @@ export default function ContactDetailPage() {
     );
   }
 
+  const daysSinceOutbound = lastOutbound
+    ? Math.floor((Date.now() - lastOutbound.getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  // rough cadence for display on this page
+  const cadence = (() => {
+    const cat = (contact.category || "").toLowerCase();
+    const t = (contact.tier || "").toUpperCase();
+    if (cat === "client") return t === "A" ? 30 : t === "B" ? 60 : 90;
+    if (cat === "agent") return t === "A" ? 30 : 60;
+    return 60;
+  })();
+
+  const overdue = daysSinceOutbound == null || daysSinceOutbound >= cadence;
+  const outboundCount = touches.filter((t) => t.direction === "outbound").length;
+
   return (
-    <div className="stack">
-      {/* Header */}
-      <div className="card cardPad">
-        <div className="rowResponsiveBetween">
-          <div style={{ minWidth: 0 }}>
-            <div className="rowResponsive" style={{ alignItems: "baseline" }}>
-              <h1 className="h1" style={{ margin: 0 }}>
-                {contact.display_name}
-              </h1>
-              <span className="subtle">
+    <div className="page">
+      {/* Back */}
+      <div style={{ marginBottom: 8 }}>
+        <a href="/contacts" className="muted small" style={{ textDecoration: "none" }}>
+          ← Contacts
+        </a>
+      </div>
+
+      {error ? <div className="alert alertError" style={{ marginBottom: 10 }}>{error}</div> : null}
+
+      {/* Hero header */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
+          {/* Left: identity */}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <h1 className="h1" style={{ margin: 0, lineHeight: 1.1 }}>{contact.display_name}</h1>
+
+            <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+              <span className="badge" style={{ fontWeight: 700 }}>
                 {prettyCategory(contact.category)}
-                {contact.tier ? ` • Tier ${contact.tier}` : ""}
-                {contact.client_type ? ` • ${contact.client_type}` : ""}
+                {contact.tier ? ` · Tier ${contact.tier}` : ""}
               </span>
+              {contact.client_type && <span className="badge">{contact.client_type}</span>}
+              {contact.company && <span className="badge">{contact.company}</span>}
             </div>
 
-            {(contact.company || contact.email || contact.phone) && (
-              <div className="subtle" style={{ marginTop: 6, fontSize: 13, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {contact.company && <span>{contact.company}</span>}
-                {contact.email && <a href={`mailto:${contact.email}`} style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>{contact.email}</a>}
-                {contact.phone && <span>{contact.phone}</span>}
+            {(contact.email || contact.phone) && (
+              <div className="row" style={{ marginTop: 10, gap: 14, flexWrap: "wrap" }}>
+                {contact.email && (
+                  <a href={`mailto:${contact.email}`} style={{ fontSize: 13, color: "#333", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                    {contact.email}
+                  </a>
+                )}
+                {contact.phone && (
+                  <a href={`tel:${contact.phone}`} style={{ fontSize: 13, color: "#333", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                    {contact.phone}
+                  </a>
+                )}
               </div>
             )}
-
-            <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
-              Last outreach: <strong>{lastOutbound ? lastOutbound.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" }) : "—"}</strong>
-            </div>
           </div>
 
-          <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
-            <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
-              Contacts
-            </a>
-            <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
-              {editing ? "Close" : "Edit"}
-            </button>
-            <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
-              Log outreach
-            </button>
+          {/* Right: days counter */}
+          <div style={{ textAlign: "center", minWidth: 90 }}>
+            <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, color: overdue ? "#b91c1c" : "#15803d" }}>
+              {daysSinceOutbound == null ? "∞" : daysSinceOutbound}
+            </div>
+            <div style={{ fontSize: 11, color: "#888", marginTop: 3, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {daysSinceOutbound == null ? "never reached out" : "days since outreach"}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <span className="badge" style={{ fontSize: 11, color: overdue ? "#b91c1c" : "#15803d", borderColor: overdue ? "#fca5a5" : "#86efac" }}>
+                {overdue ? "Overdue" : "On track"}
+              </span>
+            </div>
           </div>
         </div>
 
-        {error ? <div className="alert alertError" style={{ marginTop: 12 }}>{error}</div> : null}
+        {/* Stats row */}
+        <div className="row" style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,0.07)", flexWrap: "wrap" }}>
+          <span className="badge">{outboundCount} outbound touch{outboundCount !== 1 ? "es" : ""}</span>
+          <span className="badge">{touches.length} total interactions</span>
+          <span className="badge">Cadence {cadence}d</span>
+          {lastOutbound && (
+            <span className="badge muted">
+              Last: {lastOutbound.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </span>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="row" style={{ marginTop: 14, gap: 8 }}>
+          <button className="btn btnPrimary" onClick={openLog}>Log outreach</button>
+          <button className="btn" onClick={() => setEditing((v) => !v)}>
+            {editing ? "Close edit" : "Edit contact"}
+          </button>
+        </div>
       </div>
 
-      {/* Edit (clean, with danger zone) */}
+      {/* Edit panel */}
       {editing && (
-        <div className="card cardPad stack">
-          <div className="rowResponsiveBetween">
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
-              <div className="subtle" style={{ marginTop: 4 }}>Keep it tight. No busy work.</div>
-            </div>
-            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
-              Close
-            </button>
-          </div>
+        <div className="card cardPad stack" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>Edit contact</div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 240 }}>
+            <div className="field" style={{ flex: 1, minWidth: 200 }}>
               <div className="label">Name</div>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-
-            <div className="field" style={{ width: 220, minWidth: 180 }}>
+            <div className="field" style={{ width: 180 }}>
               <div className="label">Category</div>
               <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option>Client</option>
-                <option>Agent</option>
-                <option>Developer</option>
-                <option>Vendor</option>
-                <option>Other</option>
+                <option>Client</option><option>Agent</option><option>Developer</option>
+                <option>Vendor</option><option>Other</option>
               </select>
             </div>
-
-            <div className="field" style={{ width: 140 }}>
+            <div className="field" style={{ width: 110 }}>
               <div className="label">Tier</div>
               <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
+                <option value="A">A</option><option value="B">B</option><option value="C">C</option>
               </select>
             </div>
           </div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 220 }}>
-              <div className="label">Client type (optional)</div>
-              <input
-                className="input"
-                value={clientType}
-                onChange={(e) => setClientType(e.target.value)}
-                placeholder="buyer / seller / past client / lead / sphere …"
-              />
+            <div className="field" style={{ flex: 1, minWidth: 180 }}>
+              <div className="label">Client type</div>
+              <input className="input" value={clientType} onChange={(e) => setClientType(e.target.value)} placeholder="buyer / seller / sphere…" />
             </div>
-
-            <div className="field" style={{ flex: 1, minWidth: 220 }}>
-              <div className="label">Company (optional)</div>
-              <input
-                className="input"
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                placeholder="Compass, Douglas Elliman …"
-              />
+            <div className="field" style={{ flex: 1, minWidth: 180 }}>
+              <div className="label">Company</div>
+              <input className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Compass, etc." />
             </div>
           </div>
 
-          <div className="field">
-            <div className="label">Notes</div>
-            <textarea
-              className="textarea"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Relationship context, key details, things to remember for future conversations…"
-              style={{ minHeight: 100 }}
-            />
-          </div>
-
-          <div className="rowResponsive">
-            <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
+          <div className="row">
+            <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
+            <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
           </div>
 
           <div className="hr" />
-
-          <div className="stack">
-            <div style={{ fontWeight: 900 }}>Danger zone</div>
-            <div className="subtle" style={{ fontSize: 12 }}>
-              Deletes touches + imported texts attached to this contact.
-            </div>
-            <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
-              {deleting ? "Deleting…" : "Delete contact"}
-            </button>
-          </div>
+          <div style={{ fontWeight: 900, fontSize: 13, color: "#555" }}>Danger zone</div>
+          <div className="muted small">Deletes all touches and imported texts for this contact.</div>
+          <button className="btn" style={{ alignSelf: "flex-start", color: "#b91c1c", borderColor: "#fca5a5" }} onClick={deleteContact} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete contact"}
+          </button>
         </div>
       )}
 
-      {/* Notes — always visible if present, or shows prompt to add */}
-      <div className="card cardPad">
-        <div className="rowResponsiveBetween" style={{ marginBottom: contact.notes ? 10 : 0 }}>
+      {/* Notes — inline edit */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontWeight: 900 }}>Notes</div>
-          {!editing && (
-            <button className="btn" style={{ fontSize: 12 }} onClick={() => setEditing(true)}>
+          {!editingNotes ? (
+            <button className="btn" style={{ fontSize: 12 }} onClick={() => { setNotesValue(contact.notes || ""); setEditingNotes(true); }}>
               {contact.notes ? "Edit" : "Add notes"}
             </button>
+          ) : (
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={saveNotes} disabled={savingNotes}>
+                {savingNotes ? "Saving…" : "Save"}
+              </button>
+              <button className="btn" style={{ fontSize: 12 }} onClick={() => setEditingNotes(false)}>Cancel</button>
+            </div>
           )}
         </div>
-        {contact.notes ? (
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{contact.notes}</div>
+
+        {editingNotes ? (
+          <textarea
+            className="textarea"
+            value={notesValue}
+            onChange={(e) => setNotesValue(e.target.value)}
+            placeholder="Relationship context, deal status, key details — anything useful for the next conversation…"
+            style={{ minHeight: 120 }}
+            autoFocus
+          />
+        ) : contact.notes ? (
+          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: 14 }}>{contact.notes}</div>
         ) : (
-          <div className="subtle">No notes yet. Use notes to capture context, deal status, key details — anything useful for the next conversation.</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            No notes yet — capture context, deal status, and details useful for the next conversation.
+          </div>
         )}
       </div>
 
-      {/* Touch history */}
-      <details className="card cardPad" open={touches.length > 0 && touches.length <= 10}>
-        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none" as any }}>
-          Outreach history <span className="subtle">({touches.length})</span>
-        </summary>
+      {/* Touch timeline */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 900, marginBottom: touches.length > 0 ? 16 : 0 }}>
+          Outreach history
+          <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>({touches.length})</span>
+        </div>
 
-        <div className="stack" style={{ marginTop: 12 }}>
-          {touches.length === 0 ? (
-            <div className="subtle">No outreach logged yet.</div>
-          ) : (
-            touches.map((t) => (
-              <div key={t.id} className="card cardPad" style={{ padding: "10px 14px" }}>
-                <div className="rowResponsiveBetween">
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>
-                    {t.direction === "outbound" ? "You reached out" : "They reached out"}
-                    <span className="subtle" style={{ fontWeight: 400, marginLeft: 8 }}>
-                      via {channelLabel(t.channel)}
-                      {t.intent ? ` • ${intentLabel(t.intent)}` : ""}
-                    </span>
+        {touches.length === 0 ? (
+          <div className="muted" style={{ fontSize: 13 }}>No outreach logged yet.</div>
+        ) : (
+          <div className="stack" style={{ gap: 0 }}>
+            {touches.map((t, i) => (
+              <div key={t.id} style={{ display: "flex", gap: 14, paddingBottom: i < touches.length - 1 ? 16 : 0 }}>
+                {/* Date column */}
+                <div style={{ width: 68, textAlign: "right", flexShrink: 0, paddingTop: 2 }}>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, lineHeight: 1.3 }}>
+                    {new Date(t.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </div>
-                  <div className="subtle" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                    {new Date(t.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  <div style={{ fontSize: 11, color: "#aaa" }}>
+                    {new Date(t.occurred_at).getFullYear()}
                   </div>
                 </div>
 
-                {t.summary ? (
-                  <div style={{ marginTop: 6, color: "#444", fontSize: 13, whiteSpace: "pre-wrap" }}>{t.summary}</div>
-                ) : null}
+                {/* Line */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.direction === "outbound" ? "#2563eb" : "#9ca3af", marginTop: 4, flexShrink: 0 }} />
+                  {i < touches.length - 1 && <div style={{ width: 1, flex: 1, background: "#e5e7eb", marginTop: 4 }} />}
+                </div>
 
-                {t.source_link ? (
-                  <div style={{ marginTop: 4, fontSize: 12 }}>
-                    <a href={t.source_link} target="_blank" rel="noreferrer" style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>
-                      {t.source === "gmail" ? "View in Gmail" : "View thread"}
-                    </a>
+                {/* Content */}
+                <div style={{ flex: 1, paddingBottom: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    {t.direction === "outbound" ? "You reached out" : "They reached out"}
+                    <span style={{ fontWeight: 400, color: "#666", marginLeft: 6 }}>
+                      via {channelLabel(t.channel)}
+                      {t.intent && t.intent !== "check_in" ? ` · ${intentLabel(t.intent)}` : ""}
+                    </span>
                   </div>
-                ) : null}
+                  {t.summary && (
+                    <div style={{ marginTop: 4, fontSize: 13, color: "#444", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.summary}</div>
+                  )}
+                  {t.source_link && (
+                    <div style={{ marginTop: 4 }}>
+                      <a href={t.source_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#555", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                        {t.source === "gmail" ? "View in Gmail" : "View thread"}
+                      </a>
+                    </div>
+                  )}
+                </div>
               </div>
-            ))
-          )}
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* AI draft + text upload — collapsed by default */}
+      <details className="card cardPad" style={{ marginBottom: 12 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none", userSelect: "none" }}>
+          AI draft + text thread upload
+          <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>expand</span>
+        </summary>
+        <div style={{ marginTop: 14 }}>
+          <VoiceDraftPanel contactId={contact.id} />
+          <TextThreadUploadPanel contactId={contact.id} />
         </div>
       </details>
-
-      {/* Jordan Voice */}
-      <VoiceDraftPanel contactId={contact.id} />
-
-      {/* Text upload NEXT */}
-      <TextThreadUploadPanel contactId={contact.id} />
 
       {/* Log outreach modal */}
       {logOpen && (
         <div
-          className="modalSheet"
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.35)",
+            background: "rgba(0,0,0,0.4)",
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
@@ -627,27 +689,24 @@ export default function ContactDetailPage() {
             zIndex: 999,
           }}
         >
-          <div className="card cardPad modalSheetCard" style={{ width: "min(680px, 100%)" }}>
-            <div className="rowResponsiveBetween">
+          <div className="card cardPad" style={{ width: "min(600px, 100%)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>Log outreach</div>
-                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
+                <div style={{ fontWeight: 900, fontSize: 17 }}>Log outreach</div>
+                <div className="muted" style={{ marginTop: 3 }}>{contact.display_name}</div>
               </div>
-              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
-                Close
-              </button>
+              <button className="btn" onClick={() => setLogOpen(false)}>✕</button>
             </div>
 
-            <div className="rowResponsive" style={{ marginTop: 14, alignItems: "flex-end" }}>
-              <div className="field" style={{ width: 180, minWidth: 160 }}>
+            <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
+              <div className="field" style={{ width: 180 }}>
                 <div className="label">Who reached out</div>
                 <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
                   <option value="outbound">I reached out</option>
                   <option value="inbound">They reached out</option>
                 </select>
               </div>
-
-              <div className="field" style={{ width: 160, minWidth: 140 }}>
+              <div className="field" style={{ width: 150 }}>
                 <div className="label">How</div>
                 <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
                   <option value="text">Text</option>
@@ -658,12 +717,10 @@ export default function ContactDetailPage() {
                   <option value="other">Other</option>
                 </select>
               </div>
-
-              <div className="field" style={{ width: 200, minWidth: 160 }}>
+              <div className="field" style={{ width: 180 }}>
                 <div className="label">Purpose</div>
                 <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
                   <option value="check_in">Check-in</option>
-                  <option value="follow_up">Follow-up</option>
                   <option value="deal_followup">Deal follow-up</option>
                   <option value="referral_ask">Referral ask</option>
                   <option value="review_ask">Review ask</option>
@@ -672,36 +729,28 @@ export default function ContactDetailPage() {
                   <option value="other">Other</option>
                 </select>
               </div>
-
-              <div className="field" style={{ width: 200, minWidth: 160 }}>
+              <div className="field" style={{ width: 190 }}>
                 <div className="label">When</div>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={logOccurredAt}
-                  onChange={(e) => setLogOccurredAt(e.target.value)}
-                />
+                <input className="input" type="datetime-local" value={logOccurredAt} onChange={(e) => setLogOccurredAt(e.target.value)} />
               </div>
             </div>
 
-            <div className="field" style={{ marginTop: 10 }}>
+            <div className="field" style={{ marginTop: 12 }}>
               <div className="label">Note (optional)</div>
               <textarea
                 className="textarea"
                 value={logSummary}
                 onChange={(e) => setLogSummary(e.target.value)}
-                placeholder="What was said, what came up, anything to remember for next time…"
+                placeholder="What was said, what came up, anything useful for next time…"
                 style={{ minHeight: 80 }}
               />
             </div>
 
-            <div className="rowResponsive" style={{ marginTop: 12 }}>
-              <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
+            <div className="row" style={{ marginTop: 14 }}>
+              <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
                 {savingTouch ? "Saving…" : "Save"}
               </button>
-              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
-                Cancel
-              </button>
+              <button className="btn" onClick={() => setLogOpen(false)}>Cancel</button>
             </div>
           </div>
         </div>
