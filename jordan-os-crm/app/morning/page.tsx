@@ -99,6 +99,11 @@ function cadenceDays(category: string, tier: string | null): number {
     if (t === "C") return 90;
     return 60;
   }
+  if (cat === "sphere") {
+    if (t === "A") return 60;
+    if (t === "B") return 90;
+    return 120;
+  }
   if (cat === "agent") {
     if (t === "A") return 30;
     return 60;
@@ -332,6 +337,7 @@ export default function MorningPage() {
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, client_type, email, created_at")
+      .eq("archived", false)
       .order("created_at", { ascending: false })
       .limit(2000);
 
@@ -506,6 +512,7 @@ export default function MorningPage() {
       if (cat === "agent") score += 60;
       if (cat === "developer") score += 40;
       if (cat === "client") score += 80;
+      if (cat === "sphere") score += 50;
       if (cat === "vendor") score += 30;
 
       const t = (c.tier || "").toUpperCase();

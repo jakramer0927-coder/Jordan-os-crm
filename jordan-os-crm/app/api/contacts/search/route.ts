@@ -17,8 +17,9 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("contacts")
-    .select("id, display_name, category, tier, email")
+    .select("id, display_name, category, tier, email, phone, company, notes, client_type")
     .eq("user_id", uid)
+    .eq("archived", false)
     .or(`display_name.ilike.%${q}%,email.ilike.%${q}%,company.ilike.%${q}%`)
     .order("updated_at", { ascending: false })
     .limit(25);

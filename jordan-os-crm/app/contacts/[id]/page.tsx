@@ -26,6 +26,7 @@ type Contact = {
   email: string | null;
   phone: string | null;
   created_at: string;
+  archived: boolean;
   user_id?: string;
 };
 
@@ -203,6 +204,7 @@ export default function ContactDetailPage() {
   const [savingTouch, setSavingTouch] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
@@ -229,7 +231,7 @@ export default function ContactDetailPage() {
 
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, notes, company, email, phone, created_at, user_id")
+      .select("id, display_name, category, tier, client_type, notes, company, email, phone, created_at, archived, user_id")
       .eq("id", id)
       .single();
 
@@ -344,6 +346,24 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
+  async function archiveContact() {
+    if (!contact) return;
+    const isArchived = contact.archived;
+    setArchiving(true);
+    setError(null);
+    const { error } = await supabase
+      .from("contacts")
+      .update({ archived: !isArchived })
+      .eq("id", contact.id);
+    setArchiving(false);
+    if (error) { setError(`Archive error: ${error.message}`); return; }
+    if (!isArchived) {
+      window.location.href = "/contacts";
+    } else {
+      await fetchAll();
+    }
+  }
+
   async function deleteContact() {
     if (!contact || !uid) return;
 
@@ -433,6 +453,7 @@ export default function ContactDetailPage() {
     const cat = (contact.category || "").toLowerCase();
     const t = (contact.tier || "").toUpperCase();
     if (cat === "client") return t === "A" ? 30 : t === "B" ? 60 : 90;
+    if (cat === "sphere") return t === "A" ? 60 : t === "B" ? 90 : 120;
     if (cat === "agent") return t === "A" ? 30 : 60;
     return 60;
   })();
@@ -448,6 +469,15 @@ export default function ContactDetailPage() {
           ← Contacts
         </a>
       </div>
+
+      {contact.archived && (
+        <div style={{ marginBottom: 10, padding: "8px 12px", background: "#fef9c3", border: "1px solid #fcd34d", borderRadius: 8, fontSize: 13, color: "#92400e", fontWeight: 600 }}>
+          Archived — this contact is hidden from all lists.{" "}
+          <button onClick={archiveContact} disabled={archiving} style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline", color: "#92400e", padding: 0 }}>
+            Unarchive
+          </button>
+        </div>
+      )}
 
       {error ? <div className="alert alertError" style={{ marginBottom: 10 }}>{error}</div> : null}
 
@@ -533,7 +563,7 @@ export default function ContactDetailPage() {
             <div className="field" style={{ width: 180 }}>
               <div className="label">Category</div>
               <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option>Client</option><option>Agent</option><option>Developer</option>
+                <option>Client</option><option>Sphere</option><option>Agent</option><option>Developer</option>
                 <option>Vendor</option><option>Other</option>
               </select>
             </div>
@@ -565,10 +595,15 @@ export default function ContactDetailPage() {
 
           <div className="hr" />
           <div style={{ fontWeight: 900, fontSize: 13, color: "#555" }}>Danger zone</div>
-          <div className="muted small">Deletes all touches and imported texts for this contact.</div>
-          <button className="btn" style={{ alignSelf: "flex-start", color: "#b91c1c", borderColor: "#fca5a5" }} onClick={deleteContact} disabled={deleting}>
-            {deleting ? "Deleting…" : "Delete contact"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn" style={{ color: "#92400e", borderColor: "#fcd34d" }} onClick={archiveContact} disabled={archiving}>
+              {archiving ? "Saving…" : contact.archived ? "Unarchive" : "Archive contact"}
+            </button>
+            <button className="btn" style={{ color: "#b91c1c", borderColor: "#fca5a5" }} onClick={deleteContact} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete contact"}
+            </button>
+          </div>
+          <div className="muted small">Archive hides from all lists. Delete removes all data permanently.</div>
         </div>
       )}
 

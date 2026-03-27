@@ -31,6 +31,7 @@ function cadenceDays(category: string, tier: string | null): number {
   const cat = (category || "").toLowerCase();
   const t = (tier || "").toUpperCase();
   if (cat === "client") return t === "A" ? 30 : t === "B" ? 60 : 90;
+  if (cat === "sphere") return t === "A" ? 60 : t === "B" ? 90 : 120;
   if (cat === "agent") return t === "A" ? 30 : 60;
   return 60;
 }
@@ -115,6 +116,7 @@ export default function ContactsPage() {
     const { data, error } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, email, phone, company, notes, client_type")
+      .eq("archived", false)
       .order("display_name", { ascending: true })
       .limit(500);
 
@@ -275,8 +277,8 @@ export default function ContactsPage() {
             <div className="field" style={{ width: 160 }}>
               <div className="label">Category</div>
               <select className="select" value={addCategory} onChange={(e) => setAddCategory(e.target.value)}>
-                <option>Client</option><option>Agent</option><option>Developer</option>
-                <option>Vendor</option><option>Other</option>
+                <option>Client</option><option>Sphere</option><option>Agent</option>
+                <option>Developer</option><option>Vendor</option><option>Other</option>
               </select>
             </div>
             <div className="field" style={{ width: 100 }}>
