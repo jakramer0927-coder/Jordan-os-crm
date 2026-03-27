@@ -367,71 +367,58 @@ export default function ContactsPage() {
 
               {/* Expanded panel */}
               {expanded && (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
-                  <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-                    {/* Left: context */}
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      {(c.email || c.phone) && (
-                        <div className="row" style={{ gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                          {c.email && <a href={`mailto:${c.email}`} style={{ fontSize: 13, textDecoration: "underline", textUnderlineOffset: 2, color: "#333" }}>{c.email}</a>}
-                          {c.phone && <a href={`tel:${c.phone}`} style={{ fontSize: 13, textDecoration: "underline", textUnderlineOffset: 2, color: "#333" }}>{c.phone}</a>}
-                        </div>
-                      )}
-
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
+                  {/* Contact info */}
+                  {(c.email || c.phone || last) && (
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: 13, color: "#555" }}>
+                      {c.email && <a href={`mailto:${c.email}`} style={{ textDecoration: "underline", textUnderlineOffset: 2, color: "#333" }}>{c.email}</a>}
+                      {c.phone && <a href={`tel:${c.phone}`} style={{ textDecoration: "underline", textUnderlineOffset: 2, color: "#333" }}>{c.phone}</a>}
                       {last && (
-                        <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
-                          <span style={{ color: "#aaa" }}>Last outreach</span>
-                          {" · "}{channelLabel(last.channel)}
-                          {" · "}{new Date(last.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                        </div>
-                      )}
-
-                      {c.notes && (
-                        <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55, whiteSpace: "pre-wrap", background: "rgba(0,0,0,0.03)", borderRadius: 6, padding: "8px 10px" }}>
-                          {c.notes}
-                        </div>
+                        <span style={{ color: "#888" }}>
+                          Last outreach: {channelLabel(last.channel)} · {new Date(last.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
                       )}
                     </div>
+                  )}
 
-                    {/* Right: quick log */}
-                    <div style={{ minWidth: 260, flex: "0 0 auto" }}>
-                      <div style={{ fontWeight: 700, fontSize: 12, color: "#888", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        Log outreach
-                      </div>
-                      <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-                        <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value)}
-                          style={{ flex: 1, fontSize: 13 }}>
-                          <option value="text">Text</option>
-                          <option value="email">Email</option>
-                          <option value="call">Call</option>
-                          <option value="in_person">In person</option>
-                          <option value="social_dm">Social DM</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
-                      <textarea
-                        className="textarea"
-                        value={logSummary}
-                        onChange={(e) => setLogSummary(e.target.value)}
-                        placeholder="Note (optional)…"
-                        style={{ minHeight: 56, fontSize: 13, marginBottom: 8 }}
-                      />
-                      <div className="row" style={{ gap: 8 }}>
-                        <button className="btn btnPrimary" style={{ fontSize: 13 }}
-                          onClick={() => quickLog(c.id)} disabled={logSaving}>
-                          {logSaving ? "Saving…" : "Reached out"}
-                        </button>
-                        <a className="btn" href={`/contacts/${c.id}`}
-                          style={{ textDecoration: "none", fontSize: 13, textAlign: "center" }}>
-                          Full page →
-                        </a>
-                      </div>
-                      {logMsg && (
-                        <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: logMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
-                          {logMsg}
-                        </div>
-                      )}
+                  {c.notes && (
+                    <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55, whiteSpace: "pre-wrap", background: "rgba(0,0,0,0.03)", borderRadius: 6, padding: "8px 10px", marginBottom: 10 }}>
+                      {c.notes}
                     </div>
+                  )}
+
+                  {/* Quick log — single row */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value)}
+                      style={{ width: 120, fontSize: 13 }}>
+                      <option value="text">Text</option>
+                      <option value="email">Email</option>
+                      <option value="call">Call</option>
+                      <option value="in_person">In person</option>
+                      <option value="social_dm">Social DM</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <input
+                      className="input"
+                      value={logSummary}
+                      onChange={(e) => setLogSummary(e.target.value)}
+                      placeholder="Note (optional)"
+                      style={{ flex: 1, minWidth: 140, fontSize: 13 }}
+                      onKeyDown={(e) => e.key === "Enter" && quickLog(c.id)}
+                    />
+                    <button className="btn btnPrimary" style={{ fontSize: 13, whiteSpace: "nowrap" }}
+                      onClick={() => quickLog(c.id)} disabled={logSaving}>
+                      {logSaving ? "Saving…" : "Reached out"}
+                    </button>
+                    <a className="btn" href={`/contacts/${c.id}`}
+                      style={{ textDecoration: "none", fontSize: 13, whiteSpace: "nowrap" }}>
+                      Full page →
+                    </a>
+                    {logMsg && (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: logMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
+                        {logMsg}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
