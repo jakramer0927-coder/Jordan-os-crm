@@ -322,7 +322,7 @@ export default function ContactsPage() {
           const expanded = expandedId === c.id;
 
           return (
-            <div key={c.id} className="card cardPad" style={{ cursor: "default" }}>
+            <div key={c.id} className="card cardPad" style={{ cursor: "default", overflow: "hidden" }}>
               {/* Main row */}
               <div
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, cursor: "pointer" }}
@@ -387,10 +387,10 @@ export default function ContactsPage() {
                     </div>
                   )}
 
-                  {/* Quick log — single row */}
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {/* Quick log */}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value)}
-                      style={{ width: 120, fontSize: 13 }}>
+                      style={{ width: 110, flexShrink: 0, fontSize: 13 }}>
                       <option value="text">Text</option>
                       <option value="email">Email</option>
                       <option value="call">Call</option>
@@ -403,23 +403,23 @@ export default function ContactsPage() {
                       value={logSummary}
                       onChange={(e) => setLogSummary(e.target.value)}
                       placeholder="Note (optional)"
-                      style={{ flex: 1, minWidth: 140, fontSize: 13 }}
+                      style={{ flex: "1 1 120px", minWidth: 0, fontSize: 13 }}
                       onKeyDown={(e) => e.key === "Enter" && quickLog(c.id)}
                     />
-                    <button className="btn btnPrimary" style={{ fontSize: 13, whiteSpace: "nowrap" }}
+                    <button className="btn btnPrimary" style={{ fontSize: 13, flexShrink: 0 }}
                       onClick={() => quickLog(c.id)} disabled={logSaving}>
                       {logSaving ? "Saving…" : "Reached out"}
                     </button>
                     <a className="btn" href={`/contacts/${c.id}`}
-                      style={{ textDecoration: "none", fontSize: 13, whiteSpace: "nowrap" }}>
+                      style={{ textDecoration: "none", fontSize: 13, flexShrink: 0 }}>
                       Full page →
                     </a>
-                    {logMsg && (
-                      <span style={{ fontSize: 13, fontWeight: 700, color: logMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
-                        {logMsg}
-                      </span>
-                    )}
                   </div>
+                  {logMsg && (
+                    <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700, color: logMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
+                      {logMsg}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
