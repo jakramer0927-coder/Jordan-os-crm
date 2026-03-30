@@ -105,12 +105,15 @@ Provide 3-5 improvements. Be specific — reference actual patterns from the ema
     const raw = j?.choices?.[0]?.message?.content || "{}";
     const coaching = JSON.parse(raw);
 
-    // Persist the style_guide so the draft endpoint can use it
-    if (coaching.style_guide) {
-      await supabaseAdmin
-        .from("user_settings")
-        .upsert({ user_id: uid, voice_style_guide: coaching.style_guide, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
-    }
+    // Persist style guide + coaching tips for use in drafts and real-time feedback
+    await supabaseAdmin
+      .from("user_settings")
+      .upsert({
+        user_id: uid,
+        voice_style_guide: coaching.style_guide || null,
+        voice_coaching_tips: coaching.improvements || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
 
     return NextResponse.json({
       ok: true,

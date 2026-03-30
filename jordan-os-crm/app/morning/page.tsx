@@ -292,6 +292,11 @@ export default function MorningPage() {
   const [aiDrafts, setAiDrafts] = useState<Map<string, string>>(new Map());
   const [aiGenerating, setAiGenerating] = useState<Set<string>>(new Set());
 
+  // voice coaching tips + note analysis
+  const [coachingTips, setCoachingTips] = useState<{ issue: string; recommendation: string }[]>([]);
+  const [noteAnalysis, setNoteAnalysis] = useState<{ observations: string[]; score: number | null } | null>(null);
+  const [noteAnalyzing, setNoteAnalyzing] = useState(false);
+
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
@@ -328,6 +333,38 @@ export default function MorningPage() {
       // ignore
     } finally {
       setVoiceLoaded(true);
+    }
+
+    // Load coaching tips from user_settings via supabase client
+    try {
+      const { data } = await supabase
+        .from("user_settings")
+        .select("voice_coaching_tips")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (data && (data as any).voice_coaching_tips) {
+        setCoachingTips((data as any).voice_coaching_tips);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function analyzeNote(uid: string, text: string) {
+    if (!text.trim() || text.trim().length < 20) { setNoteAnalysis(null); return; }
+    setNoteAnalyzing(true);
+    try {
+      const res = await fetch("/api/voice/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, text }),
+      });
+      const j = await res.json();
+      if (res.ok) setNoteAnalysis(j);
+    } catch {
+      // ignore
+    } finally {
+      setNoteAnalyzing(false);
     }
   }
 
@@ -851,6 +888,14 @@ export default function MorningPage() {
                       </div>
                     ) : quickNoteFor === c.id ? (
                       <>
+                        {coachingTips.length > 0 && (
+                          <div style={{ fontSize: 12, color: "#666", background: "rgba(0,0,0,0.03)", borderRadius: 6, padding: "7px 10px" }}>
+                            <span style={{ fontWeight: 700, color: "#444" }}>Coaching: </span>
+                            {coachingTips.slice(0, 2).map((t, i) => (
+                              <span key={i}>{t.recommendation}{i < Math.min(coachingTips.length, 2) - 1 ? " · " : ""}</span>
+                            ))}
+                          </div>
+                        )}
                         <select
                           className="select"
                           value={quickChannel}
@@ -869,33 +914,51 @@ export default function MorningPage() {
                           autoFocus
                           value={quickNote}
                           onChange={(e) => setQuickNote(e.target.value)}
+                          onBlur={(e) => { if (uid && e.target.value.trim().length >= 20) analyzeNote(uid, e.target.value); }}
                           placeholder="What did you send? (optional)"
                           style={{ minHeight: 64, fontSize: 13, resize: "vertical" }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) quickLog(c, quickNote);
-                            if (e.key === "Escape") { setQuickNoteFor(null); setQuickNote(""); }
+                            if (e.key === "Escape") { setQuickNoteFor(null); setQuickNote(""); setNoteAnalysis(null); }
                           }}
                         />
-                        <button
-                          className="btn btnPrimary"
-                          onClick={() => quickLog(c, quickNote)}
-                          disabled={savingTouch}
-                        >
-                          {savingTouch ? "Saving…" : "Save"}
-                        </button>
-                        <button
-                          className="btn"
-                          style={{ fontSize: 12 }}
-                          onClick={() => { setQuickNoteFor(null); setQuickNote(""); }}
-                          disabled={savingTouch}
-                        >
-                          Cancel
-                        </button>
+                        {noteAnalyzing && (
+                          <div style={{ fontSize: 12, color: "#888" }}>Analyzing…</div>
+                        )}
+                        {noteAnalysis && !noteAnalyzing && noteAnalysis.observations.length > 0 && (
+                          <div style={{ fontSize: 12, background: "rgba(0,0,0,0.03)", borderRadius: 6, padding: "7px 10px" }}>
+                            {noteAnalysis.score !== null && (
+                              <span style={{ fontWeight: 700, marginRight: 6, color: noteAnalysis.score >= 7 ? "#15803d" : noteAnalysis.score >= 5 ? "#b45309" : "#b91c1c" }}>
+                                {noteAnalysis.score}/10
+                              </span>
+                            )}
+                            {noteAnalysis.observations.map((o, i) => (
+                              <span key={i} style={{ color: "#444" }}>{o}{i < noteAnalysis.observations.length - 1 ? " · " : ""}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="row">
+                          <button
+                            className="btn btnPrimary"
+                            onClick={() => quickLog(c, quickNote)}
+                            disabled={savingTouch}
+                          >
+                            {savingTouch ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            className="btn"
+                            style={{ fontSize: 12 }}
+                            onClick={() => { setQuickNoteFor(null); setQuickNote(""); setNoteAnalysis(null); }}
+                            disabled={savingTouch}
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </>
                     ) : (
                       <button
                         className="btn btnPrimary"
-                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); setQuickChannel(c.suggested_channel); }}
+                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); setQuickChannel(c.suggested_channel); setNoteAnalysis(null); }}
                         disabled={savingTouch}
                       >
                         Reached out

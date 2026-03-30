@@ -81,6 +81,7 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [threadFeedback, setThreadFeedback] = useState<{ observations: string[]; score: number | null } | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -119,6 +120,23 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
         setErr(j?.error || "Import failed");
       } else {
         setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+
+        // Extract Jordan's messages and analyze them
+        const myLines = raw.split("\n").filter((line) => {
+          const lower = line.toLowerCase();
+          return lower.startsWith("jordan:") || lower.startsWith("you:") || lower.startsWith("me:");
+        }).map((line) => line.replace(/^[^:]+:\s*/i, "").trim()).filter((l) => l.length > 10);
+
+        if (myLines.length >= 2 && uid) {
+          fetch("/api/voice/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid, text: myLines.join("\n\n") }),
+          }).then((r) => r.json()).then((fb) => {
+            if (fb.observations?.length > 0) setThreadFeedback(fb);
+          }).catch(() => {});
+        }
+
         setTitle("");
         setRaw("");
       }
@@ -168,6 +186,22 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
           Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
           thread is saved.
         </div>
+
+        {threadFeedback && threadFeedback.observations.length > 0 && (
+          <div style={{ padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 13 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              <span>Your messages in this thread</span>
+              {threadFeedback.score !== null && (
+                <span style={{ fontWeight: 900, color: threadFeedback.score >= 7 ? "#15803d" : threadFeedback.score >= 5 ? "#b45309" : "#b91c1c" }}>
+                  {threadFeedback.score}/10
+                </span>
+              )}
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6, color: "#444" }}>
+              {threadFeedback.observations.map((o, i) => <li key={i}>{o}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );
