@@ -162,6 +162,15 @@ export async function POST(req: Request) {
 
     await insertInChunks("text_messages", toInsert, 200);
 
+    // Auto-extract context if contact is known (fire-and-forget, don't block response)
+    if (contactId) {
+      fetch(`${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/contacts/extract_context`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, contact_id: contactId }),
+      }).catch(() => {/* ignore */});
+    }
+
     return NextResponse.json({
       ok: true,
       thread_id,

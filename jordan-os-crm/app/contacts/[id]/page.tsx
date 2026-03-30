@@ -27,6 +27,8 @@ type Contact = {
   phone: string | null;
   created_at: string;
   archived: boolean;
+  ai_context: string | null;
+  ai_context_updated_at: string | null;
   user_id?: string;
 };
 
@@ -205,6 +207,8 @@ export default function ContactDetailPage() {
 
   const [deleting, setDeleting] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState<string | null>(null);
 
   // merge
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -239,7 +243,7 @@ export default function ContactDetailPage() {
 
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, notes, company, email, phone, created_at, archived, user_id")
+      .select("id, display_name, category, tier, client_type, notes, company, email, phone, created_at, archived, ai_context, ai_context_updated_at, user_id")
       .eq("id", id)
       .single();
 
@@ -352,6 +356,27 @@ export default function ContactDetailPage() {
 
     setLogOpen(false);
     await fetchAll();
+  }
+
+  async function extractContext() {
+    if (!uid || !contact) return;
+    setExtracting(true);
+    setExtractMsg(null);
+    try {
+      const res = await fetch("/api/contacts/extract_context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, contact_id: contact.id }),
+      });
+      const j = await res.json();
+      if (!res.ok) { setExtractMsg(`Error: ${j?.error || "Extraction failed"}`); return; }
+      setExtractMsg(`Extracted from ${j.sources.messages} messages + ${j.sources.touch_notes} touch notes`);
+      await fetchAll();
+    } catch (e: any) {
+      setExtractMsg(`Error: ${e?.message || "Failed"}`);
+    } finally {
+      setExtracting(false);
+    }
   }
 
   async function searchMergeContacts(q: string) {
@@ -732,6 +757,44 @@ export default function ContactDetailPage() {
         ) : (
           <div className="muted" style={{ fontSize: 13 }}>
             No notes yet — capture context, deal status, and details useful for the next conversation.
+          </div>
+        )}
+      </div>
+
+      {/* AI Context */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: contact.ai_context ? 12 : 0 }}>
+          <div>
+            <span style={{ fontWeight: 900 }}>AI context</span>
+            {contact.ai_context_updated_at && (
+              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                Updated {new Date(contact.ai_context_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12 }}
+            onClick={extractContext}
+            disabled={extracting}
+          >
+            {extracting ? "Extracting…" : contact.ai_context ? "Re-extract" : "Extract from messages"}
+          </button>
+        </div>
+
+        {extractMsg && (
+          <div style={{ fontSize: 12, marginBottom: 10, color: extractMsg.startsWith("Error") ? "#b91c1c" : "#15803d", fontWeight: 600 }}>
+            {extractMsg}
+          </div>
+        )}
+
+        {contact.ai_context ? (
+          <div style={{ fontSize: 13, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "#333" }}>
+            {contact.ai_context}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>
+            No context extracted yet. Click "Extract from messages" to pull key details from emails and text threads.
           </div>
         )}
       </div>

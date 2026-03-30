@@ -15,6 +15,10 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // bulk extraction
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string; errors: number } | null>(null);
+
   async function load() {
     const { data } = await supabase.auth.getSession();
     const user = data.session?.user;
@@ -83,6 +87,45 @@ export default function IntegrationsPage() {
     setMsg(`Voice sync done — ${j.inserted} examples added`);
   }
 
+  async function runBulkExtract() {
+    if (!uid) return;
+    setBulkRunning(true);
+    setBulkProgress(null);
+    setErr(null);
+    setMsg(null);
+
+    // Fetch contacts with text messages
+    const res = await fetch(`/api/contacts/extract_context_bulk?uid=${uid}`);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { setErr(j?.error || "Failed to fetch contacts"); setBulkRunning(false); return; }
+
+    const contacts: { id: string; display_name: string; already_extracted: boolean }[] = j.contacts ?? [];
+    if (contacts.length === 0) { setMsg("No contacts with text threads found."); setBulkRunning(false); return; }
+
+    let done = 0;
+    let errors = 0;
+
+    for (const c of contacts) {
+      setBulkProgress({ done, total: contacts.length, current: c.display_name, errors });
+      try {
+        const r = await fetch("/api/contacts/extract_context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uid, contact_id: c.id }),
+        });
+        if (!r.ok) errors++;
+      } catch {
+        errors++;
+      }
+      done++;
+      setBulkProgress({ done, total: contacts.length, current: c.display_name, errors });
+    }
+
+    setBulkRunning(false);
+    setMsg(`Extraction complete — ${done - errors}/${done} contacts updated${errors > 0 ? `, ${errors} failed` : ""}.`);
+    setBulkProgress(null);
+  }
+
   async function importSheet() {
     if (!uid) return;
     setBusy(true);
@@ -138,6 +181,36 @@ export default function IntegrationsPage() {
             Import master sheet
           </button>
         </div>
+      </div>
+
+      {/* Bulk extraction */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, marginBottom: 4 }}>Extract contact context</div>
+        <div className="muted small" style={{ marginBottom: 12 }}>
+          Runs AI extraction on all contacts with uploaded text threads — pulls real estate context, personal details, and follow-ups into each contact card.
+        </div>
+
+        {bulkProgress && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700 }}>{bulkProgress.current}</span>
+              <span className="muted">{bulkProgress.done} / {bulkProgress.total}</span>
+            </div>
+            <div style={{ height: 6, background: "rgba(0,0,0,0.07)", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{
+                width: `${Math.round((bulkProgress.done / bulkProgress.total) * 100)}%`,
+                height: "100%", background: "#15803d", borderRadius: 4, transition: "width 0.2s"
+              }} />
+            </div>
+            {bulkProgress.errors > 0 && (
+              <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 4 }}>{bulkProgress.errors} failed so far</div>
+            )}
+          </div>
+        )}
+
+        <button className="btn" onClick={runBulkExtract} disabled={bulkRunning || !connected}>
+          {bulkRunning ? "Extracting…" : "Run bulk extraction"}
+        </button>
       </div>
 
       {/* Settings */}
