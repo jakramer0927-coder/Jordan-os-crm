@@ -95,7 +95,7 @@ export default function IntegrationsPage() {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Voice sync failed"); return; }
-    setMsg(`Voice sync done — ${j.inserted} examples added`);
+    setMsg(`Voice sync done — ${j.inserted} added, ${j.skipped} skipped (${j.scanned} scanned)`);
   }
 
   async function runBulkExtract() {
