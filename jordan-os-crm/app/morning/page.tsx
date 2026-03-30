@@ -575,14 +575,7 @@ export default function MorningPage() {
 
       const suggested_channel = pickChannel(c);
 
-      const suggested_draft = buildDraftWithVoice({
-        contact: c,
-        intent: "check_in",
-        channel: suggested_channel,
-        voice,
-      });
-
-      return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
+      return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft: "" };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -819,30 +812,34 @@ export default function MorningPage() {
                       </div>
                     )}
 
-                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span className="small muted bold">Suggested outreach</span>
-                          <span className="badge" style={{ fontSize: 11 }}>
-                            via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}
-                          </span>
-                          {aiDrafts.has(c.id) && <span className="badge" style={{ fontSize: 11, color: "#15803d", borderColor: "#86efac" }}>AI</span>}
+                    {aiDrafts.has(c.id) ? (
+                      <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span className="small muted bold">Draft</span>
+                            <span className="badge" style={{ fontSize: 11 }}>via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}</span>
+                            <span className="badge" style={{ fontSize: 11, color: "#15803d", borderColor: "#86efac" }}>AI</span>
+                          </div>
+                          <button className="btn" style={{ fontSize: 11, padding: "3px 10px" }} onClick={() => generateDraft(c)} disabled={aiGenerating.has(c.id)}>
+                            Regenerate
+                          </button>
                         </div>
+                        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 13 }}>
+                          {aiDrafts.get(c.id)}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 10 }}>
                         <button
                           className="btn"
-                          style={{ fontSize: 11, padding: "3px 10px" }}
+                          style={{ fontSize: 12, padding: "4px 12px" }}
                           onClick={() => generateDraft(c)}
                           disabled={aiGenerating.has(c.id)}
                         >
-                          {aiGenerating.has(c.id) ? "Generating…" : aiDrafts.has(c.id) ? "Regenerate" : "Generate with AI"}
+                          {aiGenerating.has(c.id) ? "Writing draft…" : "Generate draft"}
                         </button>
                       </div>
-                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 13, color: aiDrafts.has(c.id) ? "#111" : "#555" }}>
-                        {aiGenerating.has(c.id)
-                          ? "Writing something personalized…"
-                          : aiDrafts.get(c.id) ?? c.suggested_draft}
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Right: actions */}

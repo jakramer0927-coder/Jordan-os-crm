@@ -171,6 +171,10 @@ export default function UnmatchedPage() {
 
     setRows((j.rows || []) as UnmatchedRow[]);
     setReady(true);
+    // DEBUG: remove once unmatched issue resolved
+    if (!j.rows || j.rows.length === 0) {
+      setErr(`DEBUG: API returned ok but rows empty. Full response: ${JSON.stringify(j).slice(0, 500)}`);
+    }
   }
 
   async function ignoreEmail(email: string) {
