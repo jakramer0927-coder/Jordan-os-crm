@@ -288,6 +288,10 @@ export default function MorningPage() {
   const [voice, setVoice] = useState<VoiceProfile | null>(null);
   const [voiceLoaded, setVoiceLoaded] = useState(false);
 
+  // AI drafts per contact
+  const [aiDrafts, setAiDrafts] = useState<Map<string, string>>(new Map());
+  const [aiGenerating, setAiGenerating] = useState<Set<string>>(new Set());
+
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
   const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
@@ -323,6 +327,34 @@ export default function MorningPage() {
       // ignore
     } finally {
       setVoiceLoaded(true);
+    }
+  }
+
+  async function generateDraft(c: Recommendation) {
+    if (!uid || aiGenerating.has(c.id)) return;
+    setAiGenerating((prev) => new Set([...prev, c.id]));
+    try {
+      const res = await fetch("/api/voice/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          contact_id: c.id,
+          channel: c.suggested_channel === "in_person" || c.suggested_channel === "social_dm" ? "text" : c.suggested_channel,
+          intent: "check_in",
+          length: "short",
+          include_question: true,
+          include_signature: false,
+        }),
+      });
+      const j = await res.json();
+      if (res.ok && j.draft) {
+        setAiDrafts((prev) => new Map([...prev, [c.id, j.draft]]));
+      }
+    } catch {
+      // silently fall back to template
+    } finally {
+      setAiGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
     }
   }
 
@@ -583,7 +615,7 @@ export default function MorningPage() {
     }
 
     for (const c of scored) {
-      if (top.length >= 5) break;
+      if (top.length >= 10) break;
       if (used.has(c.id)) continue;
       top.push(c);
       used.add(c.id);
@@ -604,7 +636,7 @@ export default function MorningPage() {
   // Lock the initial 5 IDs after first load to prevent reshuffling — persist for the day
   useEffect(() => {
     if (lockedIds === null && recs.length > 0) {
-      const ids = recs.map((r) => r.id);
+      const ids = recs.slice(0, 5).map((r) => r.id);
       setLockedIds(ids);
       try { localStorage.setItem(todayKey, JSON.stringify(ids)); } catch { /* ignore */ }
     }
@@ -612,11 +644,20 @@ export default function MorningPage() {
 
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
-    if (lockedIds === null) return recs;
+    if (lockedIds === null) return recs.slice(0, 5);
     return lockedIds
       .map((id) => recs.find((r) => r.id === id))
       .filter((r): r is Recommendation => r != null);
   }, [lockedIds, recs]);
+
+  // Next 5 after the locked set — shown on demand
+  const [bonusLoaded, setBonusLoaded] = useState(false);
+  const bonusRecs = useMemo<Recommendation[]>(() => {
+    const lockedSet = new Set(lockedIds ?? []);
+    return recs.filter((r) => !lockedSet.has(r.id)).slice(0, 5);
+  }, [recs, lockedIds]);
+
+  const allLocked5Done = displayRecs.length > 0 && displayRecs.every((r) => completedIds.has(r.id));
 
   const stats = useMemo(() => {
     const total = contacts.length;
@@ -779,12 +820,27 @@ export default function MorningPage() {
                     )}
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="small muted bold" style={{ marginBottom: 4 }}>Suggested outreach</div>
-                      <div className="badge" style={{ marginBottom: 8 }}>
-                        via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span className="small muted bold">Suggested outreach</span>
+                          <span className="badge" style={{ fontSize: 11 }}>
+                            via {c.suggested_channel === "in_person" ? "In person" : c.suggested_channel === "social_dm" ? "Social DM" : c.suggested_channel.charAt(0).toUpperCase() + c.suggested_channel.slice(1)}
+                          </span>
+                          {aiDrafts.has(c.id) && <span className="badge" style={{ fontSize: 11, color: "#15803d", borderColor: "#86efac" }}>AI</span>}
+                        </div>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "3px 10px" }}
+                          onClick={() => generateDraft(c)}
+                          disabled={aiGenerating.has(c.id)}
+                        >
+                          {aiGenerating.has(c.id) ? "Generating…" : aiDrafts.has(c.id) ? "Regenerate" : "Generate with AI"}
+                        </button>
                       </div>
-                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 13 }}>
-                        {c.suggested_draft}
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 13, color: aiDrafts.has(c.id) ? "#111" : "#555" }}>
+                        {aiGenerating.has(c.id)
+                          ? "Writing something personalized…"
+                          : aiDrafts.get(c.id) ?? c.suggested_draft}
                       </div>
                     </div>
                   </div>
@@ -902,6 +958,102 @@ export default function MorningPage() {
               <div className="muted">No contacts found yet — add a few on Contacts first.</div>
             </div>
           ) : null}
+
+          {/* Load 5 more — only appears after all 5 are done */}
+          {allLocked5Done && bonusRecs.length > 0 && !bonusLoaded && (
+            <div className="card cardPad" style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>You finished your Top 5 today.</div>
+              <div className="muted small" style={{ marginBottom: 12 }}>Want to keep going? These won't count against your daily goal.</div>
+              <button className="btn btnPrimary" onClick={() => setBonusLoaded(true)}>
+                Load 5 more
+              </button>
+            </div>
+          )}
+
+          {/* Bonus contacts */}
+          {bonusLoaded && bonusRecs.map((c, idx) => {
+            const completed = completedIds.has(c.id);
+            const overdue = c.overdue;
+            return (
+              <div
+                key={c.id}
+                className="card cardPad"
+                style={{ opacity: completed ? 0.5 : 1, pointerEvents: completed ? "none" : undefined, borderStyle: "dashed" }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  Bonus #{idx + 1}
+                </div>
+                {completed && (
+                  <div className="small bold" style={{ color: "#0b6b2a", marginBottom: 8 }}>✓ Logged today</div>
+                )}
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                  <div style={{ textAlign: "center", minWidth: 64, paddingTop: 2 }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1, color: overdue ? "#b91c1c" : "#15803d" }}>
+                      {c.days_since_outbound == null ? "∞" : c.days_since_outbound}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 3, fontWeight: 600 }}>
+                      {c.days_since_outbound == null ? "never" : "days ago"}
+                    </div>
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 900, fontSize: 15 }}>
+                      <a href={`/contacts/${c.id}`}>{c.display_name}</a>
+                    </div>
+                    <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
+                      <span className="badge">{categoryBadge(c)}</span>
+                      <span className="badge">Cadence {c.cadence}d</span>
+                      {c.last_outbound_at && <span className="badge muted">Last: {fmtDate(c.last_outbound_at)}</span>}
+                    </div>
+                    {c.last_outbound_summary && (
+                      <div style={{ marginTop: 6, fontSize: 13, color: "#555" }}>
+                        <span style={{ fontWeight: 700, color: "#888", marginRight: 5 }}>Last note:</span>
+                        {c.last_outbound_summary}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
+                    {quickNoteFor === c.id ? (
+                      <>
+                        <textarea
+                          className="textarea"
+                          autoFocus
+                          value={quickNote}
+                          onChange={(e) => setQuickNote(e.target.value)}
+                          placeholder="What did you send?"
+                          style={{ minHeight: 72, fontSize: 13, resize: "vertical" }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) quickLog(c, quickNote);
+                            if (e.key === "Escape") { setQuickNoteFor(null); setQuickNote(""); }
+                          }}
+                        />
+                        <button className="btn btnPrimary" onClick={() => quickLog(c, quickNote)} disabled={savingTouch}>
+                          {savingTouch ? "Saving…" : "Save"}
+                        </button>
+                        <button className="btn" style={{ fontSize: 12 }} onClick={() => quickLog(c)} disabled={savingTouch}>
+                          Skip note
+                        </button>
+                      </>
+                    ) : quickLoggedFor === c.id ? (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
+                        ✓ Logged via {c.suggested_channel}
+                      </div>
+                    ) : (
+                      <button
+                        className="btn btnPrimary"
+                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); }}
+                        disabled={savingTouch}
+                      >
+                        Reached out
+                      </button>
+                    )}
+                    <a className="btn" href={`/contacts/${c.id}`} style={{ textDecoration: "none", textAlign: "center", fontSize: 13 }}>
+                      Open contact
+                    </a>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
