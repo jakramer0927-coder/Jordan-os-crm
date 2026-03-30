@@ -68,7 +68,8 @@ export default function IntegrationsPage() {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j?.error || `Sync failed`); return; }
-    setMsg(`Gmail sync done — ${j.imported} imported, ${j.unmatched} unmatched`);
+    const saveNote = j.unmatchedSaveError ? ` (save error: ${j.unmatchedSaveError})` : "";
+    setMsg(`Gmail sync done — ${j.imported} imported, ${j.unmatchedEmailsQueued ?? j.unmatched} unmatched queued${saveNote}`);
   }
 
   async function syncVoiceExamples() {

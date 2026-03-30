@@ -376,28 +376,65 @@ export async function GET(req: Request) {
     }
 
     // Persist unmatched emails to unmatched_recipients table
+    let unmatchedSaveError: string | null = null;
     if (unmatchedCounts.size > 0) {
       const now = new Date().toISOString();
-      const upsertRows = Array.from(unmatchedCounts.entries()).map(([email, count]) => {
-        const meta = unmatchedMeta.get(email);
-        return {
-          email,
-          first_seen_at: now,
-          last_seen_at: now,
-          seen_count: count,
-          last_subject: meta?.subject ?? null,
-          last_snippet: meta?.snippet ?? null,
-          last_thread_link: meta?.threadLink ?? null,
-          status: "new",
-        };
-      });
+      const allEmails = Array.from(unmatchedCounts.keys());
 
-      // Upsert in batches of 50; on conflict update everything except first_seen_at
-      for (let i = 0; i < upsertRows.length; i += 50) {
-        const { error: upsertErr } = await supabaseAdmin
-          .from("unmatched_recipients")
-          .upsert(upsertRows.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: false });
-        if (upsertErr) console.error("UNMATCHED_UPSERT_ERROR", upsertErr.message, upsertErr);
+      // Fetch which emails already exist
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from("unmatched_recipients")
+        .select("id, email")
+        .in("email", allEmails);
+
+      if (fetchErr) {
+        unmatchedSaveError = fetchErr.message;
+      } else {
+        const existingEmailSet = new Set((existing ?? []).map((r: any) => r.email as string));
+
+        const toInsert = allEmails
+          .filter((e) => !existingEmailSet.has(e))
+          .map((email) => {
+            const meta = unmatchedMeta.get(email);
+            return {
+              email,
+              first_seen_at: now,
+              last_seen_at: now,
+              seen_count: unmatchedCounts.get(email) ?? 1,
+              last_subject: meta?.subject ?? null,
+              last_snippet: meta?.snippet ?? null,
+              last_thread_link: meta?.threadLink ?? null,
+              status: "new",
+            };
+          });
+
+        const toUpdate = allEmails.filter((e) => existingEmailSet.has(e));
+
+        // Insert new rows
+        if (toInsert.length > 0) {
+          for (let i = 0; i < toInsert.length; i += 50) {
+            const { error: insErr } = await supabaseAdmin
+              .from("unmatched_recipients")
+              .insert(toInsert.slice(i, i + 50));
+            if (insErr) { unmatchedSaveError = insErr.message; console.error("UNMATCHED_INSERT_ERROR", insErr); }
+          }
+        }
+
+        // Update existing rows (bump seen_count + refresh meta)
+        for (const email of toUpdate) {
+          const meta = unmatchedMeta.get(email);
+          const { error: updErr } = await supabaseAdmin
+            .from("unmatched_recipients")
+            .update({
+              last_seen_at: now,
+              seen_count: unmatchedCounts.get(email) ?? 1,
+              last_subject: meta?.subject ?? null,
+              last_snippet: meta?.snippet ?? null,
+              last_thread_link: meta?.threadLink ?? null,
+            })
+            .eq("email", email);
+          if (updErr) console.error("UNMATCHED_UPDATE_ERROR", email, updErr.message);
+        }
       }
     }
 
@@ -416,6 +453,7 @@ export async function GET(req: Request) {
       skipped,
       unmatched,
       unmatchedEmailsQueued: unmatchedCounts.size,
+      unmatchedSaveError,
       messagesFetched,
       messagesParsed,
       matchedRecipients,
