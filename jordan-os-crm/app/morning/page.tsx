@@ -300,6 +300,7 @@ export default function MorningPage() {
   const [quickLoggedFor, setQuickLoggedFor] = useState<string | null>(null);
   const [quickNoteFor, setQuickNoteFor] = useState<string | null>(null);
   const [quickNote, setQuickNote] = useState("");
+  const [quickChannel, setQuickChannel] = useState<Touch["channel"]>("text");
 
   // stable list + completed tracking
   const todayKey = `morning-locked-${new Date().toLocaleDateString("en-CA")}`; // YYYY-MM-DD local
@@ -462,7 +463,7 @@ export default function MorningPage() {
 
     const { error: insErr } = await supabase.from("touches").insert({
       contact_id: c.id,
-      channel: c.suggested_channel,
+      channel: quickChannel,
       direction: "outbound",
       intent: "check_in",
       occurred_at: new Date().toISOString(),
@@ -846,17 +847,30 @@ export default function MorningPage() {
                   <div style={{ display: "grid", gap: 8, minWidth: 160 }}>
                     {quickLoggedFor === c.id ? (
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
-                        ✓ Logged via {c.suggested_channel}
+                        ✓ Logged via {quickChannel}
                       </div>
                     ) : quickNoteFor === c.id ? (
                       <>
+                        <select
+                          className="select"
+                          value={quickChannel}
+                          onChange={(e) => setQuickChannel(e.target.value as Touch["channel"])}
+                          style={{ fontSize: 13 }}
+                        >
+                          <option value="text">Text</option>
+                          <option value="email">Email</option>
+                          <option value="call">Call</option>
+                          <option value="in_person">In person</option>
+                          <option value="social_dm">Social DM</option>
+                          <option value="other">Other</option>
+                        </select>
                         <textarea
                           className="textarea"
                           autoFocus
                           value={quickNote}
                           onChange={(e) => setQuickNote(e.target.value)}
-                          placeholder="What did you send?"
-                          style={{ minHeight: 72, fontSize: 13, resize: "vertical" }}
+                          placeholder="What did you send? (optional)"
+                          style={{ minHeight: 64, fontSize: 13, resize: "vertical" }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) quickLog(c, quickNote);
                             if (e.key === "Escape") { setQuickNoteFor(null); setQuickNote(""); }
@@ -872,16 +886,16 @@ export default function MorningPage() {
                         <button
                           className="btn"
                           style={{ fontSize: 12 }}
-                          onClick={() => quickLog(c)}
+                          onClick={() => { setQuickNoteFor(null); setQuickNote(""); }}
                           disabled={savingTouch}
                         >
-                          Skip note
+                          Cancel
                         </button>
                       </>
                     ) : (
                       <button
                         className="btn btnPrimary"
-                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); }}
+                        onClick={() => { setQuickNoteFor(c.id); setQuickNote(""); setQuickChannel(c.suggested_channel); }}
                         disabled={savingTouch}
                       >
                         Reached out
@@ -1032,7 +1046,7 @@ export default function MorningPage() {
                       </>
                     ) : quickLoggedFor === c.id ? (
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#15803d", textAlign: "center" }}>
-                        ✓ Logged via {c.suggested_channel}
+                        ✓ Logged via {quickChannel}
                       </div>
                     ) : (
                       <button

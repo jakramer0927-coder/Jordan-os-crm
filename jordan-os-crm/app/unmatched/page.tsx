@@ -171,10 +171,6 @@ export default function UnmatchedPage() {
 
     setRows((j.rows || []) as UnmatchedRow[]);
     setReady(true);
-    // DEBUG: remove once unmatched issue resolved
-    if (!j.rows || j.rows.length === 0) {
-      setErr(`DEBUG: API returned ok but rows empty. Full response: ${JSON.stringify(j).slice(0, 500)}`);
-    }
   }
 
   async function ignoreEmail(email: string) {
@@ -307,75 +303,6 @@ export default function UnmatchedPage() {
         <div className={`alert ${err ? "alertError" : "alertOk"}`}>{err || msg}</div>
       )}
 
-      {selectedEmail && (
-        <div className="card cardPad stack" style={{ background: "rgba(247,244,238,.55)" }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Link email → contact</div>
-          <div className="subtle">
-            Email: <strong>{selectedEmail}</strong>
-          </div>
-
-          <div className="row" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ width: 420, minWidth: 260 }}>
-              <div className="label">Search contacts</div>
-              <input
-                className="input"
-                value={contactQuery}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setContactQuery(v);
-                  setSelectedContactId("");
-                  searchContacts(v);
-                }}
-                placeholder="Search by name (e.g., Brad, Ray)"
-              />
-            </div>
-
-            <div className="field" style={{ minWidth: 360, flex: 1 }}>
-              <div className="label">Pick contact</div>
-              <select
-                className="select"
-                value={selectedContactId}
-                onChange={(e) => setSelectedContactId(e.target.value)}
-              >
-                <option value="">Select a contact…</option>
-                {contactResults.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.display_name} • {c.category}
-                    {c.tier ? ` • ${c.tier}` : ""}
-                    {c.email ? ` • ${c.email}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              className="btn btnPrimary"
-              onClick={() => linkEmail(selectedEmail, selectedContactId)}
-              disabled={busy || !selectedContactId}
-            >
-              Link
-            </button>
-
-            <button
-              className="btn"
-              onClick={() => {
-                setSelectedEmail(null);
-                setSelectedContactId("");
-                setContactQuery("");
-                setContactResults([]);
-              }}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-          </div>
-
-          <div className="subtle" style={{ fontSize: 12 }}>
-            Linking will: (1) add this email to <code>contact_emails</code>, (2) mark unmatched as{" "}
-            <code>linked</code>.
-          </div>
-        </div>
-      )}
 
       <div className="stack">
         {visible.map((r) => {
@@ -425,13 +352,18 @@ export default function UnmatchedPage() {
                   ) : null}
                 </div>
 
-                <div className="stack" style={{ minWidth: 220 }}>
+                <div className="stack" style={{ minWidth: 160 }}>
                   <button
                     className="btn btnPrimary"
-                    onClick={() => setSelectedEmail(r.email)}
+                    onClick={() => {
+                      setSelectedEmail(selectedEmail === r.email ? null : r.email);
+                      setContactQuery("");
+                      setContactResults([]);
+                      setSelectedContactId("");
+                    }}
                     disabled={busy}
                   >
-                    Link to contact
+                    {selectedEmail === r.email ? "Cancel" : "Link to contact"}
                   </button>
 
                   <button
@@ -451,6 +383,54 @@ export default function UnmatchedPage() {
                   </button>
                 </div>
               </div>
+
+              {selectedEmail === r.email && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                  <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
+                    <div className="field" style={{ flex: "1 1 200px", minWidth: 180 }}>
+                      <div className="label">Search contacts</div>
+                      <input
+                        className="input"
+                        autoFocus
+                        value={contactQuery}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setContactQuery(v);
+                          setSelectedContactId("");
+                          searchContacts(v);
+                        }}
+                        placeholder="Type a name…"
+                      />
+                    </div>
+
+                    {contactResults.length > 0 && (
+                      <div className="field" style={{ flex: "1 1 240px", minWidth: 200 }}>
+                        <div className="label">Pick contact</div>
+                        <select
+                          className="select"
+                          value={selectedContactId}
+                          onChange={(e) => setSelectedContactId(e.target.value)}
+                        >
+                          <option value="">Select…</option>
+                          {contactResults.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.display_name} • {c.category}{c.tier ? ` • ${c.tier}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <button
+                      className="btn btnPrimary"
+                      onClick={() => linkEmail(r.email, selectedContactId)}
+                      disabled={busy || !selectedContactId}
+                    >
+                      Link
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

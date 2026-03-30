@@ -134,7 +134,15 @@ export async function POST(req: Request) {
             .order("created_at", { ascending: false })
             .limit(40);
 
-        // 4) Voice examples
+        // 4) Style guide from AI coaching (if run)
+        const { data: settingsRow } = await supabaseAdmin
+            .from("user_settings")
+            .select("voice_style_guide")
+            .eq("user_id", uid)
+            .maybeSingle();
+        const styleGuide = (settingsRow as any)?.voice_style_guide as string | null || null;
+
+        // 5) Voice examples
         const { data: examples, error: vErr } = await supabaseAdmin
             .from("user_voice_examples")
             .select("channel, intent, text, subject, snippet, body_preview, occurred_at, created_at")
@@ -196,15 +204,15 @@ export async function POST(req: Request) {
         const system = [
             "You write outbound client, agent, and vendor messages in Jordan Kramer’s style.",
             "Jordan is a luxury Los Angeles real estate advisor.",
-            "His tone: warm, calm, confident, intelligent, concise, modern.",
-            "Never overly salesy. Never hype-y. No exclamation spam.",
+            styleGuide
+                ? `JORDAN’S STYLE GUIDE (follow closely): ${styleGuide}`
+                : "His tone: warm, calm, confident, intelligent, concise, modern. Never overly salesy. Never hype-y. No exclamation spam.",
             "For TEXT: conversational, tight, 1-4 sentences max.",
             "For EMAIL: structured, crisp, skimmable, polished.",
-            "Jordan’s style: warm, direct, confident, low-fluff, helpful, modern, no salesy language, no exclamation spam.",
             "Use natural contractions. Avoid corporate buzzwords. Avoid emojis unless it truly fits (default: none).",
             "Never invent facts. Use only provided context.",
             "Output ONLY the final message body. No preamble, no bullet labels, no quotes.",
-        ].join(" ");
+        ].filter(Boolean).join(" ");
 
         const user = [
             `TASK: Draft a ${channel.toUpperCase()} message.`,

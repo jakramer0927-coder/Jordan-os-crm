@@ -48,20 +48,41 @@ function extractTextFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
   const plain = parts.find(
     (p) => (p.mimeType || "").toLowerCase() === "text/plain" && p.body?.data,
   );
-  if (plain?.body?.data) return b64urlToUtf8(plain.body.data);
+  if (plain?.body?.data) return stripQuotedText(b64urlToUtf8(plain.body.data));
 
   const html = parts.find((p) => (p.mimeType || "").toLowerCase() === "text/html" && p.body?.data);
   if (html?.body?.data) {
     const raw = b64urlToUtf8(html.body.data);
-    return raw
+    const stripped = raw
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<blockquote[\s\S]*?<\/blockquote>/gi, "") // strip quoted blocks
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+    return stripQuotedText(stripped);
   }
 
   return "";
+}
+
+// Remove quoted/forwarded text so only Jordan's original words are captured
+function stripQuotedText(text: string): string {
+  const lines = text.split("\n");
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Common markers for where quoted content begins
+    if (trimmed.startsWith(">")) break;
+    if (/^On .{10,} wrote:$/i.test(trimmed)) break;
+    if (/^-{4,}\s*(Original|Forwarded)\s+Message/i.test(trimmed)) break;
+    if (/^From:\s+\S+@\S+/.test(trimmed) && result.length > 4) break;
+    if (/^Sent:\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(trimmed) && result.length > 4) break;
+    result.push(line);
+  }
+
+  return result.join("\n").trim();
 }
 
 type GoogleTokenRow = {
@@ -186,13 +207,22 @@ export async function POST(req: Request) {
           .trim()
           .slice(0, 4000);
 
-        if (!text) {
+        if (!text || text.length < 40) {
           skipped += 1;
           continue;
         }
 
         const threadId = fullData.threadId || "";
         const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
+
+        // Skip duplicates
+        const { data: dup } = await supabaseAdmin
+          .from("user_voice_examples")
+          .select("id")
+          .eq("user_id", uid)
+          .eq("source_message_id", m.id)
+          .limit(1);
+        if (dup && dup.length > 0) { skipped += 1; continue; }
 
         const { error: insErr } = await supabaseAdmin.from("user_voice_examples").insert({
           user_id: uid,

@@ -19,6 +19,16 @@ export default function IntegrationsPage() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string; errors: number } | null>(null);
 
+  // voice coaching
+  const [coaching, setCoaching] = useState<{
+    style_summary: string;
+    strengths: string[];
+    improvements: { issue: string; recommendation: string; example?: string }[];
+    style_guide: string;
+    score: { warmth: number; clarity: number; brevity: number; relevance: number; overall: number };
+  } | null>(null);
+  const [coachRunning, setCoachRunning] = useState(false);
+
   async function load() {
     const { data } = await supabase.auth.getSession();
     const user = data.session?.user;
@@ -127,6 +137,23 @@ export default function IntegrationsPage() {
     setBulkProgress(null);
   }
 
+  async function runVoiceCoach() {
+    if (!uid) return;
+    setCoachRunning(true);
+    setErr(null);
+    setMsg(null);
+    const res = await fetch("/api/voice/coach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setCoachRunning(false);
+    if (!res.ok) { setErr(j?.error || "Voice coach failed"); return; }
+    setCoaching(j.coaching);
+    setMsg(`Analysis complete — ${j.examples_analyzed} emails analyzed.`);
+  }
+
   async function importSheet() {
     if (!uid) return;
     setBusy(true);
@@ -212,6 +239,66 @@ export default function IntegrationsPage() {
         <button className="btn" onClick={runBulkExtract} disabled={bulkRunning || !connected}>
           {bulkRunning ? "Extracting…" : "Run bulk extraction"}
         </button>
+      </div>
+
+      {/* Voice coaching */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, marginBottom: 4 }}>Voice coaching</div>
+        <div className="muted small" style={{ marginBottom: 12 }}>
+          Analyzes your synced emails with AI to identify your communication style, score it, and give specific improvement recommendations. Also generates a style guide used for future drafts.
+        </div>
+
+        <button className="btn" onClick={runVoiceCoach} disabled={coachRunning || !connected}>
+          {coachRunning ? "Analyzing…" : "Analyze my outreach style"}
+        </button>
+
+        {coaching && (
+          <div className="stack" style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.55 }}>
+              <span style={{ fontWeight: 700 }}>Style summary: </span>{coaching.style_summary}
+            </div>
+
+            {/* Scores */}
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              {Object.entries(coaching.score || {}).map(([k, v]) => (
+                <div key={k} style={{ textAlign: "center", minWidth: 60 }}>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: Number(v) >= 7 ? "#15803d" : Number(v) >= 5 ? "#b45309" : "#b91c1c" }}>{v}/10</div>
+                  <div style={{ fontSize: 11, color: "#888", textTransform: "capitalize" }}>{k}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Strengths */}
+            {coaching.strengths?.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>What's working</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                  {coaching.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {/* Improvements */}
+            {coaching.improvements?.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Improvements</div>
+                <div className="stack">
+                  {coaching.improvements.map((imp, i) => (
+                    <div key={i} style={{ padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>{imp.issue}</div>
+                      <div style={{ color: "#444", marginBottom: imp.example ? 6 : 0 }}>{imp.recommendation}</div>
+                      {imp.example && <div style={{ fontStyle: "italic", color: "#666", fontSize: 12 }}>{imp.example}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} onClick={runVoiceCoach} disabled={coachRunning}>
+              Re-analyze
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Settings */}
