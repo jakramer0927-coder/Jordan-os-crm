@@ -728,10 +728,16 @@ export default function MorningPage() {
   const [bonusLoaded, setBonusLoaded] = useState(false);
   const bonusRecs = useMemo<Recommendation[]>(() => {
     const lockedSet = new Set(lockedIds ?? []);
-    return recs.filter((r) => !lockedSet.has(r.id)).slice(0, 5);
-  }, [recs, lockedIds]);
+    // Exclude already-completed contacts so bonus list always has actionable items
+    return recs.filter((r) => !lockedSet.has(r.id) && !completedIds.has(r.id)).slice(0, 5);
+  }, [recs, lockedIds, completedIds]);
 
   const allLocked5Done = displayRecs.length > 0 && displayRecs.every((r) => completedIds.has(r.id));
+
+  // Auto-show bonus list if we return to the page with all 5 already done
+  useEffect(() => {
+    if (allLocked5Done && bonusRecs.length > 0) setBonusLoaded(true);
+  }, [allLocked5Done, bonusRecs.length]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
@@ -1110,6 +1116,20 @@ export default function MorningPage() {
               <button className="btn btnPrimary" onClick={() => setBonusLoaded(true)}>
                 Load 5 more
               </button>
+            </div>
+          )}
+
+          {allLocked5Done && bonusRecs.length === 0 && (
+            <div className="card cardPad" style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>All caught up for today.</div>
+              <div className="muted small">No more overdue contacts to show. Come back tomorrow.</div>
+            </div>
+          )}
+
+          {allLocked5Done && bonusLoaded && bonusRecs.length > 0 && (
+            <div style={{ paddingLeft: 2, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Keep going</span>
+              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>won't count against your daily goal</span>
             </div>
           )}
 
