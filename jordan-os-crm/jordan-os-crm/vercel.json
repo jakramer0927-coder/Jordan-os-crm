@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/gmail-sync",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/daily-accountability",
+      "schedule": "0 16 * * *"
     }
   ]
 }

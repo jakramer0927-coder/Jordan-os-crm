@@ -66,6 +66,14 @@ export default function ContactsPage() {
   const [logSaving, setLogSaving] = useState(false);
   const [logMsg, setLogMsg] = useState<string | null>(null);
 
+  // triage mode
+  const [triageMode, setTriageMode] = useState(false);
+  const [triageFilter, setTriageFilter] = useState<"all" | "never" | "notier" | "other">("never");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   // add contact form
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState("");
@@ -218,6 +226,38 @@ export default function ContactsPage() {
     }
   }
 
+  async function bulkAction(action: "archive" | "delete") {
+    if (!uid || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const res = await fetch("/api/contacts/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, action, ids: Array.from(selectedIds) }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setBulkBusy(false);
+    setConfirmDelete(false);
+    if (!res.ok) { setBulkMsg(`Error: ${j?.error || "Failed"}`); return; }
+    setBulkMsg(`${action === "archive" ? "Archived" : "Deleted"} ${j.affected} contact${j.affected !== 1 ? "s" : ""}`);
+    setSelectedIds(new Set());
+    await loadRecent();
+    setTimeout(() => setBulkMsg(null), 3000);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(ids: string[]) {
+    const allSelected = ids.every((id) => selectedIds.has(id));
+    setSelectedIds(allSelected ? new Set() : new Set(ids));
+  }
+
   useEffect(() => {
     requireSession().then((u) => {
       if (!u) return;
@@ -233,6 +273,23 @@ export default function ContactsPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, uid]);
+
+  const triageRows = useMemo(() => {
+    let filtered = [...rows];
+    if (triageFilter === "never") filtered = filtered.filter((c) => !lastTouchMap.has(c.id));
+    else if (triageFilter === "notier") filtered = filtered.filter((c) => !c.tier);
+    else if (triageFilter === "other") filtered = filtered.filter((c) => (c.category || "").toLowerCase() === "other");
+    // Sort: never contacted first, then by oldest touch
+    filtered.sort((a, b) => {
+      const la = lastTouchMap.get(a.id);
+      const lb = lastTouchMap.get(b.id);
+      if (!la && !lb) return a.display_name.localeCompare(b.display_name);
+      if (!la) return -1;
+      if (!lb) return 1;
+      return lb.days - la.days; // oldest first
+    });
+    return filtered;
+  }, [rows, lastTouchMap, triageFilter]);
 
   const hint = useMemo(() => {
     const qt = q.trim();
@@ -256,6 +313,13 @@ export default function ContactsPage() {
         <div className="row">
           <a className="btn" href="/morning">Morning</a>
           <a className="btn" href="/unmatched">Unmatched</a>
+          <button
+            className="btn"
+            style={triageMode ? { background: "#fef3c7", borderColor: "#fcd34d", fontWeight: 700 } : {}}
+            onClick={() => { setTriageMode((v) => !v); setSelectedIds(new Set()); setBulkMsg(null); setConfirmDelete(false); }}
+          >
+            {triageMode ? "Exit triage" : "Triage"}
+          </button>
           <button className="btn btnPrimary" onClick={() => { setAddOpen((v) => !v); setAddErr(null); }}>
             {addOpen ? "Cancel" : "Add contact"}
           </button>
@@ -317,19 +381,98 @@ export default function ContactsPage() {
       </div>
 
       <div className="stack">
-        {rows.map((c) => {
+        {triageMode && (
+        <div className="card cardPad" style={{ background: "#fffbeb", borderColor: "#fcd34d" }}>
+          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>Triage</div>
+            {(["never", "notier", "other", "all"] as const).map((f) => (
+              <button
+                key={f}
+                className="btn"
+                style={triageFilter === f ? { fontWeight: 700, background: "#1e293b", color: "#fff", borderColor: "#1e293b" } : { fontSize: 12 }}
+                onClick={() => { setTriageFilter(f); setSelectedIds(new Set()); }}
+              >
+                {{ never: "Never contacted", notier: "No tier set", other: "Category: Other", all: "All contacts" }[f]}
+              </button>
+            ))}
+            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>
+              {triageRows.length} shown · {selectedIds.size} selected
+            </span>
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
+              {!confirmDelete ? (
+                <>
+                  <button className="btn" style={{ fontSize: 13 }} onClick={() => bulkAction("archive")} disabled={bulkBusy}>
+                    {bulkBusy ? "Working…" : `Archive ${selectedIds.size}`}
+                  </button>
+                  <button className="btn" style={{ fontSize: 13, color: "#b91c1c", borderColor: "#fca5a5" }} onClick={() => setConfirmDelete(true)} disabled={bulkBusy}>
+                    Delete {selectedIds.size}…
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c" }}>
+                    Permanently delete {selectedIds.size} contact{selectedIds.size !== 1 ? "s" : ""}? This cannot be undone.
+                  </span>
+                  <button className="btn" style={{ fontSize: 13, background: "#b91c1c", color: "#fff", borderColor: "#b91c1c" }} onClick={() => bulkAction("delete")} disabled={bulkBusy}>
+                    {bulkBusy ? "Deleting…" : "Yes, delete"}
+                  </button>
+                  <button className="btn" style={{ fontSize: 13 }} onClick={() => setConfirmDelete(false)} disabled={bulkBusy}>
+                    Cancel
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {bulkMsg && (
+            <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: bulkMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
+              {bulkMsg}
+            </div>
+          )}
+        </div>
+      )}
+
+      {triageMode && triageRows.length === 0 && (
+        <div className="muted">No contacts match this filter.</div>
+      )}
+
+      {triageMode && triageRows.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 2px" }}>
+          <input
+            type="checkbox"
+            checked={triageRows.every((c) => selectedIds.has(c.id))}
+            onChange={() => toggleSelectAll(triageRows.map((c) => c.id))}
+            style={{ width: 16, height: 16, cursor: "pointer" }}
+          />
+          <span className="muted" style={{ fontSize: 12 }}>Select all {triageRows.length}</span>
+        </div>
+      )}
+
+      {(triageMode ? triageRows : rows).map((c) => {
           const last = lastTouchMap.get(c.id) ?? null;
           const cadence = cadenceDays(c.category, c.tier);
           const overdue = last == null || last.days >= cadence;
           const expanded = expandedId === c.id;
 
           return (
-            <div key={c.id} className="card cardPad" style={{ cursor: "default", overflow: "hidden" }}>
+            <div key={c.id} className="card cardPad" style={{ cursor: "default", overflow: "hidden", outline: triageMode && selectedIds.has(c.id) ? "2px solid #f59e0b" : "none" }}>
               {/* Main row */}
               <div
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, cursor: "pointer" }}
-                onClick={() => toggleExpand(c.id)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, cursor: triageMode ? "default" : "pointer" }}
+                onClick={() => !triageMode && toggleExpand(c.id)}
               >
+                {triageMode && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSelect(c.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
+                  />
+                )}
                 {/* Days counter */}
                 <div style={{ textAlign: "center", minWidth: 52, flexShrink: 0 }}>
                   <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1, color: overdue ? "#b91c1c" : "#15803d" }}>
@@ -358,17 +501,27 @@ export default function ContactsPage() {
                   )}
                 </div>
 
-                {/* Overdue chip + chevron */}
+                {/* Overdue chip + action */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                   <span className="badge" style={{ fontSize: 11, color: overdue ? "#b91c1c" : "#15803d", borderColor: overdue ? "#fca5a5" : "#86efac" }}>
                     {overdue ? "Overdue" : "On track"}
                   </span>
-                  <span style={{ color: "#aaa", fontSize: 12, userSelect: "none" }}>{expanded ? "▲" : "▼"}</span>
+                  {triageMode ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <a className="btn" href={`/contacts/${c.id}`} style={{ fontSize: 11, padding: "2px 8px", textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>View</a>
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} disabled={bulkBusy}
+                        onClick={(e) => { e.stopPropagation(); setSelectedIds(new Set([c.id])); bulkAction("archive"); }}>
+                        Archive
+                      </button>
+                    </div>
+                  ) : (
+                    <span style={{ color: "#aaa", fontSize: 12, userSelect: "none" }}>{expanded ? "▲" : "▼"}</span>
+                  )}
                 </div>
               </div>
 
               {/* Expanded panel */}
-              {expanded && (
+              {expanded && !triageMode && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
                   {/* Contact info */}
                   {(c.email || c.phone || last) && (

@@ -75,6 +75,10 @@ function daysSince(iso: string): number {
   return Math.max(0, days);
 }
 
+function localDateLA(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   try {
@@ -307,6 +311,10 @@ export default function MorningPage() {
   const [quickNote, setQuickNote] = useState("");
   const [quickChannel, setQuickChannel] = useState<Touch["channel"]>("text");
 
+  // accountability stats
+  const [streak, setStreak] = useState<number>(0);
+  const [yesterdayCount, setYesterdayCount] = useState<number | null>(null);
+
   // stable list + completed tracking
   const todayKey = `morning-locked-${new Date().toLocaleDateString("en-CA")}`; // YYYY-MM-DD local
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
@@ -482,6 +490,31 @@ export default function MorningPage() {
     });
 
     setContacts(merged);
+
+    // Compute yesterday touch count + streak from loaded touches
+    const yesterdayLA = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return localDateLA(d); })();
+    const byDay = new Map<string, Set<string>>();
+    for (const t of touches) {
+      const d = localDateLA(new Date(t.occurred_at));
+      if (!byDay.has(d)) byDay.set(d, new Set());
+      byDay.get(d)!.add(t.contact_id);
+    }
+    setYesterdayCount(byDay.get(yesterdayLA)?.size ?? 0);
+
+    const DAILY_TARGET = 3;
+    let s = 0;
+    const streakCheck = new Date();
+    streakCheck.setDate(streakCheck.getDate() - 1);
+    for (let i = 0; i < 30; i++) {
+      const dow = streakCheck.getDay();
+      const dStr = localDateLA(streakCheck);
+      if (dow === 0 || dow === 6) { streakCheck.setDate(streakCheck.getDate() - 1); continue; }
+      if ((byDay.get(dStr)?.size ?? 0) >= DAILY_TARGET) s++;
+      else break;
+      streakCheck.setDate(streakCheck.getDate() - 1);
+    }
+    setStreak(s);
+
     setLoading(false);
   }
 
@@ -755,6 +788,32 @@ export default function MorningPage() {
             }}
           >
             {error || msg}
+          </div>
+        </div>
+      )}
+
+      {yesterdayCount !== null && (
+        <div
+          className="card cardPad"
+          style={{
+            marginTop: 14,
+            borderColor: yesterdayCount >= 3 ? "rgba(0,120,0,0.2)" : "rgba(180,120,0,0.35)",
+            background: yesterdayCount >= 3 ? "rgba(0,100,0,0.03)" : "rgba(255,200,0,0.07)",
+          }}
+        >
+          <div className="row" style={{ gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>
+              {streak >= 3
+                ? `🔥 ${streak}-day streak`
+                : streak > 0
+                ? `${streak}-day streak building`
+                : "No active streak"}
+            </div>
+            <div style={{ fontSize: 14, color: yesterdayCount >= 3 ? "#15803d" : "#92400e" }}>
+              {yesterdayCount >= 3
+                ? `Yesterday: ${yesterdayCount}/3 touches ✓`
+                : `Yesterday: ${yesterdayCount}/3 touches — add ${3 - yesterdayCount} extra today to catch up`}
+            </div>
           </div>
         </div>
       )}
