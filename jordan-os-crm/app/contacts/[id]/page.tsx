@@ -74,7 +74,7 @@ function intentLabel(i: string | null) {
   }
 }
 
-function TextThreadUploadPanel({ contactId }: { contactId: string }) {
+function TextThreadUploadPanel({ contactId, onImported }: { contactId: string; onImported?: () => void }) {
   const [uid, setUid] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [raw, setRaw] = useState("");
@@ -119,9 +119,9 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       if (!res.ok) {
         setErr(j?.error || "Import failed");
       } else {
-        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}. Extracting contact context…`);
 
-        // Extract Jordan's messages and analyze them
+        // Extract Jordan's messages and analyze voice coaching
         const myLines = raw.split("\n").filter((line) => {
           const lower = line.toLowerCase();
           return lower.startsWith("jordan:") || lower.startsWith("you:") || lower.startsWith("me:");
@@ -134,6 +134,20 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
             body: JSON.stringify({ uid, text: myLines.join("\n\n") }),
           }).then((r) => r.json()).then((fb) => {
             if (fb.observations?.length > 0) setThreadFeedback(fb);
+          }).catch(() => {});
+        }
+
+        // Auto-extract and save AI context for this contact
+        if (uid) {
+          fetch("/api/contacts/extract_context", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ uid, contact_id: contactId }),
+          }).then((r) => r.json()).then((ej) => {
+            if (ej.ok) {
+              setMsg(`Imported ✅ ${j.inserted_messages ?? "?"} messages — AI context updated.`);
+              onImported?.();
+            }
           }).catch(() => {});
         }
 
@@ -415,6 +429,17 @@ export default function ContactDetailPage() {
 
     setLogOpen(false);
     await fetchAll();
+
+    // Auto-update AI context if there's a summary to incorporate
+    if (logSummary.trim() && uid) {
+      fetch("/api/contacts/extract_context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, contact_id: contact.id }),
+      }).then((r) => r.json()).then((ej) => {
+        if (ej.ok) fetchAll();
+      }).catch(() => {});
+    }
   }
 
   async function extractContext() {
@@ -850,6 +875,44 @@ export default function ContactDetailPage() {
         </div>
       )}
 
+      {/* AI Context */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: contact.ai_context ? 12 : 0 }}>
+          <div>
+            <span style={{ fontWeight: 900 }}>AI context</span>
+            {contact.ai_context_updated_at && (
+              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                Updated {new Date(contact.ai_context_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12 }}
+            onClick={extractContext}
+            disabled={extracting}
+          >
+            {extracting ? "Extracting…" : contact.ai_context ? "Re-extract" : "Extract from messages"}
+          </button>
+        </div>
+
+        {extractMsg && (
+          <div style={{ fontSize: 12, marginBottom: 10, color: extractMsg.startsWith("Error") ? "#b91c1c" : "#15803d", fontWeight: 600 }}>
+            {extractMsg}
+          </div>
+        )}
+
+        {contact.ai_context ? (
+          <div style={{ fontSize: 13, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "#333" }}>
+            {contact.ai_context}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>
+            No context extracted yet. Click "Extract from messages" to pull key details from emails and text threads.
+          </div>
+        )}
+      </div>
+
       {/* Notes — inline edit */}
       <div className="card cardPad" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -1001,44 +1064,6 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* AI Context */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: contact.ai_context ? 12 : 0 }}>
-          <div>
-            <span style={{ fontWeight: 900 }}>AI context</span>
-            {contact.ai_context_updated_at && (
-              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                Updated {new Date(contact.ai_context_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
-            )}
-          </div>
-          <button
-            className="btn"
-            style={{ fontSize: 12 }}
-            onClick={extractContext}
-            disabled={extracting}
-          >
-            {extracting ? "Extracting…" : contact.ai_context ? "Re-extract" : "Extract from messages"}
-          </button>
-        </div>
-
-        {extractMsg && (
-          <div style={{ fontSize: 12, marginBottom: 10, color: extractMsg.startsWith("Error") ? "#b91c1c" : "#15803d", fontWeight: 600 }}>
-            {extractMsg}
-          </div>
-        )}
-
-        {contact.ai_context ? (
-          <div style={{ fontSize: 13, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "#333" }}>
-            {contact.ai_context}
-          </div>
-        ) : (
-          <div className="muted" style={{ fontSize: 13 }}>
-            No context extracted yet. Click "Extract from messages" to pull key details from emails and text threads.
-          </div>
-        )}
-      </div>
-
       {/* Touch timeline */}
       <div className="card cardPad" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 900, marginBottom: touches.length > 0 ? 16 : 0 }}>
@@ -1102,7 +1127,7 @@ export default function ContactDetailPage() {
         </summary>
         <div style={{ marginTop: 14 }}>
           <VoiceDraftPanel contactId={contact.id} />
-          <TextThreadUploadPanel contactId={contact.id} />
+          <TextThreadUploadPanel contactId={contact.id} onImported={fetchAll} />
         </div>
       </details>
 

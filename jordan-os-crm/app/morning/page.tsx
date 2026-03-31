@@ -719,9 +719,15 @@ export default function MorningPage() {
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
     if (lockedIds === null) return recs.slice(0, 5);
-    return lockedIds
+    const resolved = lockedIds
       .map((id) => recs.find((r) => r.id === id))
       .filter((r): r is Recommendation => r != null);
+    // If locked IDs no longer resolve (e.g. contacts archived/deleted), reset and fall back to fresh top 5
+    if (resolved.length === 0 && recs.length > 0) {
+      try { localStorage.removeItem(todayKey); } catch { /* ignore */ }
+      return recs.slice(0, 5);
+    }
+    return resolved;
   }, [lockedIds, recs]);
 
   // Next 5 after the locked set — shown on demand
