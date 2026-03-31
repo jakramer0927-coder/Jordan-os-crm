@@ -239,6 +239,19 @@ export default function ContactDetailPage() {
   const [logSummary, setLogSummary] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
+  // linked contacts (household)
+  type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
+  const [linkedContacts, setLinkedContacts] = useState<LinkedContact[]>([]);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkQ, setLinkQ] = useState("");
+  const [linkResults, setLinkResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
+  const [linkHouseholdName, setLinkHouseholdName] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState<string | null>(null);
+  const [distributeConfirm, setDistributeConfirm] = useState(false);
+  const [distributing, setDistributing] = useState(false);
+  const [distributeMsg, setDistributeMsg] = useState<string | null>(null);
+
   const [deleting, setDeleting] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -312,6 +325,13 @@ export default function ContactDetailPage() {
     }
 
     setTouches((tData ?? []) as Touch[]);
+
+    // Load linked contacts
+    const linksRes = await fetch(`/api/contacts/links?contact_id=${id}`);
+    if (linksRes.ok) {
+      const lj = await linksRes.json().catch(() => ({}));
+      setLinkedContacts(lj.links ?? []);
+    }
   }
 
   async function saveContact() {
@@ -371,20 +391,25 @@ export default function ContactDetailPage() {
 
     const occurred_at = logOccurredAt ? new Date(logOccurredAt).toISOString() : new Date().toISOString();
 
-    const { error } = await supabase.from("touches").insert({
-      contact_id: contact.id,
-      channel: logChannel,
-      direction: logDirection,
-      intent: logIntent,
-      occurred_at,
-      summary: logSummary.trim() ? logSummary.trim() : null,
-      source: "manual",
+    const res = await fetch("/api/touches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contact_id: contact.id,
+        channel: logChannel,
+        direction: logDirection,
+        intent: logIntent,
+        occurred_at,
+        summary: logSummary.trim() ? logSummary.trim() : null,
+        source: "manual",
+      }),
     });
 
     setSavingTouch(false);
 
-    if (error) {
-      setError(`Insert touch error: ${error.message}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(`Insert touch error: ${j?.error || res.statusText}`);
       return;
     }
 
@@ -433,6 +458,72 @@ export default function ContactDetailPage() {
     setMerging(false);
     if (!res.ok) { setMergeMsg(`Error: ${j?.error || "Merge failed"}`); return; }
     window.location.href = `/contacts/${mergeTarget.id}`;
+  }
+
+  async function searchLinkContacts(q: string) {
+    if (!uid || q.trim().length < 2) { setLinkResults([]); return; }
+    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setLinkResults((j.results || []).filter((r: any) => r.id !== id && !linkedContacts.some((l) => l.contact.id === r.id)));
+  }
+
+  async function addLink(targetId: string) {
+    if (!uid) return;
+    setLinkBusy(true);
+    setLinkMsg(null);
+    const res = await fetch("/api/contacts/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: uid,
+        contact_id_a: id,
+        contact_id_b: targetId,
+        household_name: linkHouseholdName.trim() || null,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setLinkBusy(false);
+    if (!res.ok) { setLinkMsg(`Error: ${j?.error || "Failed"}`); return; }
+    setLinkOpen(false);
+    setLinkQ("");
+    setLinkResults([]);
+    setLinkHouseholdName("");
+    setLinkMsg(null);
+    await fetchAll();
+  }
+
+  async function removeLink(linkId: string) {
+    setLinkBusy(true);
+    const res = await fetch("/api/contacts/links", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ link_id: linkId }),
+    });
+    setLinkBusy(false);
+    if (res.ok) await fetchAll();
+  }
+
+  async function distributeToLinked() {
+    if (!uid) return;
+    setDistributing(true);
+    setDistributeMsg(null);
+    const res = await fetch("/api/contacts/distribute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, group_contact_id: id }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setDistributing(false);
+    if (!res.ok) {
+      setDistributeMsg(`Error: ${j?.error || "Failed"}`);
+      setDistributeConfirm(false);
+      return;
+    }
+    setDistributeMsg(
+      `Done — ${j.touches_copied} touches copied to ${j.distributed_to.join(" & ")}. This contact has been archived.`
+    );
+    setDistributeConfirm(false);
+    await fetchAll();
   }
 
   async function archiveContact() {
@@ -795,6 +886,121 @@ export default function ContactDetailPage() {
         )}
       </div>
 
+      {/* Linked contacts (household) */}
+      <div className="card cardPad" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: linkedContacts.length > 0 ? 12 : 0 }}>
+          <div>
+            <span style={{ fontWeight: 900 }}>Household / linked contacts</span>
+            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>touches mirror automatically</span>
+          </div>
+          <button className="btn" style={{ fontSize: 12 }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
+            {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "Add another" : "Link contact"}
+          </button>
+        </div>
+
+        {linkedContacts.length > 0 && (
+          <div className="stack" style={{ gap: 6, marginBottom: linkOpen ? 12 : 0 }}>
+            {linkedContacts.map((l) => (
+              <div key={l.link_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(0,0,0,0.03)", borderRadius: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <a href={`/contacts/${l.contact.id}`} style={{ fontWeight: 700, fontSize: 14 }}>{l.contact.display_name}</a>
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{l.contact.category}{l.contact.tier ? ` · ${l.contact.tier}` : ""}</span>
+                  {l.household_name && <span className="badge" style={{ marginLeft: 8, fontSize: 11 }}>{l.household_name}</span>}
+                </div>
+                <button
+                  className="btn"
+                  style={{ fontSize: 11, color: "#888", padding: "3px 8px" }}
+                  onClick={() => removeLink(l.link_id)}
+                  disabled={linkBusy}
+                >
+                  Unlink
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {linkedContacts.length === 0 && !linkOpen && (
+          <div className="muted" style={{ fontSize: 13 }}>
+            No linked contacts. Link a partner/spouse so logging a touch on one automatically logs it on the other.
+          </div>
+        )}
+
+        {linkedContacts.length > 0 && !linkOpen && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
+            {!distributeConfirm ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, color: "#92400e", borderColor: "#fcd34d" }}
+                  onClick={() => { setDistributeConfirm(true); setDistributeMsg(null); }}
+                >
+                  Distribute & archive this contact →
+                </button>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Copies all touches, notes, and context to linked contacts, then archives this one.
+                </span>
+              </div>
+            ) : (
+              <div className="stack" style={{ gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  Copy all outreach + notes from <strong>{contact?.display_name}</strong> to{" "}
+                  <strong>{linkedContacts.map((l) => l.contact.display_name).join(" & ")}</strong>, then archive this contact?
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>This cannot be undone (though the contact can be unarchived).</div>
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>
+                    {distributing ? "Distributing…" : "Yes, distribute & archive"}
+                  </button>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
+                </div>
+              </div>
+            )}
+            {distributeMsg && (
+              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: distributeMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
+                {distributeMsg}
+              </div>
+            )}
+          </div>
+        )}
+
+        {linkOpen && (
+          <div className="stack" style={{ gap: 8 }}>
+            <input
+              className="input"
+              placeholder="Search for contact to link…"
+              value={linkQ}
+              autoFocus
+              onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }}
+            />
+            {linkResults.length > 0 && (
+              <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }}>
+                {linkResults.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.06)", fontSize: 13 }}
+                    onClick={() => addLink(r.id)}
+                  >
+                    <span style={{ fontWeight: 700 }}>{r.display_name}</span>
+                    <span className="muted" style={{ marginLeft: 8 }}>{r.category}{r.tier ? ` · ${r.tier}` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder='Household name (optional, e.g. "Smith Family")'
+                value={linkHouseholdName}
+                onChange={(e) => setLinkHouseholdName(e.target.value)}
+              />
+            </div>
+            {linkMsg && <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600 }}>{linkMsg}</div>}
+          </div>
+        )}
+      </div>
+
       {/* AI Context */}
       <div className="card cardPad" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: contact.ai_context ? 12 : 0 }}>
@@ -970,6 +1176,12 @@ export default function ContactDetailPage() {
                 style={{ minHeight: 80 }}
               />
             </div>
+
+            {linkedContacts.length > 0 && (
+              <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(37,99,235,0.06)", borderRadius: 6, fontSize: 12, color: "#1d4ed8" }}>
+                Will also mirror to: {linkedContacts.map((l) => l.contact.display_name).join(", ")}
+              </div>
+            )}
 
             <div className="row" style={{ marginTop: 14 }}>
               <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>

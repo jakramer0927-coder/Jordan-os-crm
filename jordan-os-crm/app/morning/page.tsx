@@ -531,20 +531,25 @@ export default function MorningPage() {
     setSavingTouch(true);
     setError(null);
 
-    const { error: insErr } = await supabase.from("touches").insert({
-      contact_id: c.id,
-      channel: quickChannel,
-      direction: "outbound",
-      intent: "check_in",
-      occurred_at: new Date().toISOString(),
-      summary: note?.trim() || null,
-      source: "manual",
+    const res = await fetch("/api/touches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contact_id: c.id,
+        channel: quickChannel,
+        direction: "outbound",
+        intent: "check_in",
+        occurred_at: new Date().toISOString(),
+        summary: note?.trim() || null,
+        source: "manual",
+      }),
     });
 
     setSavingTouch(false);
 
-    if (insErr) {
-      setError(`Insert touch error: ${insErr.message}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(`Insert touch error: ${j?.error || res.statusText}`);
       return;
     }
 
@@ -560,20 +565,25 @@ export default function MorningPage() {
     setError(null);
     setMsg(null);
 
-    const { error: insErr } = await supabase.from("touches").insert({
-      contact_id: loggingFor,
-      channel: touchChannel,
-      direction: "outbound",
-      intent: "check_in",
-      occurred_at: new Date().toISOString(),
-      summary: touchSummary.trim() ? touchSummary.trim() : null,
-      source: "manual",
+    const res = await fetch("/api/touches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contact_id: loggingFor,
+        channel: touchChannel,
+        direction: "outbound",
+        intent: "check_in",
+        occurred_at: new Date().toISOString(),
+        summary: touchSummary.trim() ? touchSummary.trim() : null,
+        source: "manual",
+      }),
     });
 
     setSavingTouch(false);
 
-    if (insErr) {
-      setError(`Insert touch error: ${insErr.message}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(`Insert touch error: ${j?.error || res.statusText}`);
       return;
     }
 
