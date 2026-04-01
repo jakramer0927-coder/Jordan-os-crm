@@ -199,17 +199,17 @@ export async function POST(req: Request) {
 
         const lengthRule =
             length === "short"
-                ? "Keep it very short (1–3 sentences for text; 3–6 for email)."
+                ? "Keep it very short: 1–2 sentences for text; 2–4 sentences for email. No filler."
                 : length === "medium"
-                    ? "Keep it medium (3–6 sentences for text; 6–12 for email)."
-                    : "It can be longer, but still crisp and skimmable.";
+                    ? "Medium length: 3–5 sentences for text; 6–10 sentences for email. Cover the key points without padding."
+                    : "Long form: text can run 6–10 sentences; email can be 3–5 short paragraphs (12–20 sentences). Be thorough — give context, detail, and any relevant next steps. Still no fluff, but don't artificially cut content.";
 
         const system = [
             "You write outbound client, agent, and vendor messages in Jordan Kramer’s style.",
             "Jordan is a luxury Los Angeles real estate advisor.",
             "His tone: warm, calm, confident, intelligent, concise, modern.",
             "Never overly salesy. Never hype-y. No exclamation spam.",
-            "For TEXT: conversational, tight, 1-4 sentences max.",
+            "For TEXT: conversational and tight. Default to short, but follow the length instruction.",
             "For EMAIL: structured, crisp, skimmable, polished.",
             "Jordan’s style: warm, direct, confident, low-fluff, helpful, modern, no salesy language, no exclamation spam.",
             "Use natural contractions. Avoid corporate buzzwords. Avoid emojis unless it truly fits (default: none).",
