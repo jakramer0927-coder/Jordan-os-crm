@@ -468,6 +468,7 @@ export default function ContactDetailPage() {
                 <option>Agent</option>
                 <option>Developer</option>
                 <option>Vendor</option>
+                <option>Sphere</option>
                 <option>Other</option>
               </select>
             </div>

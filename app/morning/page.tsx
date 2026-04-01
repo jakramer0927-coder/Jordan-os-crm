@@ -104,6 +104,11 @@ function cadenceDays(category: string, tier: string | null): number {
   }
   if (cat === "developer") return 60;
   if (cat === "vendor") return 60;
+  if (cat === "sphere") {
+    if (t === "A") return 30;
+    if (t === "B") return 60;
+    return 90;
+  }
   return 60;
 }
 
@@ -131,6 +136,7 @@ function categoryBadge(c: ContactWithLastOutbound) {
 function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
   const cat = (c.category || "").toLowerCase();
   if (cat === "agent" || cat === "developer" || cat === "vendor") return "email";
+  if (cat === "sphere") return "text";
   return "text";
 }
 
@@ -216,6 +222,18 @@ function buildDraftWithVoice(opts: {
     "If I loop you in on something, what's the fastest way to get it on your radar?",
   ];
 
+  const sphereValues = [
+    "Just wanted to check in — hope everything's going well on your end.",
+    "Been thinking about you — wanted to say hi and stay in touch.",
+    "Quick note to reconnect — it's been a while and I've been meaning to reach out.",
+  ];
+
+  const sphereAsks = [
+    "How's life treating you?",
+    "Anything new and exciting happening for you?",
+    "Would love to grab coffee or a quick call whenever works for you.",
+  ];
+
   const voice = opts.voice;
   let opener = choose(openers, `Hey ${name} — quick one.`);
   let close = choose(softCloses, "No rush — just let me know.");
@@ -235,6 +253,9 @@ function buildDraftWithVoice(opts: {
   } else if (cat === "vendor") {
     value = choose(vendorValues, vendorValues[0]);
     ask = choose(vendorAsks, vendorAsks[0]);
+  } else if (cat === "sphere") {
+    value = choose(sphereValues, sphereValues[0]);
+    ask = choose(sphereAsks, sphereAsks[0]);
   } else {
     value = choose(clientValues, clientValues[0]);
     ask = choose(clientAsks, clientAsks[0]);
@@ -269,6 +290,37 @@ type Recommendation = ContactWithLastOutbound & {
   suggested_draft: string;
 };
 
+type MorningRules = {
+  totalRecs: number;
+  minAgents: number;
+  minClients: number;
+  minSphere: number;
+};
+
+const DEFAULT_RULES: MorningRules = {
+  totalRecs: 5,
+  minAgents: 2,
+  minClients: 0,
+  minSphere: 0,
+};
+
+const RULES_KEY = "morning_rules_v1";
+
+function loadRules(): MorningRules {
+  try {
+    const raw = localStorage.getItem(RULES_KEY);
+    if (!raw) return DEFAULT_RULES;
+    const parsed = JSON.parse(raw) as Partial<MorningRules>;
+    return { ...DEFAULT_RULES, ...parsed };
+  } catch {
+    return DEFAULT_RULES;
+  }
+}
+
+function saveRules(r: MorningRules) {
+  try { localStorage.setItem(RULES_KEY, JSON.stringify(r)); } catch { /* ignore */ }
+}
+
 export default function MorningPage() {
   const [ready, setReady] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -294,6 +346,12 @@ export default function MorningPage() {
   // stable list + completed tracking
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+
+  // operating rules
+  const [rules, setRules] = useState<MorningRules>(DEFAULT_RULES);
+  const [rulesOpen, setRulesOpen] = useState(false);
+
+  useEffect(() => { setRules(loadRules()); }, []);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -460,6 +518,7 @@ export default function MorningPage() {
 
   const recs = useMemo<Recommendation[]>(() => {
     const weekday = isWeekdayLocal();
+    const { totalRecs, minAgents, minClients, minSphere } = rules;
 
     const scored: Recommendation[] = contacts.map((c) => {
       const cadence = cadenceDays(c.category, c.tier);
@@ -478,6 +537,7 @@ export default function MorningPage() {
       let score = 0;
       if (isAClient(c)) score += 1000;
       if (overdue) score += 300;
+      if (d == null) score += 200; // never reached out — boost above minimally-overdue contacts
       score += (d ?? cadence) * 2;
 
       const cat = (c.category || "").toLowerCase();
@@ -485,6 +545,7 @@ export default function MorningPage() {
       if (cat === "developer") score += 40;
       if (cat === "client") score += 80;
       if (cat === "vendor") score += 30;
+      if (cat === "sphere") score += 50;
 
       const t = (c.tier || "").toUpperCase();
       if (t === "A") score += 40;
@@ -511,44 +572,48 @@ export default function MorningPage() {
 
     const overdueAClients = scored.filter((c) => isAClient(c) && c.overdue);
     for (const c of overdueAClients) {
-      if (top.length >= 5) break;
+      if (top.length >= totalRecs) break;
       top.push(c);
       used.add(c.id);
     }
 
-    const agentsNeeded = 2;
-    const agentPool = scored.filter(
-      (c) => (c.category || "").toLowerCase() === "agent" && !used.has(c.id),
-    );
-    const pickAgents = agentPool.slice(
-      0,
-      Math.max(
-        0,
-        agentsNeeded - top.filter((x) => (x.category || "").toLowerCase() === "agent").length,
-      ),
-    );
-    for (const a of pickAgents) {
-      if (top.length >= 5) break;
-      top.push(a);
-      used.add(a.id);
+    const guaranteedSlots: Array<{ cat: string; needed: number }> = [
+      { cat: "agent", needed: minAgents },
+      { cat: "client", needed: minClients },
+      { cat: "sphere", needed: minSphere },
+    ];
+    for (const { cat, needed } of guaranteedSlots) {
+      if (needed <= 0) continue;
+      const pool = scored.filter((c) => (c.category || "").toLowerCase() === cat && !used.has(c.id));
+      const already = top.filter((x) => (x.category || "").toLowerCase() === cat).length;
+      const picks = pool.slice(0, Math.max(0, needed - already));
+      for (const p of picks) {
+        if (top.length >= totalRecs) break;
+        top.push(p);
+        used.add(p.id);
+      }
     }
 
     for (const c of scored) {
-      if (top.length >= 5) break;
+      if (top.length >= totalRecs) break;
       if (used.has(c.id)) continue;
       top.push(c);
       used.add(c.id);
     }
 
     return top;
-  }, [contacts, voice]);
+  }, [contacts, voice, rules]);
 
-  // Lock the initial 5 IDs after first load to prevent reshuffling
+  // Lock the initial IDs after first load to prevent reshuffling; reset when rules change
+  useEffect(() => {
+    setLockedIds(null);
+  }, [rules]);
+
   useEffect(() => {
     if (lockedIds === null && recs.length > 0) {
       setLockedIds(recs.map((r) => r.id));
     }
-  }, [recs]);
+  }, [recs, lockedIds]);
 
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
@@ -630,16 +695,63 @@ export default function MorningPage() {
       <div className="section" style={{ marginTop: 14 }}>
         <div className="sectionTitleRow">
           <div className="sectionTitle">Operating rules</div>
-          <div className="sectionSub">Daily accountability, without noise.</div>
+          <div className="row" style={{ gap: 8 }}>
+            <div className="sectionSub">Daily accountability, without noise.</div>
+            <button
+              className="btn"
+              style={{ fontSize: 12, padding: "2px 10px" }}
+              onClick={() => setRulesOpen((o) => !o)}
+            >
+              {rulesOpen ? "Done" : "Edit"}
+            </button>
+          </div>
         </div>
 
-        <div className="row">
-          <span className="badge">Top 5 per day</span>
-          <span className="badge">Min 2 agents (if available)</span>
-          <span className="badge">A-Client never missed</span>
-          <span className="badge">Outbound resets cadence</span>
-          <span className="badge">Weekday-focused suggestions</span>
-        </div>
+        {rulesOpen ? (
+          <div className="card cardPad" style={{ marginTop: 10 }}>
+            <div className="row" style={{ flexWrap: "wrap", gap: 20, alignItems: "flex-end" }}>
+              {(
+                [
+                  { key: "totalRecs", label: "Outreach per day", min: 1, max: 20 },
+                  { key: "minAgents", label: "Min agents", min: 0, max: 10 },
+                  { key: "minClients", label: "Min clients", min: 0, max: 10 },
+                  { key: "minSphere", label: "Min sphere", min: 0, max: 10 },
+                ] as Array<{ key: keyof MorningRules; label: string; min: number; max: number }>
+              ).map(({ key, label, min, max }) => (
+                <div key={key} className="field" style={{ minWidth: 120 }}>
+                  <div className="label">{label}</div>
+                  <input
+                    className="input"
+                    type="number"
+                    min={min}
+                    max={max}
+                    value={rules[key]}
+                    onChange={(e) => {
+                      const val = Math.max(min, Math.min(max, Number(e.target.value) || min));
+                      const next = { ...rules, [key]: val };
+                      setRules(next);
+                      saveRules(next);
+                    }}
+                    style={{ width: 72 }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="muted small" style={{ marginTop: 10 }}>
+              Changes apply immediately and persist across sessions.
+            </div>
+          </div>
+        ) : (
+          <div className="row">
+            <span className="badge">Top {rules.totalRecs} per day</span>
+            {rules.minAgents > 0 && <span className="badge">Min {rules.minAgents} agents</span>}
+            {rules.minClients > 0 && <span className="badge">Min {rules.minClients} clients</span>}
+            {rules.minSphere > 0 && <span className="badge">Min {rules.minSphere} sphere</span>}
+            <span className="badge">A-Client never missed</span>
+            <span className="badge">Outbound resets cadence</span>
+            <span className="badge">Weekday-focused suggestions</span>
+          </div>
+        )}
 
         {!weekday ? (
           <div className="muted small" style={{ marginTop: 10 }}>
@@ -651,7 +763,7 @@ export default function MorningPage() {
 
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
-          <div className="sectionTitle">Today's Top 5</div>
+          <div className="sectionTitle">Today's Top {rules.totalRecs}</div>
           <div className="sectionSub">
             Ranked by overdue + tier + category + days since outbound.
           </div>

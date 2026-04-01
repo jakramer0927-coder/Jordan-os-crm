@@ -79,6 +79,11 @@ function cadenceDays(categoryRaw: string, tierRaw: string | null): number {
     return 90;
   }
   if (category === "developer") return 60;
+  if (category === "sphere") {
+    if (tier === "A") return 30;
+    if (tier === "B") return 60;
+    return 90;
+  }
 
   if (tier === "A") return 45;
   if (tier === "B") return 75;
