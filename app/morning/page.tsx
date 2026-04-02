@@ -693,18 +693,18 @@ export default function MorningPage() {
       )}
 
       <div className="section" style={{ marginTop: 14 }}>
-        <div className="sectionTitleRow">
-          <div className="sectionTitle">Operating rules</div>
-          <div className="row" style={{ gap: 8 }}>
+        <div className="rowBetween" style={{ marginBottom: 10 }}>
+          <div>
+            <div className="sectionTitle">Operating rules</div>
             <div className="sectionSub">Daily accountability, without noise.</div>
-            <button
-              className="btn"
-              style={{ fontSize: 12, padding: "2px 10px" }}
-              onClick={() => setRulesOpen((o) => !o)}
-            >
-              {rulesOpen ? "Done" : "Edit"}
-            </button>
           </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12, padding: "2px 10px", flexShrink: 0 }}
+            onClick={() => setRulesOpen((o) => !o)}
+          >
+            {rulesOpen ? "Done" : "Edit"}
+          </button>
         </div>
 
         {rulesOpen ? (

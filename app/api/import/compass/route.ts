@@ -359,6 +359,7 @@ export async function POST(req: Request) {
       const { data: ins, error: insErr } = await supabaseAdmin
         .from("contacts")
         .insert({
+          user_id: uid,
           display_name: fullName,
           category,
           client_type,

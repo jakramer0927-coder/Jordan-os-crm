@@ -216,7 +216,7 @@ export default function UnmatchedPage() {
       setMsg(null);
     }
 
-    const res = await fetch(`/api/unmatched/ignore`, {
+    const res = await fetch(`/unmatched/ignore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid, email }),
@@ -310,7 +310,7 @@ export default function UnmatchedPage() {
     setErr(null);
     setMsg(null);
 
-    const res = await fetch(`/api/unmatched/link`, {
+    const res = await fetch(`/unmatched/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid, email, contact_id: contactId }),
