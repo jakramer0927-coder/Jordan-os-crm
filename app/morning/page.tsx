@@ -347,11 +347,12 @@ export default function MorningPage() {
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  // operating rules
-  const [rules, setRules] = useState<MorningRules>(DEFAULT_RULES);
+  // operating rules — load synchronously on first render to avoid re-render loop
+  const [rules, setRules] = useState<MorningRules>(() => {
+    if (typeof window === "undefined") return DEFAULT_RULES;
+    return loadRules();
+  });
   const [rulesOpen, setRulesOpen] = useState(false);
-
-  useEffect(() => { setRules(loadRules()); }, []);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -604,9 +605,12 @@ export default function MorningPage() {
     return top;
   }, [contacts, voice, rules]);
 
-  // Lock the initial IDs after first load to prevent reshuffling; reset when rules change
+  // Reset locked list when user explicitly changes rules (not on mount)
+  const isFirstRulesRender = useState(true);
   useEffect(() => {
+    if (isFirstRulesRender[0]) { isFirstRulesRender[1](false); return; }
     setLockedIds(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);
 
   useEffect(() => {

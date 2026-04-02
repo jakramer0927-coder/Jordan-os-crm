@@ -198,7 +198,9 @@ export default function UnmatchedPage() {
   }
 
   async function createContact(email: string) {
-    if (!uid) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const activeUid = sd.session?.user?.id ?? uid;
+    if (!activeUid) return;
     setBusy(true);
     setErr(null);
     setMsg(null);
@@ -206,7 +208,7 @@ export default function UnmatchedPage() {
     const res = await fetch(`/unmatched/create_contact`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, email }),
+      body: JSON.stringify({ uid: activeUid, email }),
     });
 
     const j = await res.json();
@@ -238,7 +240,9 @@ export default function UnmatchedPage() {
   }
 
   async function linkEmail(email: string, contactId: string) {
-    if (!uid) return;
+    const { data: sd } = await supabase.auth.getSession();
+    const activeUid = sd.session?.user?.id ?? uid;
+    if (!activeUid) return;
     if (!contactId) {
       setErr("Pick a contact to link to.");
       return;
@@ -251,7 +255,7 @@ export default function UnmatchedPage() {
     const res = await fetch(`/unmatched/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, email, contact_id: contactId }),
+      body: JSON.stringify({ uid: activeUid, email, contact_id: contactId }),
     });
 
     const j = await res.json();
@@ -275,7 +279,10 @@ export default function UnmatchedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visible = useMemo(() => rows.filter((r) => r.status !== "ignored"), [rows]);
+  const visible = useMemo(
+    () => rows.filter((r) => r.status !== "ignored" && r.status !== "linked" && r.status !== "auto_created"),
+    [rows],
+  );
 
   if (!ready) return <div className="card cardPad">Loading…</div>;
 
