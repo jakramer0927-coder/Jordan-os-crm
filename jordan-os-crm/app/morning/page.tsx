@@ -353,6 +353,7 @@ export default function MorningPage() {
     return loadRules();
   });
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [rulesReady, setRulesReady] = useState(false);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -606,9 +607,8 @@ export default function MorningPage() {
   }, [contacts, voice, rules]);
 
   // Reset locked list when user explicitly changes rules (not on mount)
-  const isFirstRulesRender = useState(true);
   useEffect(() => {
-    if (isFirstRulesRender[0]) { isFirstRulesRender[1](false); return; }
+    if (!rulesReady) { setRulesReady(true); return; }
     setLockedIds(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);

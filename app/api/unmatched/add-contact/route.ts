@@ -46,31 +46,48 @@ export async function POST(req: Request) {
     if (!email || !email.includes("@"))
       return NextResponse.json({ error: "Invalid email" }, { status: 400 });
 
-    // 1) Create contact
-    const display_name = displayFromEmail(email);
-    const category = body?.category || "Client";
-    const tier = body?.tier ?? null;
-
-    const { data: insC, error: insCErr } = await supabaseAdmin
+    // 1) Check if a contact with this email already exists for this user
+    const { data: existing } = await supabaseAdmin
       .from("contacts")
-      .insert({
-        user_id: uid,
-        display_name,
-        category,
-        tier,
-        email, // keep legacy single email if you still have it
-      })
       .select("id, display_name")
-      .single();
+      .eq("user_id", uid)
+      .eq("email", email)
+      .maybeSingle();
 
-    if (insCErr || !insC) {
-      return NextResponse.json(
-        { error: insCErr?.message || "Failed to create contact" },
-        { status: 500 },
-      );
+    let contactId: string;
+    let display_name: string;
+
+    if (existing) {
+      // Already exists — just link it
+      contactId = String(existing.id);
+      display_name = String(existing.display_name);
+    } else {
+      // Create new contact
+      display_name = displayFromEmail(email);
+      const category = body?.category || "Agent";
+      const tier = body?.tier ?? null;
+
+      const { data: insC, error: insCErr } = await supabaseAdmin
+        .from("contacts")
+        .insert({
+          user_id: uid,
+          display_name,
+          category,
+          tier,
+          email,
+        })
+        .select("id, display_name")
+        .single();
+
+      if (insCErr || !insC) {
+        return NextResponse.json(
+          { error: insCErr?.message || "Failed to create contact" },
+          { status: 500 },
+        );
+      }
+
+      contactId = String((insC as { id: string }).id);
     }
-
-    const contactId = String((insC as { id: string }).id);
 
     // 2) Add email to contact_emails (dedupe handled by constraint if you created one)
     const { error: ceErr } = await supabaseAdmin.from("contact_emails").insert({
