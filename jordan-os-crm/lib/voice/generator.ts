@@ -144,6 +144,7 @@ function categoryKey(category: string) {
   if (c.includes("client")) return "client";
   if (c.includes("developer")) return "developer";
   if (c.includes("vendor")) return "vendor";
+  if (c.includes("sphere")) return "sphere";
   return "other";
 }
 
@@ -232,6 +233,16 @@ export function buildDraft(args: BuildDraftArgs): string {
       recency,
       "Quick check-in — how busy are you right now, and what’s your lead time looking like?",
       "I’ve got a couple things coming up and want to plan cleanly.",
+      closerFromExamples,
+    ]);
+  }
+
+  if (cat === "sphere") {
+    return join([
+      openerFromExamples,
+      recency,
+      "Just wanted to check in and stay connected — hope everything's going well on your end.",
+      "Would love to catch up soon.",
       closerFromExamples,
     ]);
   }

@@ -51,9 +51,10 @@ async function openaiDraft(args: {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
-    const model = args.model || process.env.OPENAI_MODEL || "gpt-4o-mini";
+    // Use Responses API style call (works well on Vercel Node runtime)
+    const model = args.model || process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -61,7 +62,7 @@ async function openaiDraft(args: {
         },
         body: JSON.stringify({
             model,
-            messages: [
+            input: [
                 { role: "system", content: args.system },
                 { role: "user", content: args.user },
             ],
@@ -76,8 +77,18 @@ async function openaiDraft(args: {
         throw new Error(msg);
     }
 
-    const text = j?.choices?.[0]?.message?.content;
-    if (typeof text === "string" && text.trim()) return text.trim();
+    // responses API returns output_text convenience in many SDKs; here we’ll extract manually
+    const out = j?.output ?? [];
+    for (const item of out) {
+        const content = item?.content ?? [];
+        for (const c of content) {
+            if (c?.type === "output_text" && typeof c?.text === "string") return c.text.trim();
+        }
+    }
+
+    // fallback
+    const t = j?.output_text;
+    if (typeof t === "string" && t.trim()) return t.trim();
 
     throw new Error("OpenAI returned no text");
 }
@@ -134,15 +145,7 @@ export async function POST(req: Request) {
             .order("created_at", { ascending: false })
             .limit(40);
 
-        // 4) Style guide from AI coaching (if run)
-        const { data: settingsRow } = await supabaseAdmin
-            .from("user_settings")
-            .select("voice_style_guide")
-            .eq("user_id", uid)
-            .maybeSingle();
-        const styleGuide = (settingsRow as any)?.voice_style_guide as string | null || null;
-
-        // 5) Voice examples
+        // 4) Voice examples
         const { data: examples, error: vErr } = await supabaseAdmin
             .from("user_voice_examples")
             .select("channel, intent, text, subject, snippet, body_preview, occurred_at, created_at")
@@ -196,23 +199,23 @@ export async function POST(req: Request) {
 
         const lengthRule =
             length === "short"
-                ? "Keep it very short (1–3 sentences for text; 3–6 for email)."
+                ? "Keep it very short: 1–2 sentences for text; 2–4 sentences for email. No filler."
                 : length === "medium"
-                    ? "Keep it medium (3–6 sentences for text; 6–12 for email)."
-                    : "It can be longer, but still crisp and skimmable.";
+                    ? "Medium length: 3–5 sentences for text; 6–10 sentences for email. Cover the key points without padding."
+                    : "Long form: text can run 6–10 sentences; email can be 3–5 short paragraphs (12–20 sentences). Be thorough — give context, detail, and any relevant next steps. Still no fluff, but don't artificially cut content.";
 
         const system = [
             "You write outbound client, agent, and vendor messages in Jordan Kramer’s style.",
             "Jordan is a luxury Los Angeles real estate advisor.",
-            styleGuide
-                ? `JORDAN’S STYLE GUIDE (follow closely): ${styleGuide}`
-                : "His tone: warm, calm, confident, intelligent, concise, modern. Never overly salesy. Never hype-y. No exclamation spam.",
-            "For TEXT: conversational, tight, 1-4 sentences max.",
+            "His tone: warm, calm, confident, intelligent, concise, modern.",
+            "Never overly salesy. Never hype-y. No exclamation spam.",
+            "For TEXT: conversational and tight. Default to short, but follow the length instruction.",
             "For EMAIL: structured, crisp, skimmable, polished.",
+            "Jordan’s style: warm, direct, confident, low-fluff, helpful, modern, no salesy language, no exclamation spam.",
             "Use natural contractions. Avoid corporate buzzwords. Avoid emojis unless it truly fits (default: none).",
             "Never invent facts. Use only provided context.",
             "Output ONLY the final message body. No preamble, no bullet labels, no quotes.",
-        ].filter(Boolean).join(" ");
+        ].join(" ");
 
         const user = [
             `TASK: Draft a ${channel.toUpperCase()} message.`,

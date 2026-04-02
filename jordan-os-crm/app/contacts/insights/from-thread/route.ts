@@ -78,21 +78,39 @@ export async function POST(req: Request) {
 
     const { insights, drafts } = extractInsights(messages);
 
-    // 2️⃣ Insert insights
+    // 2️⃣ Insert insights — skip any already extracted from this thread
     if (insights.length > 0) {
-      await supabaseAdmin.from("contact_insights").insert(
-        insights.map((i) => ({
-          user_id: uid,
-          contact_id,
-          source_thread_id: thread_id,
-          kind: i.kind,
-          value: i.value,
-        })),
-      );
+      const { data: existing } = await supabaseAdmin
+        .from("contact_insights")
+        .select("kind")
+        .eq("contact_id", contact_id)
+        .eq("source_thread_id", thread_id);
+
+      const existingKinds = new Set((existing ?? []).map((r: { kind: string }) => r.kind));
+      const newInsights = insights.filter((i) => !existingKinds.has(i.kind));
+
+      if (newInsights.length > 0) {
+        await supabaseAdmin.from("contact_insights").insert(
+          newInsights.map((i) => ({
+            user_id: uid,
+            contact_id,
+            source_thread_id: thread_id,
+            kind: i.kind,
+            value: i.value,
+          })),
+        );
+      }
     }
 
-    // 3️⃣ Insert drafts
-    if (drafts.length > 0) {
+    // 3️⃣ Insert drafts — skip if this thread already produced drafts
+    const { data: existingDrafts } = await supabaseAdmin
+      .from("contact_drafts")
+      .select("id")
+      .eq("contact_id", contact_id)
+      .eq("source_thread_id", thread_id)
+      .limit(1);
+
+    if (drafts.length > 0 && (!existingDrafts || existingDrafts.length === 0)) {
       await supabaseAdmin.from("contact_drafts").insert(
         drafts.map((d) => ({
           user_id: uid,
@@ -105,19 +123,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4️⃣ Update contact next action
+    // 4️⃣ Only update next_action if it is currently null — never overwrite existing value
     await supabaseAdmin
       .from("contacts")
       .update({
         next_action: "Follow up on recent conversation",
         next_action_due_at: daysFromNow(5),
       })
-      .eq("id", contact_id);
+      .eq("id", contact_id)
+      .is("next_action", null);
 
     return NextResponse.json({
       ok: true,
-      insights_created: insights.length,
-      drafts_created: drafts.length,
+      insights_found: insights.length,
+      drafts_found: drafts.length,
     });
   } catch (e) {
     return NextResponse.json({ error: "Insight extraction failed" }, { status: 500 });

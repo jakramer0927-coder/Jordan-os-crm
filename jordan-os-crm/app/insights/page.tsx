@@ -4,6 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
+type TouchIntent =
+  | "check_in"
+  | "referral_ask"
+  | "review_ask"
+  | "deal_followup"
+  | "collaboration"
+  | "event_invite"
+  | "other";
+
 type Contact = {
   id: string;
   display_name: string;
@@ -16,356 +25,805 @@ type Touch = {
   contact_id: string;
   direction: "outbound" | "inbound";
   occurred_at: string;
-  intent: string | null;
+  intent: TouchIntent | null;
 };
 
+type Intervention = {
+  key: string;
+  priority: number;
+  title: string;
+  summary: string;
+  target: string;
+  suggested: Array<{
+    contact_id: string;
+    display_name: string;
+    category: string;
+    tier: string | null;
+    days_since_outbound: number | null;
+    why: string;
+  }>;
+};
+
+function pct(n: number, d: number) {
+  if (d <= 0) return "—";
+  return `${Math.round((n / d) * 100)}%`;
+}
+
+function deltaPct(curr: number, prev: number) {
+  if (prev <= 0) return curr > 0 ? 100 : 0;
+  return Math.round(((curr - prev) / prev) * 100);
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
 function daysSince(iso: string) {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
 }
 
-function cadenceDays(cat: string, tier: string | null): number {
-  const c = (cat || "").toLowerCase();
-  const t = (tier || "").toUpperCase();
-  if (c === "client") return t === "A" ? 30 : t === "B" ? 60 : 90;
-  if (c === "sphere") return t === "A" ? 60 : t === "B" ? 90 : 120;
-  if (c === "agent") return t === "A" ? 30 : 60;
-  if (c === "developer") return 60;
-  return 90;
+function cadenceDays(categoryRaw: string, tierRaw: string | null): number {
+  const category = (categoryRaw || "").toLowerCase();
+  const tier = (tierRaw || "").toUpperCase();
+
+  if (category === "client") {
+    if (tier === "A") return 30;
+    if (tier === "B") return 60;
+    return 90;
+  }
+  if (category === "agent") {
+    if (tier === "A") return 30;
+    if (tier === "B") return 60;
+    return 90;
+  }
+  if (category === "developer") return 60;
+  if (category === "sphere") {
+    if (tier === "A") return 30;
+    if (tier === "B") return 60;
+    return 90;
+  }
+
+  if (tier === "A") return 45;
+  if (tier === "B") return 75;
+  return 120;
 }
 
-function startOfWeekMonday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
+function startOfDayLocal(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function startOfWeekMondayLocal(now = new Date()) {
+  const d = startOfDayLocal(now);
   const day = d.getDay();
-  d.setDate(d.getDate() - ((day + 6) % 7));
+  const diffToMonday = (day + 6) % 7;
+  d.setDate(d.getDate() - diffToMonday);
   return d;
 }
 
-function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
-  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
-  return (
-    <div style={{ height: 6, background: "rgba(0,0,0,0.07)", borderRadius: 4, overflow: "hidden", marginTop: 6 }}>
-      <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
-    </div>
-  );
+function weekdaysElapsedThisWeek(now = new Date()) {
+  const day = now.getDay();
+  if (day === 0) return 5;
+  if (day === 6) return 5;
+  return day;
 }
 
-function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
-  return (
-    <div className="card cardPad">
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <div style={{ fontSize: 32, fontWeight: 900, lineHeight: 1.1, marginTop: 6, color: color || "inherit" }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
+function isThursdayOrLater(now = new Date()) {
+  const day = now.getDay();
+  return day >= 4 && day <= 6;
+}
+
+function categoryPretty(c: string) {
+  const s = (c || "").trim();
+  if (!s) return "Other";
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
 export default function InsightsPage() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Touch metrics
+  const [out7, setOut7] = useState(0);
+  const [out30, setOut30] = useState(0);
+  const [out7Prev, setOut7Prev] = useState(0);
+  const [agents7, setAgents7] = useState(0);
+  const [clients7, setClients7] = useState(0);
+
+  const [refAsks30, setRefAsks30] = useState(0);
+  const [reviewAsks30, setReviewAsks30] = useState(0);
+
+  // Week-to-date coach metrics
+  const [wtdOutbound, setWtdOutbound] = useState(0);
+  const [wtdAgents, setWtdAgents] = useState(0);
+  const [wtdReferralAsks, setWtdReferralAsks] = useState(0);
+
+  // Database health
+  const [contactsTotal, setContactsTotal] = useState(0);
+  const [agentsTotal, setAgentsTotal] = useState(0);
+  const [clientsTotal, setClientsTotal] = useState(0);
+
+  const [aClientsTotal, setAClientsTotal] = useState(0);
+  const [aClientsDueOrOverdue, setAClientsDueOrOverdue] = useState(0);
+  const [aClientsVeryOverdue, setAClientsVeryOverdue] = useState(0);
+
+  const [loadedHealth, setLoadedHealth] = useState(false);
+
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [lastOutboundById, setLastOutboundById] = useState<Map<string, string>>(new Map());
-  const [touches7, setTouches7] = useState<Touch[]>([]);
-  const [touches30, setTouches30] = useState<Touch[]>([]);
-  const [touchesWTD, setTouchesWTD] = useState<Touch[]>([]);
+  const [lastOutboundById, setLastOutboundById] = useState<Map<string, string | null>>(new Map());
 
-  // --- derived ---
+  const wow = useMemo(() => deltaPct(out7, out7Prev), [out7, out7Prev]);
 
-  const categoryMap = useMemo(() => {
-    const m = new Map<string, string>();
-    contacts.forEach((c) => m.set(c.id, (c.category || "").toLowerCase()));
-    return m;
-  }, [contacts]);
+  const weekdaysElapsed = useMemo(
+    () => weekdaysElapsedThisWeek(new Date()),
+    [wtdOutbound, wtdAgents, wtdReferralAsks],
+  );
+  const expectedOutboundWTD = useMemo(() => weekdaysElapsed * 5, [weekdaysElapsed]);
+  const expectedAgentsWTD = useMemo(() => weekdaysElapsed * 2, [weekdaysElapsed]);
 
-  const tierMap = useMemo(() => {
-    const m = new Map<string, string | null>();
-    contacts.forEach((c) => m.set(c.id, c.tier));
-    return m;
-  }, [contacts]);
+  const healthScore = useMemo(() => {
+    const aComp =
+      aClientsTotal > 0
+        ? clamp(Math.round(30 * (1 - aClientsDueOrOverdue / aClientsTotal)), 0, 30)
+        : 30;
 
-  // WTD breakdown
-  const wtdTotal = touchesWTD.length;
-  const weekdaysElapsed = (() => {
-    const day = new Date().getDay();
-    if (day === 0 || day === 6) return 5;
-    return day;
-  })();
-  const wtdGoal = weekdaysElapsed * 5;
-  const wtdAgents = touchesWTD.filter((t) => categoryMap.get(t.contact_id) === "agent").length;
-  const wtdAgentGoal = weekdaysElapsed * 2;
-  const wtdReferralAsks = touchesWTD.filter((t) => t.intent === "referral_ask").length;
+    const velocity = clamp(Math.round((out30 / 120) * 25), 0, 25);
 
-  // 30-day breakdown by category
-  const breakdown30 = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const people: Record<string, Set<string>> = {};
-    for (const t of touches30) {
-      const cat = categoryMap.get(t.contact_id) || "other";
-      counts[cat] = (counts[cat] || 0) + 1;
-      if (!people[cat]) people[cat] = new Set();
-      people[cat].add(t.contact_id);
-    }
-    return { counts, people };
-  }, [touches30, categoryMap]);
+    const agentShare = out7 > 0 ? agents7 / out7 : 0;
+    const agent = clamp(Math.round((agentShare / 0.4) * 20), 0, 20);
 
-  // Cadence compliance
-  const compliance = useMemo(() => {
-    const results: {
-      contact: Contact;
-      daysSince: number | null;
-      cadence: number;
-      overdue: boolean;
-      overdueBy: number;
-    }[] = [];
+    const ask = clamp(Math.round((refAsks30 / 4) * 15), 0, 15);
 
-    for (const c of contacts) {
-      const last = lastOutboundById.get(c.id) ?? null;
-      const d = last ? daysSince(last) : null;
-      const cad = cadenceDays(c.category, c.tier);
-      const overdue = d === null || d >= cad;
-      const overdueBy = d === null ? cad + 999 : d - cad;
-      results.push({ contact: c, daysSince: d, cadence: cad, overdue, overdueBy });
+    const growth = clamp(Math.round((contactsTotal / 200) * 10), 0, 10);
+
+    return aComp + velocity + agent + ask + growth;
+  }, [aClientsTotal, aClientsDueOrOverdue, out30, out7, agents7, refAsks30, contactsTotal]);
+
+  const warnings = useMemo(() => {
+    const items: Array<{ title: string; detail: string }> = [];
+
+    if (out7Prev >= 5 && wow <= -20) {
+      items.push({
+        title: "Outreach declining",
+        detail: `Outbound touches are down ${Math.abs(wow)}% vs the prior 7 days.`,
+      });
     }
 
-    return results;
-  }, [contacts, lastOutboundById]);
-
-  const overdueAll = compliance.filter((x) => x.overdue);
-  const onTrackAll = compliance.filter((x) => !x.overdue);
-
-  const overdueByCategory = useMemo(() => {
-    const out: Record<string, { overdue: number; total: number }> = {};
-    for (const x of compliance) {
-      const cat = (x.contact.category || "other").toLowerCase();
-      if (!out[cat]) out[cat] = { overdue: 0, total: 0 };
-      out[cat].total += 1;
-      if (x.overdue) out[cat].overdue += 1;
+    if (out7 >= 5) {
+      const agentPct = agents7 / out7;
+      if (agentPct < 0.25) {
+        items.push({
+          title: "Agent outreach low",
+          detail: `Only ${pct(agents7, out7)} of outbound touches were to agents in the last 7 days.`,
+        });
+      }
     }
-    return out;
-  }, [compliance]);
 
-  const mostOverdue = useMemo(() => {
-    return overdueAll
-      .sort((a, b) => b.overdueBy - a.overdueBy)
-      .slice(0, 8);
-  }, [overdueAll]);
+    if (aClientsTotal > 0) {
+      const overduePct = aClientsDueOrOverdue / aClientsTotal;
+      if (overduePct >= 0.15) {
+        items.push({
+          title: "A-Client risk",
+          detail: `${aClientsDueOrOverdue}/${aClientsTotal} A-clients are due/overdue on outbound cadence.`,
+        });
+      }
+      if (aClientsVeryOverdue > 0) {
+        items.push({
+          title: "A-Client very overdue",
+          detail: `${aClientsVeryOverdue} A-client(s) are >14 days beyond cadence.`,
+        });
+      }
+    }
 
-  // --- fetch ---
-  async function fetchAll() {
+    if (refAsks30 + reviewAsks30 === 0) {
+      items.push({
+        title: "No referral/review asks tracked (30 days)",
+        detail:
+          "Tag at least 1 touch per week as referral_ask so Jordan OS can coach the behavior.",
+      });
+    }
+
+    return items;
+  }, [
+    wow,
+    out7Prev,
+    out7,
+    agents7,
+    aClientsTotal,
+    aClientsDueOrOverdue,
+    aClientsVeryOverdue,
+    refAsks30,
+    reviewAsks30,
+  ]);
+
+  const interventions: Intervention[] = useMemo(() => {
+    const list: Intervention[] = [];
+
+    const suggest = (opts: {
+      category?: string;
+      tier?: string;
+      limit?: number;
+      onlyDue?: boolean;
+    }) => {
+      const limit = opts.limit ?? 3;
+      const cat = (opts.category || "").toLowerCase();
+      const tier = (opts.tier || "").toUpperCase();
+
+      const candidates = contacts
+        .filter((c) => {
+          if (cat && (c.category || "").toLowerCase() !== cat) return false;
+          if (tier && (c.tier || "").toUpperCase() !== tier) return false;
+          return true;
+        })
+        .map((c) => {
+          const last = lastOutboundById.get(c.id) ?? null;
+          const days = last ? daysSince(last) : null;
+          const cadence = cadenceDays(c.category, c.tier);
+          const isDue = days === null ? true : days >= cadence;
+          const overdueBy = days === null ? cadence + 1 : days - cadence;
+          return { c, days, cadence, isDue, overdueBy };
+        })
+        .filter((x) => (opts.onlyDue ? x.isDue : true))
+        .sort((a, b) => {
+          const ao = a.days === null ? 9999 : a.overdueBy;
+          const bo = b.days === null ? 9999 : b.overdueBy;
+          return bo - ao;
+        })
+        .slice(0, limit)
+        .map((x) => ({
+          contact_id: x.c.id,
+          display_name: x.c.display_name,
+          category: x.c.category,
+          tier: x.c.tier,
+          days_since_outbound: x.days,
+          why:
+            x.days === null
+              ? `No outbound touch logged (cadence ${x.cadence}d)`
+              : `${x.days}d since outbound (cadence ${x.cadence}d)`,
+        }));
+
+      return candidates;
+    };
+
+    if (
+      aClientsVeryOverdue > 0 ||
+      (aClientsTotal > 0 && aClientsDueOrOverdue / aClientsTotal >= 0.15)
+    ) {
+      const pr = aClientsVeryOverdue > 0 ? 100 : 85;
+      const suggested = suggest({ category: "client", tier: "A", limit: 5, onlyDue: true });
+
+      list.push({
+        key: "a_client_risk",
+        priority: pr,
+        title:
+          aClientsVeryOverdue > 0
+            ? "A-Client protection: urgent"
+            : "A-Client protection: tighten cadence",
+        summary:
+          aClientsVeryOverdue > 0
+            ? `${aClientsVeryOverdue} A-client(s) are >14 days beyond cadence.`
+            : `${aClientsDueOrOverdue}/${aClientsTotal} A-clients are due/overdue.`,
+        target: "Clear overdue A-clients first (they stay pinned until touched).",
+        suggested,
+      });
+    }
+
+    const paceRatio = expectedOutboundWTD > 0 ? wtdOutbound / expectedOutboundWTD : 1;
+    if (expectedOutboundWTD > 0 && paceRatio < 0.8) {
+      const deficit = expectedOutboundWTD - wtdOutbound;
+      const suggested = suggest({ limit: 5 });
+      list.push({
+        key: "weekly_velocity",
+        priority: 75,
+        title: "Weekly velocity at risk",
+        summary: `Week-to-date outbound: ${wtdOutbound}/${expectedOutboundWTD} (behind by ${deficit}).`,
+        target: `Get back on pace: add ${Math.max(0, deficit)} outbound touches this week.`,
+        suggested,
+      });
+    }
+
+    const agentPaceRatio = expectedAgentsWTD > 0 ? wtdAgents / expectedAgentsWTD : 1;
+    if (expectedAgentsWTD > 0 && agentPaceRatio < 0.8) {
+      const deficit = expectedAgentsWTD - wtdAgents;
+      const suggested = suggest({ category: "agent", limit: 5, onlyDue: false });
+      list.push({
+        key: "agent_leverage",
+        priority: 70,
+        title: "Agent leverage drifting",
+        summary: `Week-to-date agent touches: ${wtdAgents}/${expectedAgentsWTD} (need ${Math.max(0, deficit)} more).`,
+        target: `Hit your network leverage: add ${Math.max(0, deficit)} agent touches this week.`,
+        suggested,
+      });
+    }
+
+    if (isThursdayOrLater(new Date()) && wtdReferralAsks === 0) {
+      const suggested = suggest({ category: "client", tier: "A", limit: 3, onlyDue: false })
+        .concat(suggest({ category: "client", tier: "B", limit: 2, onlyDue: false }))
+        .slice(0, 5);
+
+      list.push({
+        key: "referral_ask",
+        priority: 65,
+        title: "Referral ask missing this week",
+        summary: "0 touches tagged as referral_ask since Monday.",
+        target: "Tag at least 1 touch as referral_ask this week (minimum discipline).",
+        suggested,
+      });
+    }
+
+    if (list.length === 0) {
+      list.push({
+        key: "no_intervention",
+        priority: 1,
+        title: "No intervention needed",
+        summary: "You’re on pace and your risk indicators are clean.",
+        target: "Keep running the Morning Top 5 and tag at least 1 referral ask this week.",
+        suggested: suggest({ limit: 3 }),
+      });
+    }
+
+    return list.sort((a, b) => b.priority - a.priority).slice(0, 2);
+  }, [
+    contacts,
+    lastOutboundById,
+    aClientsTotal,
+    aClientsDueOrOverdue,
+    aClientsVeryOverdue,
+    expectedOutboundWTD,
+    expectedAgentsWTD,
+    wtdOutbound,
+    wtdAgents,
+    wtdReferralAsks,
+  ]);
+
+  async function fetchTouchCounts() {
     setError(null);
 
     const now = new Date();
-    const since7 = new Date(now); since7.setDate(since7.getDate() - 7); since7.setHours(0, 0, 0, 0);
-    const since30 = new Date(now); since30.setDate(since30.getDate() - 30); since30.setHours(0, 0, 0, 0);
-    const monday = startOfWeekMonday();
+    const since7 = new Date(now);
+    since7.setDate(since7.getDate() - 7);
+    since7.setHours(0, 0, 0, 0);
 
-    const [cRes, loRes, t30Res, tWTDRes] = await Promise.all([
-      supabase.from("contacts").select("id, display_name, category, tier").eq("archived", false).limit(5000),
-      supabase.from("contact_last_outbound").select("contact_id, last_outbound_at").limit(5000),
-      supabase.from("touches").select("id, contact_id, direction, occurred_at, intent").eq("direction", "outbound").gte("occurred_at", since30.toISOString()).limit(10000),
-      supabase.from("touches").select("id, contact_id, direction, occurred_at, intent").eq("direction", "outbound").gte("occurred_at", monday.toISOString()).limit(5000),
-    ]);
+    const since14 = new Date(now);
+    since14.setDate(since14.getDate() - 14);
+    since14.setHours(0, 0, 0, 0);
 
-    if (cRes.error) { setError(cRes.error.message); return; }
-    if (loRes.error) { setError(loRes.error.message); return; }
+    const since30 = new Date(now);
+    since30.setDate(since30.getDate() - 30);
+    since30.setHours(0, 0, 0, 0);
 
-    const cs = (cRes.data ?? []) as Contact[];
+    const { data: t14, error: e14 } = await supabase
+      .from("touches")
+      .select("id, contact_id, direction, occurred_at, intent")
+      .eq("direction", "outbound")
+      .gte("occurred_at", since14.toISOString())
+      .order("occurred_at", { ascending: false })
+      .limit(20000);
+
+    if (e14) {
+      setError(`Touches (14d) fetch error: ${e14.message}`);
+      return;
+    }
+
+    const touches14 = (t14 ?? []) as Touch[];
+    const now7 = touches14.filter((t) => t.occurred_at >= since7.toISOString());
+    const prev7 = touches14.filter((t) => t.occurred_at < since7.toISOString());
+
+    setOut7(now7.length);
+    setOut7Prev(prev7.length);
+
+    const { count: c30, error: e30 } = await supabase
+      .from("touches")
+      .select("id", { count: "exact", head: true })
+      .eq("direction", "outbound")
+      .gte("occurred_at", since30.toISOString());
+
+    if (e30) setError((prev) => prev ?? `Touches (30d) count error: ${e30.message}`);
+    else setOut30(c30 ?? 0);
+
+    const { data: t30, error: e30i } = await supabase
+      .from("touches")
+      .select("id, intent, occurred_at, direction, contact_id")
+      .eq("direction", "outbound")
+      .gte("occurred_at", since30.toISOString())
+      .limit(20000);
+
+    if (e30i) {
+      setError((prev) => prev ?? `Touches (30d) intent fetch error: ${e30i.message}`);
+    } else {
+      const rows = (t30 ?? []) as Touch[];
+      setRefAsks30(rows.filter((r) => r.intent === "referral_ask").length);
+      setReviewAsks30(rows.filter((r) => r.intent === "review_ask").length);
+    }
+
+    const touchedIds7 = Array.from(new Set(now7.map((t) => t.contact_id)));
+    if (touchedIds7.length === 0) {
+      setAgents7(0);
+      setClients7(0);
+    } else {
+      const { data: c7, error: ec7 } = await supabase
+        .from("contacts")
+        .select("id, category")
+        .in("id", touchedIds7);
+      if (ec7) setError((prev) => prev ?? `Contacts (7d categories) error: ${ec7.message}`);
+      else {
+        const catById = new Map<string, string>();
+        (c7 ?? []).forEach((r: any) => catById.set(r.id, r.category));
+        let agents = 0;
+        let clients = 0;
+        for (const t of now7) {
+          const cat = (catById.get(t.contact_id) || "").toLowerCase();
+          if (cat === "agent") agents += 1;
+          else if (cat === "client") clients += 1;
+        }
+        setAgents7(agents);
+        setClients7(clients);
+      }
+    }
+
+    const monday = startOfWeekMondayLocal(new Date());
+    const mondayISO = monday.toISOString();
+
+    const { data: wtd, error: ewtd } = await supabase
+      .from("touches")
+      .select("id, contact_id, occurred_at, direction, intent")
+      .eq("direction", "outbound")
+      .gte("occurred_at", mondayISO)
+      .limit(20000);
+
+    if (ewtd) {
+      setError((prev) => prev ?? `WTD metrics error: ${ewtd.message}`);
+    } else {
+      const wtdTouches = (wtd ?? []) as Touch[];
+      setWtdOutbound(wtdTouches.length);
+      setWtdReferralAsks(wtdTouches.filter((t) => t.intent === "referral_ask").length);
+
+      const ids = Array.from(new Set(wtdTouches.map((t) => t.contact_id)));
+      if (ids.length === 0) {
+        setWtdAgents(0);
+      } else {
+        const { data: cc, error: ecc } = await supabase
+          .from("contacts")
+          .select("id, category")
+          .in("id", ids);
+        if (ecc) {
+          setError((prev) => prev ?? `WTD agent count error: ${ecc.message}`);
+        } else {
+          const catById = new Map<string, string>();
+          (cc ?? []).forEach((r: any) => catById.set(r.id, r.category));
+          let agentCount = 0;
+          for (const t of wtdTouches) {
+            if ((catById.get(t.contact_id) || "").toLowerCase() === "agent") agentCount += 1;
+          }
+          setWtdAgents(agentCount);
+        }
+      }
+    }
+  }
+
+  async function fetchDatabaseHealth() {
+    setError(null);
+    setLoadedHealth(false);
+
+    const { data: cData, error: cErr } = await supabase
+      .from("contacts")
+      .select("id, display_name, category, tier")
+      .limit(20000);
+
+    if (cErr) {
+      setError(`Contacts fetch error: ${cErr.message}`);
+      return;
+    }
+
+    const cs = (cData ?? []) as Contact[];
     setContacts(cs);
+    setContactsTotal(cs.length);
 
-    const loMap = new Map<string, string>();
-    (loRes.data ?? []).forEach((r: any) => { if (r.last_outbound_at) loMap.set(r.contact_id, r.last_outbound_at); });
-    setLastOutboundById(loMap);
+    const agents = cs.filter((c) => (c.category || "").toLowerCase() === "agent").length;
+    const clients = cs.filter((c) => (c.category || "").toLowerCase() === "client").length;
+    setAgentsTotal(agents);
+    setClientsTotal(clients);
 
-    const t30 = (t30Res.data ?? []) as Touch[];
-    setTouches30(t30);
-    setTouches7(t30.filter((t) => t.occurred_at >= since7.toISOString()));
-    setTouchesWTD((tWTDRes.data ?? []) as Touch[]);
+    const aClients = cs.filter(
+      (c) => (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A",
+    );
+    setAClientsTotal(aClients.length);
+
+    const { data: vData, error: vErr } = await supabase
+      .from("contact_last_outbound")
+      .select("contact_id, last_outbound_at")
+      .limit(20000);
+
+    if (vErr) {
+      setError((prev) => prev ?? `View contact_last_outbound error: ${vErr.message}`);
+      return;
+    }
+
+    const map = new Map<string, string | null>();
+    (vData ?? []).forEach((r: any) => map.set(r.contact_id, r.last_outbound_at));
+    setLastOutboundById(map);
+
+    let dueOrOverdue = 0;
+    let veryOverdue = 0;
+
+    for (const c of aClients) {
+      const last = map.get(c.id) ?? null;
+      const cadence = cadenceDays(c.category, c.tier);
+
+      if (!last) {
+        dueOrOverdue += 1;
+        continue;
+      }
+
+      const d = daysSince(last);
+      if (d >= cadence) {
+        dueOrOverdue += 1;
+        if (d >= cadence + 14) veryOverdue += 1;
+      }
+    }
+
+    setAClientsDueOrOverdue(dueOrOverdue);
+    setAClientsVeryOverdue(veryOverdue);
+
+    setLoadedHealth(true);
+  }
+
+  async function refreshAll() {
+    await Promise.all([fetchTouchCounts(), fetchDatabaseHealth()]);
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) { window.location.href = "/login"; return; }
+    let alive = true;
+
+    const init = async () => {
+      const { data } = await supabase.auth.getSession();
+      const uid = data.session?.user.id ?? null;
+
+      if (!alive) return;
+
+      if (!uid) {
+        setTimeout(async () => {
+          const { data: d2 } = await supabase.auth.getSession();
+          if (!d2.session) window.location.href = "/login";
+        }, 250);
+        return;
+      }
+
       setReady(true);
-      fetchAll();
+      await refreshAll();
+    };
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      const uid = session?.user.id ?? null;
+      if (!uid) window.location.href = "/login";
     });
+
+    init();
+
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
-  if (!ready) return <div className="page">Loading…</div>;
-
-  const CATEGORIES = ["client", "sphere", "agent", "developer", "vendor", "other"];
+  if (!ready) return <div className="card cardPad">Loading…</div>;
 
   return (
-    <div className="page">
-      <div className="pageHeader">
+    <div className="stack">
+      <div className="rowBetween">
         <div>
           <h1 className="h1">Insights</h1>
-          <div className="muted" style={{ marginTop: 6 }}>{contacts.length} contacts tracked</div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Velocity • Asks • Database health • Active Coach
+          </div>
         </div>
+
         <div className="row">
-          <a className="btn" href="/morning">Morning</a>
-          <a className="btn" href="/contacts">Contacts</a>
-          <button className="btn" onClick={fetchAll}>Refresh</button>
+          <a className="btn" href="/morning" style={{ textDecoration: "none" }}>
+            Morning
+          </a>
+          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>
+            Contacts
+          </a>
+          <button className="btn" onClick={refreshAll}>
+            Refresh
+          </button>
         </div>
       </div>
 
-      {error && <div className="alert alertError">{error}</div>}
+      {error ? <div className="alert alertError">{error}</div> : null}
 
-      {/* === THIS WEEK === */}
-      <div style={{ fontWeight: 900, fontSize: 13, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-        This week
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 16 }}>
-        <StatCard
-          label="Outreach"
-          value={wtdTotal}
-          sub={`Goal: ${wtdGoal} (5/weekday)`}
-          color={wtdTotal >= wtdGoal ? "#15803d" : wtdTotal >= wtdGoal * 0.7 ? "#b45309" : "#b91c1c"}
-        />
-        <StatCard
-          label="Agent touches"
-          value={wtdAgents}
-          sub={`Goal: ${wtdAgentGoal} (2/weekday)`}
-          color={wtdAgents >= wtdAgentGoal ? "#15803d" : "#b91c1c"}
-        />
-        <StatCard
-          label="Referral asks"
-          value={wtdReferralAsks}
-          sub="Goal: 1/week"
-          color={wtdReferralAsks >= 1 ? "#15803d" : "#b91c1c"}
-        />
-        <StatCard
-          label="Last 7 days"
-          value={touches7.length}
-          sub={`Last 30 days: ${touches30.length}`}
-        />
-      </div>
-
-      {/* Progress bars */}
-      <div className="card cardPad" style={{ marginBottom: 16 }}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-              <span style={{ fontWeight: 700 }}>Outreach pace</span>
-              <span style={{ color: "#888" }}>{wtdTotal} / {wtdGoal}</span>
-            </div>
-            <ProgressBar value={wtdTotal} max={wtdGoal} color={wtdTotal >= wtdGoal ? "#15803d" : "#f59e0b"} />
+      <div
+        className="stack"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <div className="card cardPad">
+          <div className="label">Operator score</div>
+          <div style={{ fontSize: 34, fontWeight: 900, marginTop: 6 }}>{healthScore}</div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            0–100 (compliance + velocity + leverage + asks)
           </div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-              <span style={{ fontWeight: 700 }}>Agent coverage</span>
-              <span style={{ color: "#888" }}>{wtdAgents} / {wtdAgentGoal}</span>
-            </div>
-            <ProgressBar value={wtdAgents} max={wtdAgentGoal} color={wtdAgents >= wtdAgentGoal ? "#15803d" : "#b91c1c"} />
+        </div>
+
+        <div className="card cardPad">
+          <div className="label">Outbound velocity</div>
+          <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
+            {out7} (7d) • {out30} (30d)
           </div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-              <span style={{ fontWeight: 700 }}>Referral asks</span>
-              <span style={{ color: "#888" }}>{wtdReferralAsks} / 1</span>
-            </div>
-            <ProgressBar value={wtdReferralAsks} max={1} color="#15803d" />
+          <div className="subtle" style={{ marginTop: 6 }}>
+            WoW: <strong>{wow >= 0 ? `+${wow}%` : `${wow}%`}</strong> (prior 7d: {out7Prev})
+          </div>
+        </div>
+
+        <div className="card cardPad">
+          <div className="label">Mix (last 7d)</div>
+          <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
+            Agents: {agents7} ({pct(agents7, out7)}) • Clients: {clients7} ({pct(clients7, out7)})
+          </div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Goal: keep agents meaningful while protecting clients.
+          </div>
+        </div>
+
+        <div className="card cardPad">
+          <div className="label">Asks (last 30d)</div>
+          <div style={{ fontSize: 22, fontWeight: 900, marginTop: 6 }}>
+            Referrals: {refAsks30} • Reviews: {reviewAsks30}
+          </div>
+          <div className="subtle" style={{ marginTop: 6 }}>
+            Tracked via touch intent.
           </div>
         </div>
       </div>
 
-      {/* === LAST 30 DAYS BREAKDOWN === */}
-      <div style={{ fontWeight: 900, fontSize: 13, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-        Last 30 days — by relationship type
-      </div>
+      <div className="card cardPad stack">
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Coach intervention</div>
 
-      <div className="card cardPad" style={{ marginBottom: 16 }}>
-        <div style={{ display: "grid", gap: 10 }}>
-          {CATEGORIES.filter((cat) => overdueByCategory[cat] || breakdown30.counts[cat]).map((cat) => {
-            const touched = breakdown30.counts[cat] || 0;
-            const uniquePeople = breakdown30.people[cat]?.size || 0;
-            const ov = overdueByCategory[cat] || { overdue: 0, total: 0 };
-            const compliancePct = ov.total > 0 ? Math.round(((ov.total - ov.overdue) / ov.total) * 100) : 100;
-            const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-            return (
-              <div key={cat} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 80, fontSize: 13, fontWeight: 700, flexShrink: 0 }}>{label}</div>
-                <div style={{ flex: 1 }}>
-                  <ProgressBar
-                    value={ov.total - ov.overdue}
-                    max={ov.total}
-                    color={compliancePct >= 80 ? "#15803d" : compliancePct >= 50 ? "#f59e0b" : "#b91c1c"}
-                  />
+        <div className="row" style={{ marginTop: 10 }}>
+          <span className="badge">
+            WTD outbound: <strong>{wtdOutbound}</strong> / {expectedOutboundWTD} (5/weekday)
+          </span>
+          <span className="badge">
+            WTD agents: <strong>{wtdAgents}</strong> / {expectedAgentsWTD} (2/weekday)
+          </span>
+          <span className="badge">
+            Referral asks this week: <strong>{wtdReferralAsks}</strong> / 1
+          </span>
+          <span className="subtle" style={{ fontSize: 12 }}>
+            Weekday-only • Weekly aggregate scoring • Top 2 interventions
+          </span>
+        </div>
+
+        <div className="stack" style={{ marginTop: 10 }}>
+          {interventions.map((iv) => (
+            <div key={iv.key} className="card cardPad">
+              <div className="rowBetween" style={{ alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 16 }}>{iv.title}</div>
+                  <div className="subtle" style={{ marginTop: 6 }}>
+                    {iv.summary}
+                  </div>
+                  <div style={{ marginTop: 8, fontWeight: 800 }}>{iv.target}</div>
                 </div>
-                <div style={{ fontSize: 12, color: "#888", flexShrink: 0, minWidth: 160, textAlign: "right" }}>
-                  {touched} touches · {uniquePeople} people · <strong style={{ color: compliancePct >= 80 ? "#15803d" : "#b91c1c" }}>{compliancePct}% on cadence</strong>
+                <div className="subtle" style={{ fontSize: 12, minWidth: 110, textAlign: "right" }}>
+                  priority
+                  <div style={{ fontWeight: 900, fontSize: 18, color: "var(--ink)" }}>
+                    {iv.priority}
+                  </div>
                 </div>
               </div>
-            );
-          })}
+
+              <div style={{ marginTop: 12 }}>
+                <div className="label" style={{ marginBottom: 8 }}>
+                  Suggested contacts
+                </div>
+
+                {iv.suggested.length === 0 ? (
+                  <div className="subtle">
+                    No suggestions available yet (add more contacts / touches).
+                  </div>
+                ) : (
+                  <div className="stack">
+                    {iv.suggested.map((s) => (
+                      <div key={s.contact_id} className="card cardPad">
+                        <div className="rowBetween" style={{ alignItems: "flex-start" }}>
+                          <div>
+                            <div style={{ fontWeight: 900 }}>
+                              {s.display_name}{" "}
+                              <span className="subtle" style={{ fontWeight: 700 }}>
+                                • {categoryPretty(s.category)} {s.tier ? `• Tier ${s.tier}` : ""}
+                              </span>
+                            </div>
+                            <div className="subtle" style={{ marginTop: 6 }}>
+                              {s.why}
+                              {typeof s.days_since_outbound === "number"
+                                ? ` • ${s.days_since_outbound}d`
+                                : ""}
+                            </div>
+                          </div>
+                          <a
+                            className="btn"
+                            href="/morning"
+                            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+                          >
+                            Go act →
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* === WHERE YOU STAND === */}
-      <div style={{ fontWeight: 900, fontSize: 13, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-        Cadence compliance
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Database health</div>
+        <div className="subtle" style={{ marginTop: 8 }}>
+          Contacts: <strong>{contactsTotal}</strong> • Clients: <strong>{clientsTotal}</strong> •
+          Agents: <strong>{agentsTotal}</strong>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <span className="badge">A-Clients: {aClientsTotal}</span>{" "}
+          <span className="badge">A-Clients due/overdue: {aClientsDueOrOverdue}</span>{" "}
+          {!loadedHealth ? (
+            <span className="subtle" style={{ fontSize: 12 }}>
+              loading…
+            </span>
+          ) : null}
+          {aClientsVeryOverdue > 0 ? (
+            <span
+              className="badge"
+              style={{ borderColor: "rgba(220,20,60,.25)", background: "rgba(220,20,60,.06)" }}
+            >
+              {aClientsVeryOverdue} very overdue
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 16 }}>
-        <StatCard
-          label="On track"
-          value={onTrackAll.length}
-          sub={`${contacts.length > 0 ? Math.round((onTrackAll.length / contacts.length) * 100) : 0}% of contacts`}
-          color="#15803d"
-        />
-        <StatCard
-          label="Overdue"
-          value={overdueAll.length}
-          sub={`${contacts.length > 0 ? Math.round((overdueAll.length / contacts.length) * 100) : 0}% of contacts`}
-          color={overdueAll.length > 0 ? "#b91c1c" : "#15803d"}
-        />
-        {overdueByCategory["client"] && (
-          <StatCard
-            label="Clients overdue"
-            value={overdueByCategory["client"].overdue}
-            sub={`of ${overdueByCategory["client"].total} total`}
-            color={overdueByCategory["client"].overdue > 0 ? "#b91c1c" : "#15803d"}
-          />
-        )}
-        {overdueByCategory["agent"] && (
-          <StatCard
-            label="Agents overdue"
-            value={overdueByCategory["agent"].overdue}
-            sub={`of ${overdueByCategory["agent"].total} total`}
-            color={overdueByCategory["agent"].overdue > 5 ? "#b91c1c" : "#b45309"}
-          />
-        )}
-      </div>
-
-      {/* === MOST OVERDUE === */}
-      {mostOverdue.length > 0 && (
-        <>
-          <div style={{ fontWeight: 900, fontSize: 13, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-            Most overdue
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Early warnings</div>
+        {warnings.length === 0 ? (
+          <div className="subtle" style={{ marginTop: 8 }}>
+            No warnings right now ✅
           </div>
-          <div className="card cardPad" style={{ marginBottom: 16 }}>
-            <div style={{ display: "grid", gap: 8 }}>
-              {mostOverdue.map(({ contact, daysSince: d, cadence, overdueBy }) => (
-                <div key={contact.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: "#b91c1c", minWidth: 44, textAlign: "center", lineHeight: 1 }}>
-                    {d ?? "∞"}
-                    <div style={{ fontSize: 10, color: "#aaa", fontWeight: 600 }}>days</div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <a href={`/contacts/${contact.id}`} style={{ fontWeight: 700, fontSize: 14 }}>{contact.display_name}</a>
-                    <div style={{ fontSize: 12, color: "#888" }}>
-                      {contact.category}{contact.tier ? ` · ${contact.tier}` : ""} · cadence {cadence}d
-                      {overdueBy > 0 && <span style={{ color: "#b91c1c", marginLeft: 6 }}>+{overdueBy}d overdue</span>}
-                    </div>
-                  </div>
-                  <a className="btn" href={`/contacts/${contact.id}`} style={{ textDecoration: "none", fontSize: 12, flexShrink: 0 }}>
-                    Open →
-                  </a>
+        ) : (
+          <div className="stack" style={{ marginTop: 12 }}>
+            {warnings.map((w, i) => (
+              <div key={i} className="card cardPad">
+                <div style={{ fontWeight: 900 }}>{w.title}</div>
+                <div className="subtle" style={{ marginTop: 6 }}>
+                  {w.detail}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
-        </>
-      )}
+        )}
+      </div>
+
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 16 }}>Next actions</div>
+        <ul style={{ marginTop: 10, paddingLeft: 18 }}>
+          <li>
+            Use <a href="/morning">Morning</a> to execute your Top 5.
+          </li>
+          <li>
+            Tag at least 1 touch per week as <code>referral_ask</code>.
+          </li>
+          <li>If “Agent leverage drifting” appears, prioritize agents before the weekend.</li>
+        </ul>
+      </div>
     </div>
   );
 }

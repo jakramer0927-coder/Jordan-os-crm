@@ -21,15 +21,8 @@ type Contact = {
   category: string;
   tier: string | null;
   client_type: string | null;
-  notes: string | null;
-  company: string | null;
-  email: string | null;
-  phone: string | null;
   created_at: string;
-  archived: boolean;
-  ai_context: string | null;
-  ai_context_updated_at: string | null;
-  user_id?: string;
+  user_id?: string; // optional in case you add it to selects later
 };
 
 type Touch = {
@@ -50,38 +43,36 @@ function prettyCategory(c: string) {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+function fmtDT(v: string) {
+  try {
+    return new Date(v).toLocaleString();
+  } catch {
+    return v;
+  }
+}
+
+function dirPill(direction: Touch["direction"]) {
+  return direction === "outbound" ? "Outbound" : "Inbound";
+}
 
 function channelLabel(c: Touch["channel"]) {
   switch (c) {
-    case "email": return "Email";
-    case "text": return "Text";
-    case "call": return "Call";
-    case "in_person": return "In person";
-    case "social_dm": return "Social DM";
-    default: return "Other";
+    case "in_person":
+      return "In person";
+    case "social_dm":
+      return "Social DM";
+    default:
+      return c;
   }
 }
 
-function intentLabel(i: string | null) {
-  switch (i) {
-    case "check_in": return "Check-in";
-    case "referral_ask": return "Referral ask";
-    case "review_ask": return "Review ask";
-    case "deal_followup": return "Deal follow-up";
-    case "collaboration": return "Collaboration";
-    case "event_invite": return "Event invite";
-    default: return i || "Other";
-  }
-}
-
-function TextThreadUploadPanel({ contactId, onImported }: { contactId: string; onImported?: () => void }) {
+function TextThreadUploadPanel({ contactId }: { contactId: string }) {
   const [uid, setUid] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [raw, setRaw] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [threadFeedback, setThreadFeedback] = useState<{ observations: string[]; score: number | null } | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -119,38 +110,7 @@ function TextThreadUploadPanel({ contactId, onImported }: { contactId: string; o
       if (!res.ok) {
         setErr(j?.error || "Import failed");
       } else {
-        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}. Extracting contact context…`);
-
-        // Extract Jordan's messages and analyze voice coaching
-        const myLines = raw.split("\n").filter((line) => {
-          const lower = line.toLowerCase();
-          return lower.startsWith("jordan:") || lower.startsWith("you:") || lower.startsWith("me:");
-        }).map((line) => line.replace(/^[^:]+:\s*/i, "").trim()).filter((l) => l.length > 10);
-
-        if (myLines.length >= 2 && uid) {
-          fetch("/api/voice/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid, text: myLines.join("\n\n") }),
-          }).then((r) => r.json()).then((fb) => {
-            if (fb.observations?.length > 0) setThreadFeedback(fb);
-          }).catch(() => {});
-        }
-
-        // Auto-extract and save AI context for this contact
-        if (uid) {
-          fetch("/api/contacts/extract_context", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ uid, contact_id: contactId }),
-          }).then((r) => r.json()).then((ej) => {
-            if (ej.ok) {
-              setMsg(`Imported ✅ ${j.inserted_messages ?? "?"} messages — AI context updated.`);
-              onImported?.();
-            }
-          }).catch(() => {});
-        }
-
+        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
         setTitle("");
         setRaw("");
       }
@@ -200,22 +160,6 @@ function TextThreadUploadPanel({ contactId, onImported }: { contactId: string; o
           Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
           thread is saved.
         </div>
-
-        {threadFeedback && threadFeedback.observations.length > 0 && (
-          <div style={{ padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 13 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-              <span>Your messages in this thread</span>
-              {threadFeedback.score !== null && (
-                <span style={{ fontWeight: 900, color: threadFeedback.score >= 7 ? "#15803d" : threadFeedback.score >= 5 ? "#b45309" : "#b91c1c" }}>
-                  {threadFeedback.score}/10
-                </span>
-              )}
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6, color: "#444" }}>
-              {threadFeedback.observations.map((o, i) => <li key={i}>{o}</li>)}
-            </ul>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -238,12 +182,7 @@ export default function ContactDetailPage() {
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
-  const [notes, setNotes] = useState("");
-  const [company, setCompany] = useState("");
   const [savingContact, setSavingContact] = useState(false);
-  const [editingNotes, setEditingNotes] = useState(false);
-  const [notesValue, setNotesValue] = useState("");
-  const [savingNotes, setSavingNotes] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
   const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
@@ -251,33 +190,11 @@ export default function ContactDetailPage() {
   const [logIntent, setLogIntent] = useState<TouchIntent>("check_in");
   const [logOccurredAt, setLogOccurredAt] = useState<string>("");
   const [logSummary, setLogSummary] = useState("");
+  const [logSource, setLogSource] = useState("manual");
+  const [logLink, setLogLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
-  // linked contacts (household)
-  type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
-  const [linkedContacts, setLinkedContacts] = useState<LinkedContact[]>([]);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [linkQ, setLinkQ] = useState("");
-  const [linkResults, setLinkResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
-  const [linkHouseholdName, setLinkHouseholdName] = useState("");
-  const [linkBusy, setLinkBusy] = useState(false);
-  const [linkMsg, setLinkMsg] = useState<string | null>(null);
-  const [distributeConfirm, setDistributeConfirm] = useState(false);
-  const [distributing, setDistributing] = useState(false);
-  const [distributeMsg, setDistributeMsg] = useState<string | null>(null);
-
   const [deleting, setDeleting] = useState(false);
-  const [archiving, setArchiving] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [extractMsg, setExtractMsg] = useState<string | null>(null);
-
-  // merge
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [mergeQ, setMergeQ] = useState("");
-  const [mergeResults, setMergeResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
-  const [mergeTarget, setMergeTarget] = useState<{ id: string; display_name: string } | null>(null);
-  const [merging, setMerging] = useState(false);
-  const [mergeMsg, setMergeMsg] = useState<string | null>(null);
 
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
@@ -302,10 +219,12 @@ export default function ContactDetailPage() {
     const myUid = sess.user.id;
     setUid(myUid);
 
+    // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, notes, company, email, phone, created_at, archived, ai_context, ai_context_updated_at, user_id")
+      .select("id, display_name, category, tier, client_type, created_at, user_id")
       .eq("id", id)
+      .eq("user_id", myUid)
       .single();
 
     if (cErr) {
@@ -322,8 +241,6 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
-    setNotes(c.notes || "");
-    setCompany(c.company || "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -339,13 +256,6 @@ export default function ContactDetailPage() {
     }
 
     setTouches((tData ?? []) as Touch[]);
-
-    // Load linked contacts
-    const linksRes = await fetch(`/api/contacts/links?contact_id=${id}`);
-    if (linksRes.ok) {
-      const lj = await linksRes.json().catch(() => ({}));
-      setLinkedContacts(lj.links ?? []);
-    }
   }
 
   async function saveContact() {
@@ -360,8 +270,6 @@ export default function ContactDetailPage() {
         category,
         tier,
         client_type: clientType.trim() ? clientType.trim() : null,
-        notes: notes.trim() ? notes.trim() : null,
-        company: company.trim() ? company.trim() : null,
       })
       .eq("id", contact.id);
 
@@ -376,26 +284,15 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
-  async function saveNotes() {
-    if (!contact) return;
-    setSavingNotes(true);
-    const { error } = await supabase
-      .from("contacts")
-      .update({ notes: notesValue.trim() || null })
-      .eq("id", contact.id);
-    setSavingNotes(false);
-    if (error) { setError(`Notes save error: ${error.message}`); return; }
-    setEditingNotes(false);
-    await fetchAll();
-  }
-
   function openLog() {
     setLogOpen(true);
     setLogChannel("text");
     setLogDirection("outbound");
     setLogIntent("check_in");
     setLogSummary("");
-    setLogOccurredAt(new Date().toISOString().slice(0, 16));
+    setLogSource("manual");
+    setLogLink("");
+    setLogOccurredAt(new Date().toISOString().slice(0, 16)); // yyyy-mm-ddThh:mm
   }
 
   async function saveTouch() {
@@ -405,168 +302,26 @@ export default function ContactDetailPage() {
 
     const occurred_at = logOccurredAt ? new Date(logOccurredAt).toISOString() : new Date().toISOString();
 
-    const res = await fetch("/api/touches", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contact_id: contact.id,
-        channel: logChannel,
-        direction: logDirection,
-        intent: logIntent,
-        occurred_at,
-        summary: logSummary.trim() ? logSummary.trim() : null,
-        source: "manual",
-      }),
+    const { error } = await supabase.from("touches").insert({
+      contact_id: contact.id,
+      channel: logChannel,
+      direction: logDirection,
+      intent: logIntent,
+      occurred_at,
+      summary: logSummary.trim() ? logSummary.trim() : null,
+      source: logSource.trim() ? logSource.trim() : null,
+      source_link: logLink.trim() ? logLink.trim() : null,
     });
 
     setSavingTouch(false);
 
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(`Insert touch error: ${j?.error || res.statusText}`);
+    if (error) {
+      setError(`Insert touch error: ${error.message}`);
       return;
     }
 
     setLogOpen(false);
     await fetchAll();
-
-    // Auto-update AI context if there's a summary to incorporate
-    if (logSummary.trim() && uid) {
-      fetch("/api/contacts/extract_context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid, contact_id: contact.id }),
-      }).then((r) => r.json()).then((ej) => {
-        if (ej.ok) fetchAll();
-      }).catch(() => {});
-    }
-  }
-
-  async function extractContext() {
-    if (!uid || !contact) return;
-    setExtracting(true);
-    setExtractMsg(null);
-    try {
-      const res = await fetch("/api/contacts/extract_context", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid, contact_id: contact.id }),
-      });
-      const j = await res.json();
-      if (!res.ok) { setExtractMsg(`Error: ${j?.error || "Extraction failed"}`); return; }
-      setExtractMsg(`Extracted from ${j.sources.messages} messages + ${j.sources.touch_notes} touch notes`);
-      await fetchAll();
-    } catch (e: any) {
-      setExtractMsg(`Error: ${e?.message || "Failed"}`);
-    } finally {
-      setExtracting(false);
-    }
-  }
-
-  async function searchMergeContacts(q: string) {
-    if (!uid || q.trim().length < 2) { setMergeResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json().catch(() => ({}));
-    setMergeResults((j.results || []).filter((r: any) => r.id !== id));
-  }
-
-  async function mergeIntoTarget() {
-    if (!mergeTarget || !uid) return;
-    setMerging(true);
-    setMergeMsg(null);
-    const res = await fetch("/api/contacts/merge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, source_id: id, target_id: mergeTarget.id }),
-    });
-    const j = await res.json().catch(() => ({}));
-    setMerging(false);
-    if (!res.ok) { setMergeMsg(`Error: ${j?.error || "Merge failed"}`); return; }
-    window.location.href = `/contacts/${mergeTarget.id}`;
-  }
-
-  async function searchLinkContacts(q: string) {
-    if (!uid || q.trim().length < 2) { setLinkResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json().catch(() => ({}));
-    setLinkResults((j.results || []).filter((r: any) => r.id !== id && !linkedContacts.some((l) => l.contact.id === r.id)));
-  }
-
-  async function addLink(targetId: string) {
-    if (!uid) return;
-    setLinkBusy(true);
-    setLinkMsg(null);
-    const res = await fetch("/api/contacts/links", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: uid,
-        contact_id_a: id,
-        contact_id_b: targetId,
-        household_name: linkHouseholdName.trim() || null,
-      }),
-    });
-    const j = await res.json().catch(() => ({}));
-    setLinkBusy(false);
-    if (!res.ok) { setLinkMsg(`Error: ${j?.error || "Failed"}`); return; }
-    setLinkOpen(false);
-    setLinkQ("");
-    setLinkResults([]);
-    setLinkHouseholdName("");
-    setLinkMsg(null);
-    await fetchAll();
-  }
-
-  async function removeLink(linkId: string) {
-    setLinkBusy(true);
-    const res = await fetch("/api/contacts/links", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ link_id: linkId }),
-    });
-    setLinkBusy(false);
-    if (res.ok) await fetchAll();
-  }
-
-  async function distributeToLinked() {
-    if (!uid) return;
-    setDistributing(true);
-    setDistributeMsg(null);
-    const res = await fetch("/api/contacts/distribute", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, group_contact_id: id }),
-    });
-    const j = await res.json().catch(() => ({}));
-    setDistributing(false);
-    if (!res.ok) {
-      setDistributeMsg(`Error: ${j?.error || "Failed"}`);
-      setDistributeConfirm(false);
-      return;
-    }
-    setDistributeMsg(
-      `Done — ${j.touches_copied} touches copied to ${j.distributed_to.join(" & ")}. This contact has been archived.`
-    );
-    setDistributeConfirm(false);
-    await fetchAll();
-  }
-
-  async function archiveContact() {
-    if (!contact) return;
-    const isArchived = contact.archived;
-    setArchiving(true);
-    setError(null);
-    const { error } = await supabase
-      .from("contacts")
-      .update({ archived: !isArchived })
-      .eq("id", contact.id);
-    setArchiving(false);
-    if (error) { setError(`Archive error: ${error.message}`); return; }
-    if (!isArchived) {
-      window.location.href = "/contacts";
-    } else {
-      await fetchAll();
-    }
   }
 
   async function deleteContact() {
@@ -649,495 +404,173 @@ export default function ContactDetailPage() {
     );
   }
 
-  const daysSinceOutbound = lastOutbound
-    ? Math.floor((Date.now() - lastOutbound.getTime()) / (1000 * 60 * 60 * 24))
-    : null;
-
-  // rough cadence for display on this page
-  const cadence = (() => {
-    const cat = (contact.category || "").toLowerCase();
-    const t = (contact.tier || "").toUpperCase();
-    if (cat === "client") return t === "A" ? 30 : t === "B" ? 60 : 90;
-    if (cat === "sphere") return t === "A" ? 60 : t === "B" ? 90 : 120;
-    if (cat === "agent") return t === "A" ? 30 : 60;
-    return 60;
-  })();
-
-  const overdue = daysSinceOutbound == null || daysSinceOutbound >= cadence;
-  const outboundCount = touches.filter((t) => t.direction === "outbound").length;
-
   return (
-    <div className="page">
-      {/* Back */}
-      <div style={{ marginBottom: 8 }}>
-        <a href="/contacts" className="muted small" style={{ textDecoration: "none" }}>
-          ← Contacts
-        </a>
-      </div>
-
-      {contact.archived && (
-        <div style={{ marginBottom: 10, padding: "8px 12px", background: "#fef9c3", border: "1px solid #fcd34d", borderRadius: 8, fontSize: 13, color: "#92400e", fontWeight: 600 }}>
-          Archived — this contact is hidden from all lists.{" "}
-          <button onClick={archiveContact} disabled={archiving} style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline", color: "#92400e", padding: 0 }}>
-            Unarchive
-          </button>
-        </div>
-      )}
-
-      {error ? <div className="alert alertError" style={{ marginBottom: 10 }}>{error}</div> : null}
-
-      {/* Hero header */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, flexWrap: "wrap" }}>
-          {/* Left: identity */}
-          <div style={{ flex: 1, minWidth: 220 }}>
-            <h1 className="h1" style={{ margin: 0, lineHeight: 1.1 }}>{contact.display_name}</h1>
-
-            <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-              <span className="badge" style={{ fontWeight: 700 }}>
+    <div className="stack">
+      {/* Header */}
+      <div className="card cardPad">
+        <div className="rowResponsiveBetween">
+          <div style={{ minWidth: 0 }}>
+            <div className="rowResponsive" style={{ alignItems: "baseline" }}>
+              <h1 className="h1" style={{ margin: 0 }}>
+                {contact.display_name}
+              </h1>
+              <span className="subtle">
                 {prettyCategory(contact.category)}
-                {contact.tier ? ` · Tier ${contact.tier}` : ""}
+                {contact.tier ? ` • Tier ${contact.tier}` : ""}
+                {contact.client_type ? ` • ${contact.client_type}` : ""}
               </span>
-              {contact.client_type && <span className="badge">{contact.client_type}</span>}
-              {contact.company && <span className="badge">{contact.company}</span>}
             </div>
 
-            {(contact.email || contact.phone) && (
-              <div className="row" style={{ marginTop: 10, gap: 14, flexWrap: "wrap" }}>
-                {contact.email && (
-                  <a href={`mailto:${contact.email}`} style={{ fontSize: 13, color: "#333", textDecoration: "underline", textUnderlineOffset: 2 }}>
-                    {contact.email}
-                  </a>
-                )}
-                {contact.phone && (
-                  <a href={`tel:${contact.phone}`} style={{ fontSize: 13, color: "#333", textDecoration: "underline", textUnderlineOffset: 2 }}>
-                    {contact.phone}
-                  </a>
-                )}
-              </div>
-            )}
+            <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
+              Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+            </div>
           </div>
 
-          {/* Right: days counter */}
-          <div style={{ textAlign: "center", minWidth: 90 }}>
-            <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, color: overdue ? "#b91c1c" : "#15803d" }}>
-              {daysSinceOutbound == null ? "∞" : daysSinceOutbound}
-            </div>
-            <div style={{ fontSize: 11, color: "#888", marginTop: 3, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              {daysSinceOutbound == null ? "never reached out" : "days since outreach"}
-            </div>
-            <div style={{ marginTop: 6 }}>
-              <span className="badge" style={{ fontSize: 11, color: overdue ? "#b91c1c" : "#15803d", borderColor: overdue ? "#fca5a5" : "#86efac" }}>
-                {overdue ? "Overdue" : "On track"}
-              </span>
-            </div>
+          <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
+            <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
+              Contacts
+            </a>
+            <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
+              {editing ? "Close edit" : "Edit"}
+            </button>
+            <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
+              Log touch
+            </button>
           </div>
         </div>
 
-        {/* Stats row */}
-        <div className="row" style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,0.07)", flexWrap: "wrap" }}>
-          <span className="badge">{outboundCount} outbound touch{outboundCount !== 1 ? "es" : ""}</span>
-          <span className="badge">{touches.length} total interactions</span>
-          <span className="badge">Cadence {cadence}d</span>
-          {lastOutbound && (
-            <span className="badge muted">
-              Last: {lastOutbound.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-            </span>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="row" style={{ marginTop: 14, gap: 8 }}>
-          <button className="btn btnPrimary" onClick={openLog}>Log outreach</button>
-          <button className="btn" onClick={() => setEditing((v) => !v)}>
-            {editing ? "Close edit" : "Edit contact"}
-          </button>
-        </div>
+        {error ? <div className="alert alertError" style={{ marginTop: 12 }}>{error}</div> : null}
       </div>
 
-      {/* Edit panel */}
+      {/* Edit (clean, with danger zone) */}
       {editing && (
-        <div className="card cardPad stack" style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 900, fontSize: 15 }}>Edit contact</div>
+        <div className="card cardPad stack">
+          <div className="rowResponsiveBetween">
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
+              <div className="subtle" style={{ marginTop: 4 }}>Keep it tight. No busy work.</div>
+            </div>
+            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
+              Close
+            </button>
+          </div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 200 }}>
+            <div className="field" style={{ flex: 1, minWidth: 240 }}>
               <div className="label">Name</div>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-            <div className="field" style={{ width: 180 }}>
+
+            <div className="field" style={{ width: 220, minWidth: 180 }}>
               <div className="label">Category</div>
               <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option>Client</option><option>Sphere</option><option>Agent</option><option>Developer</option>
-                <option>Vendor</option><option>Other</option>
+                <option>Client</option>
+                <option>Agent</option>
+                <option>Developer</option>
+                <option>Vendor</option>
+                <option>Sphere</option>
+                <option>Other</option>
               </select>
             </div>
-            <div className="field" style={{ width: 110 }}>
+
+            <div className="field" style={{ width: 140 }}>
               <div className="label">Tier</div>
               <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
-                <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
               </select>
             </div>
           </div>
 
-          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 180 }}>
-              <div className="label">Client type</div>
-              <input className="input" value={clientType} onChange={(e) => setClientType(e.target.value)} placeholder="buyer / seller / sphere…" />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 180 }}>
-              <div className="label">Company</div>
-              <input className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Compass, etc." />
-            </div>
+          <div className="field">
+            <div className="label">Client Type (optional)</div>
+            <input
+              className="input"
+              value={clientType}
+              onChange={(e) => setClientType(e.target.value)}
+              placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..."
+            />
           </div>
 
-          <div className="row">
-            <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
+          <div className="rowResponsive">
+            <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
-            <button className="btn" onClick={() => setEditing(false)}>Cancel</button>
           </div>
 
           <div className="hr" />
-          <div style={{ fontWeight: 900, fontSize: 13, color: "#555" }}>Danger zone</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn" style={{ color: "#92400e", borderColor: "#fcd34d" }} onClick={archiveContact} disabled={archiving}>
-              {archiving ? "Saving…" : contact.archived ? "Unarchive" : "Archive contact"}
-            </button>
-            <button className="btn" style={{ color: "#b91c1c", borderColor: "#fca5a5" }} onClick={deleteContact} disabled={deleting}>
+
+          <div className="stack">
+            <div style={{ fontWeight: 900 }}>Danger zone</div>
+            <div className="subtle" style={{ fontSize: 12 }}>
+              Deletes touches + imported texts attached to this contact.
+            </div>
+            <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
               {deleting ? "Deleting…" : "Delete contact"}
             </button>
           </div>
-          <div className="muted small">Archive hides from all lists. Delete removes all data permanently.</div>
-
-          <div className="hr" />
-          <div style={{ fontWeight: 900, fontSize: 13, color: "#555" }}>Merge into another contact</div>
-          <div className="muted small">Moves all touches from this contact into another, then archives this one.</div>
-          {!mergeOpen ? (
-            <button className="btn" style={{ alignSelf: "flex-start" }} onClick={() => setMergeOpen(true)}>
-              Merge contact…
-            </button>
-          ) : (
-            <div className="stack">
-              {mergeTarget ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(0,0,0,0.04)", borderRadius: 6 }}>
-                  <div style={{ flex: 1, fontWeight: 700 }}>
-                    Merge into: <span style={{ color: "#1d4ed8" }}>{mergeTarget.display_name}</span>
-                  </div>
-                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setMergeTarget(null)}>Change</button>
-                </div>
-              ) : (
-                <div>
-                  <input
-                    className="input"
-                    placeholder="Search for target contact…"
-                    value={mergeQ}
-                    onChange={(e) => { setMergeQ(e.target.value); searchMergeContacts(e.target.value); }}
-                    autoFocus
-                  />
-                  {mergeResults.length > 0 && (
-                    <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {mergeResults.map((r) => (
-                        <div
-                          key={r.id}
-                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.06)", fontSize: 13 }}
-                          onClick={() => { setMergeTarget(r); setMergeQ(""); setMergeResults([]); }}
-                        >
-                          <span style={{ fontWeight: 700 }}>{r.display_name}</span>
-                          <span className="muted" style={{ marginLeft: 8 }}>{r.category}{r.tier ? ` · ${r.tier}` : ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {mergeMsg && (
-                <div style={{ fontSize: 13, fontWeight: 700, color: mergeMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>{mergeMsg}</div>
-              )}
-
-              <div style={{ display: "flex", gap: 8 }}>
-                {mergeTarget && (
-                  <button
-                    className="btn btnPrimary"
-                    onClick={mergeIntoTarget}
-                    disabled={merging}
-                  >
-                    {merging ? "Merging…" : `Merge into ${mergeTarget.display_name}`}
-                  </button>
-                )}
-                <button className="btn" onClick={() => { setMergeOpen(false); setMergeTarget(null); setMergeQ(""); setMergeResults([]); setMergeMsg(null); }}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* AI Context */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: contact.ai_context ? 12 : 0 }}>
-          <div>
-            <span style={{ fontWeight: 900 }}>AI context</span>
-            {contact.ai_context_updated_at && (
-              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                Updated {new Date(contact.ai_context_updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
-            )}
-          </div>
-          <button
-            className="btn"
-            style={{ fontSize: 12 }}
-            onClick={extractContext}
-            disabled={extracting}
-          >
-            {extracting ? "Extracting…" : contact.ai_context ? "Re-extract" : "Extract from messages"}
-          </button>
-        </div>
+      {/* Jordan Voice FIRST */}
+      <VoiceDraftPanel contactId={contact.id} />
 
-        {extractMsg && (
-          <div style={{ fontSize: 12, marginBottom: 10, color: extractMsg.startsWith("Error") ? "#b91c1c" : "#15803d", fontWeight: 600 }}>
-            {extractMsg}
-          </div>
-        )}
+      {/* Text upload NEXT */}
+      <TextThreadUploadPanel contactId={contact.id} />
 
-        {contact.ai_context ? (
-          <div style={{ fontSize: 13, lineHeight: 1.65, whiteSpace: "pre-wrap", color: "#333" }}>
-            {contact.ai_context}
-          </div>
-        ) : (
-          <div className="muted" style={{ fontSize: 13 }}>
-            No context extracted yet. Click "Extract from messages" to pull key details from emails and text threads.
-          </div>
-        )}
-      </div>
-
-      {/* Notes — inline edit */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div style={{ fontWeight: 900 }}>Notes</div>
-          {!editingNotes ? (
-            <button className="btn" style={{ fontSize: 12 }} onClick={() => { setNotesValue(contact.notes || ""); setEditingNotes(true); }}>
-              {contact.notes ? "Edit" : "Add notes"}
-            </button>
-          ) : (
-            <div className="row" style={{ gap: 6 }}>
-              <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={saveNotes} disabled={savingNotes}>
-                {savingNotes ? "Saving…" : "Save"}
-              </button>
-              <button className="btn" style={{ fontSize: 12 }} onClick={() => setEditingNotes(false)}>Cancel</button>
-            </div>
-          )}
-        </div>
-
-        {editingNotes ? (
-          <textarea
-            className="textarea"
-            value={notesValue}
-            onChange={(e) => setNotesValue(e.target.value)}
-            placeholder="Relationship context, deal status, key details — anything useful for the next conversation…"
-            style={{ minHeight: 120 }}
-            autoFocus
-          />
-        ) : contact.notes ? (
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: 14 }}>{contact.notes}</div>
-        ) : (
-          <div className="muted" style={{ fontSize: 13 }}>
-            No notes yet — capture context, deal status, and details useful for the next conversation.
-          </div>
-        )}
-      </div>
-
-      {/* Linked contacts (household) */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: linkedContacts.length > 0 ? 12 : 0 }}>
-          <div>
-            <span style={{ fontWeight: 900 }}>Household / linked contacts</span>
-            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>touches mirror automatically</span>
-          </div>
-          <button className="btn" style={{ fontSize: 12 }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
-            {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "Add another" : "Link contact"}
-          </button>
-        </div>
-
-        {linkedContacts.length > 0 && (
-          <div className="stack" style={{ gap: 6, marginBottom: linkOpen ? 12 : 0 }}>
-            {linkedContacts.map((l) => (
-              <div key={l.link_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(0,0,0,0.03)", borderRadius: 6 }}>
-                <div style={{ flex: 1 }}>
-                  <a href={`/contacts/${l.contact.id}`} style={{ fontWeight: 700, fontSize: 14 }}>{l.contact.display_name}</a>
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{l.contact.category}{l.contact.tier ? ` · ${l.contact.tier}` : ""}</span>
-                  {l.household_name && <span className="badge" style={{ marginLeft: 8, fontSize: 11 }}>{l.household_name}</span>}
-                </div>
-                <button
-                  className="btn"
-                  style={{ fontSize: 11, color: "#888", padding: "3px 8px" }}
-                  onClick={() => removeLink(l.link_id)}
-                  disabled={linkBusy}
-                >
-                  Unlink
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {linkedContacts.length === 0 && !linkOpen && (
-          <div className="muted" style={{ fontSize: 13 }}>
-            No linked contacts. Link a partner/spouse so logging a touch on one automatically logs it on the other.
-          </div>
-        )}
-
-        {linkedContacts.length > 0 && !linkOpen && (
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
-            {!distributeConfirm ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <button
-                  className="btn"
-                  style={{ fontSize: 12, color: "#92400e", borderColor: "#fcd34d" }}
-                  onClick={() => { setDistributeConfirm(true); setDistributeMsg(null); }}
-                >
-                  Distribute & archive this contact →
-                </button>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Copies all touches, notes, and context to linked contacts, then archives this one.
-                </span>
-              </div>
-            ) : (
-              <div className="stack" style={{ gap: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  Copy all outreach + notes from <strong>{contact?.display_name}</strong> to{" "}
-                  <strong>{linkedContacts.map((l) => l.contact.display_name).join(" & ")}</strong>, then archive this contact?
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>This cannot be undone (though the contact can be unarchived).</div>
-                <div className="row" style={{ gap: 8 }}>
-                  <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>
-                    {distributing ? "Distributing…" : "Yes, distribute & archive"}
-                  </button>
-                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
-                </div>
-              </div>
-            )}
-            {distributeMsg && (
-              <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600, color: distributeMsg.startsWith("Error") ? "#b91c1c" : "#15803d" }}>
-                {distributeMsg}
-              </div>
-            )}
-          </div>
-        )}
-
-        {linkOpen && (
-          <div className="stack" style={{ gap: 8 }}>
-            <input
-              className="input"
-              placeholder="Search for contact to link…"
-              value={linkQ}
-              autoFocus
-              onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }}
-            />
-            {linkResults.length > 0 && (
-              <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }}>
-                {linkResults.map((r) => (
-                  <div
-                    key={r.id}
-                    style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.06)", fontSize: 13 }}
-                    onClick={() => addLink(r.id)}
-                  >
-                    <span style={{ fontWeight: 700 }}>{r.display_name}</span>
-                    <span className="muted" style={{ marginLeft: 8 }}>{r.category}{r.tier ? ` · ${r.tier}` : ""}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                className="input"
-                style={{ flex: 1 }}
-                placeholder='Household name (optional, e.g. "Smith Family")'
-                value={linkHouseholdName}
-                onChange={(e) => setLinkHouseholdName(e.target.value)}
-              />
-            </div>
-            {linkMsg && <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600 }}>{linkMsg}</div>}
-          </div>
-        )}
-      </div>
-
-      {/* Touch timeline */}
-      <div className="card cardPad" style={{ marginBottom: 12 }}>
-        <div style={{ fontWeight: 900, marginBottom: touches.length > 0 ? 16 : 0 }}>
-          Outreach history
-          <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>({touches.length})</span>
-        </div>
-
-        {touches.length === 0 ? (
-          <div className="muted" style={{ fontSize: 13 }}>No outreach logged yet.</div>
-        ) : (
-          <div className="stack" style={{ gap: 0 }}>
-            {touches.map((t, i) => (
-              <div key={t.id} style={{ display: "flex", gap: 14, paddingBottom: i < touches.length - 1 ? 16 : 0 }}>
-                {/* Date column */}
-                <div style={{ width: 68, textAlign: "right", flexShrink: 0, paddingTop: 2 }}>
-                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, lineHeight: 1.3 }}>
-                    {new Date(t.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#aaa" }}>
-                    {new Date(t.occurred_at).getFullYear()}
-                  </div>
-                </div>
-
-                {/* Line */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.direction === "outbound" ? "#2563eb" : "#9ca3af", marginTop: 4, flexShrink: 0 }} />
-                  {i < touches.length - 1 && <div style={{ width: 1, flex: 1, background: "#e5e7eb", marginTop: 4 }} />}
-                </div>
-
-                {/* Content */}
-                <div style={{ flex: 1, paddingBottom: 4 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    {t.direction === "outbound" ? "You reached out" : "They reached out"}
-                    <span style={{ fontWeight: 400, color: "#666", marginLeft: 6 }}>
-                      via {channelLabel(t.channel)}
-                      {t.intent && t.intent !== "check_in" ? ` · ${intentLabel(t.intent)}` : ""}
-                    </span>
-                  </div>
-                  {t.summary && (
-                    <div style={{ marginTop: 4, fontSize: 13, color: "#444", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.summary}</div>
-                  )}
-                  {t.source_link && (
-                    <div style={{ marginTop: 4 }}>
-                      <a href={t.source_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#555", textDecoration: "underline", textUnderlineOffset: 2 }}>
-                        {t.source === "gmail" ? "View in Gmail" : "View thread"}
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* AI draft + text upload — collapsed by default */}
-      <details className="card cardPad" style={{ marginBottom: 12 }}>
-        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none", userSelect: "none" }}>
-          AI draft + text thread upload
-          <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>expand</span>
+      {/* Touch history: collapsed + calm */}
+      <details className="card cardPad" open={false}>
+        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none" as any }}>
+          Touch history <span className="subtle">({touches.length})</span>
         </summary>
-        <div style={{ marginTop: 14 }}>
-          <VoiceDraftPanel contactId={contact.id} />
-          <TextThreadUploadPanel contactId={contact.id} onImported={fetchAll} />
+
+        <div className="stack" style={{ marginTop: 12 }}>
+          {touches.length === 0 ? (
+            <div className="subtle">No touches yet.</div>
+          ) : (
+            touches.map((t) => (
+              <div key={t.id} className="card cardPad">
+                <div className="rowResponsiveBetween">
+                  <div style={{ fontWeight: 900 }}>
+                    {dirPill(t.direction)} • {channelLabel(t.channel)}
+                    {t.intent ? <span className="subtle"> • {t.intent}</span> : null}
+                  </div>
+                  <div className="subtle">{fmtDT(t.occurred_at)}</div>
+                </div>
+
+                {t.summary ? (
+                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
+                ) : null}
+
+                {(t.source || t.source_link) ? (
+                  <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
+                    {t.source ? `source: ${t.source}` : ""}
+                    {t.source_link ? (
+                      <>
+                        {" "}
+                        •{" "}
+                        <a href={t.source_link} target="_blank" rel="noreferrer">
+                          open link
+                        </a>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </details>
 
-      {/* Log outreach modal */}
+      {/* Log touch modal (kept functional but less noisy text) */}
       {logOpen && (
         <div
+          className="modalSheet"
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.4)",
+            background: "rgba(0,0,0,0.35)",
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
@@ -1145,74 +578,101 @@ export default function ContactDetailPage() {
             zIndex: 999,
           }}
         >
-          <div className="card cardPad" style={{ width: "min(600px, 100%)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div className="card cardPad modalSheetCard" style={{ width: "min(860px, 100%)" }}>
+            <div className="rowResponsiveBetween">
               <div>
-                <div style={{ fontWeight: 900, fontSize: 17 }}>Log outreach</div>
-                <div className="muted" style={{ marginTop: 3 }}>{contact.display_name}</div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
+                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
               </div>
-              <button className="btn" onClick={() => setLogOpen(false)}>✕</button>
+              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
+                Close
+              </button>
             </div>
 
-            <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-              <div className="field" style={{ width: 180 }}>
-                <div className="label">Who reached out</div>
+            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
+              <div className="field" style={{ width: 160, minWidth: 160 }}>
+                <div className="label">Direction</div>
                 <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
-                  <option value="outbound">I reached out</option>
-                  <option value="inbound">They reached out</option>
+                  <option value="outbound">outbound</option>
+                  <option value="inbound">inbound</option>
                 </select>
               </div>
-              <div className="field" style={{ width: 150 }}>
-                <div className="label">How</div>
+
+              <div className="field" style={{ width: 160, minWidth: 160 }}>
+                <div className="label">Channel</div>
                 <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
-                  <option value="text">Text</option>
-                  <option value="email">Email</option>
-                  <option value="call">Call</option>
-                  <option value="in_person">In person</option>
-                  <option value="social_dm">Social DM</option>
-                  <option value="other">Other</option>
+                  <option value="email">email</option>
+                  <option value="text">text</option>
+                  <option value="call">call</option>
+                  <option value="in_person">in_person</option>
+                  <option value="social_dm">social_dm</option>
+                  <option value="other">other</option>
                 </select>
               </div>
-              <div className="field" style={{ width: 180 }}>
-                <div className="label">Purpose</div>
+
+              <div className="field" style={{ width: 220, minWidth: 220 }}>
+                <div className="label">Intent</div>
                 <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
-                  <option value="check_in">Check-in</option>
-                  <option value="deal_followup">Deal follow-up</option>
-                  <option value="referral_ask">Referral ask</option>
-                  <option value="review_ask">Review ask</option>
-                  <option value="collaboration">Collaboration</option>
-                  <option value="event_invite">Event invite</option>
-                  <option value="other">Other</option>
+                  <option value="check_in">check_in</option>
+                  <option value="referral_ask">referral_ask</option>
+                  <option value="review_ask">review_ask</option>
+                  <option value="deal_followup">deal_followup</option>
+                  <option value="collaboration">collaboration</option>
+                  <option value="event_invite">event_invite</option>
+                  <option value="other">other</option>
                 </select>
               </div>
-              <div className="field" style={{ width: 190 }}>
-                <div className="label">When</div>
-                <input className="input" type="datetime-local" value={logOccurredAt} onChange={(e) => setLogOccurredAt(e.target.value)} />
+
+              <div className="field" style={{ width: 220, minWidth: 220 }}>
+                <div className="label">Occurred at</div>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={logOccurredAt}
+                  onChange={(e) => setLogOccurredAt(e.target.value)}
+                />
               </div>
             </div>
 
-            <div className="field" style={{ marginTop: 12 }}>
-              <div className="label">Note (optional)</div>
+            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
+              <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                <div className="label">Source</div>
+                <input
+                  className="input"
+                  value={logSource}
+                  onChange={(e) => setLogSource(e.target.value)}
+                  placeholder="manual / gmail / sms"
+                />
+              </div>
+
+              <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                <div className="label">Link (optional)</div>
+                <input
+                  className="input"
+                  value={logLink}
+                  onChange={(e) => setLogLink(e.target.value)}
+                  placeholder="thread link / calendar link"
+                />
+              </div>
+            </div>
+
+            <div className="field" style={{ marginTop: 10 }}>
+              <div className="label">Summary (optional)</div>
               <textarea
                 className="textarea"
                 value={logSummary}
                 onChange={(e) => setLogSummary(e.target.value)}
-                placeholder="What was said, what came up, anything useful for next time…"
-                style={{ minHeight: 80 }}
+                placeholder="Quick note about what happened"
               />
             </div>
 
-            {linkedContacts.length > 0 && (
-              <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(37,99,235,0.06)", borderRadius: 6, fontSize: 12, color: "#1d4ed8" }}>
-                Will also mirror to: {linkedContacts.map((l) => l.contact.display_name).join(", ")}
-              </div>
-            )}
-
-            <div className="row" style={{ marginTop: 14 }}>
-              <button className="btn btnPrimary" onClick={saveTouch} disabled={savingTouch}>
-                {savingTouch ? "Saving…" : "Save"}
+            <div className="rowResponsive" style={{ marginTop: 12 }}>
+              <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
+                {savingTouch ? "Saving…" : "Save touch"}
               </button>
-              <button className="btn" onClick={() => setLogOpen(false)}>Cancel</button>
+              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>
