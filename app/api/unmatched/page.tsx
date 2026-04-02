@@ -216,7 +216,7 @@ export default function UnmatchedPage() {
       setMsg(null);
     }
 
-    const res = await fetch(`/unmatched/ignore`, {
+    const res = await fetch(`/api/unmatched/ignore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid, email }),

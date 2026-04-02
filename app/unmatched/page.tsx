@@ -179,7 +179,7 @@ export default function UnmatchedPage() {
     setErr(null);
     setMsg(null);
 
-    const res = await fetch(`/unmatched/ignore`, {
+    const res = await fetch(`/api/unmatched/ignore`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid, email }),
@@ -205,7 +205,7 @@ export default function UnmatchedPage() {
     setErr(null);
     setMsg(null);
 
-    const res = await fetch(`/unmatched/create_contact`, {
+    const res = await fetch(`/api/unmatched/add-contact`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid: activeUid, email }),
@@ -252,7 +252,7 @@ export default function UnmatchedPage() {
     setErr(null);
     setMsg(null);
 
-    const res = await fetch(`/unmatched/link`, {
+    const res = await fetch(`/api/unmatched/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uid: activeUid, email, contact_id: contactId }),
