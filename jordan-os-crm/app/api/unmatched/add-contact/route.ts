@@ -31,7 +31,8 @@ function safeErr(e: unknown) {
 type Body = {
   uid: string;
   email: string;
-  category?: string; // optional override
+  display_name?: string | null; // optional override from form
+  category?: string;
   tier?: string | null;
 };
 
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
       display_name = String(existing.display_name);
     } else {
       // Create new contact
-      display_name = displayFromEmail(email);
+      display_name = (body?.display_name || "").trim() || displayFromEmail(email);
       const category = body?.category || "Agent";
       const tier = body?.tier ?? null;
 
