@@ -392,6 +392,7 @@ export default function MorningPage() {
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, client_type, email, created_at")
+      .neq("archived", true)
       .order("created_at", { ascending: false })
       .limit(2000);
 
