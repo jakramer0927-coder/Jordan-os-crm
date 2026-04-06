@@ -269,7 +269,7 @@ export default function VoiceDraftPanel({ contactId }: Props) {
                         </div>
                     </div>
 
-                    <button className="btn btnPrimary btnFullMobile" onClick={generate} disabled={busy}>
+                    <button className="btn btnPrimary btnFullMobile" onClick={() => generate()} disabled={busy}>
                         {busy ? "Writing…" : "Generate"}
                     </button>
                 </div>
