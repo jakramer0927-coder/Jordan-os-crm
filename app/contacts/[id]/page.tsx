@@ -871,8 +871,19 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* Buyer profile — shown for clients */}
-      {(contact.category || "").toLowerCase() === "client" && (
+      {/* Buyer profile — active buyers only */}
+      {(contact.category || "").toLowerCase() === "client" && (() => {
+        const ct = (contact.client_type || "").toLowerCase();
+        const isPastOrSeller = ct.includes("past") || ct.includes("seller") || ct.includes("landlord");
+        if (isPastOrSeller) return (
+          <div className="card cardPad" style={{ borderColor: "var(--line2)" }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Buyer profile</div>
+            <div className="subtle" style={{ fontSize: 13, marginTop: 6 }}>
+              Not applicable — use <strong>Properties &amp; deals</strong> above to record the property this contact bought or sold.
+            </div>
+          </div>
+        );
+        return (
         <div className="card cardPad stack">
           <div>
             <div style={{ fontWeight: 900, fontSize: 15 }}>Buyer profile</div>
@@ -899,7 +910,8 @@ export default function ContactDetailPage() {
             {buyerMsg && <span style={{ fontSize: 12, color: buyerMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a", fontWeight: 700 }}>{buyerMsg}</span>}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Jordan Voice FIRST */}
       <VoiceDraftPanel contactId={contact.id} />
