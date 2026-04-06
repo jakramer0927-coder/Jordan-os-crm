@@ -143,7 +143,7 @@ export default function VoiceDraftPanel({ contactId }: Props) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ask, uid, contactId, channel]);
 
-    async function generate() {
+    async function generate(intentOverride?: Intent) {
         setErr(null);
         setCopied(false);
 
@@ -160,7 +160,7 @@ export default function VoiceDraftPanel({ contactId }: Props) {
                     uid,
                     contact_id: contactId,
                     channel,
-                    intent,
+                    intent: intentOverride ?? intent,
                     length,
                     ask: ask.trim() || null,
                     key_points: keyPoints.length ? keyPoints : null,
@@ -306,14 +306,17 @@ export default function VoiceDraftPanel({ contactId }: Props) {
                         )}
                     </div>
 
-                    {suggestMeta ? (
+                    {suggestMeta && suggestMeta.intent !== intent ? (
                         <button
-                            className="btn btnFullMobile"
+                            className="btn btnPrimary btnFullMobile"
                             type="button"
-                            onClick={() => setIntent(suggestMeta.intent)}
+                            onClick={() => {
+                                setIntent(suggestMeta.intent);
+                                generate(suggestMeta.intent);
+                            }}
                             disabled={busy}
                         >
-                            Apply suggestion
+                            Apply &amp; generate
                         </button>
                     ) : null}
                 </div>
