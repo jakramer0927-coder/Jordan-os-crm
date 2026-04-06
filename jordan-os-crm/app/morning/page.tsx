@@ -88,6 +88,12 @@ function isWeekdayLocal(): boolean {
   return d >= 1 && d <= 5;
 }
 
+function weekdaysElapsedToday(now = new Date()): number {
+  const day = now.getDay();
+  if (day === 0 || day === 6) return 5;
+  return day; // Mon=1 … Fri=5
+}
+
 function cadenceDays(category: string, tier: string | null): number {
   const cat = (category || "").toLowerCase();
   const t = (tier || "").toUpperCase();
@@ -347,6 +353,10 @@ export default function MorningPage() {
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
+  // accountability strip
+  const [todayCount, setTodayCount] = useState(0);
+  const [wtdCount, setWtdCount] = useState(0);
+
   // operating rules — load synchronously on first render to avoid re-render loop
   const [rules, setRules] = useState<MorningRules>(() => {
     if (typeof window === "undefined") return DEFAULT_RULES;
@@ -451,6 +461,19 @@ export default function MorningPage() {
     });
 
     setContacts(merged);
+
+    // Accountability strip counts
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const weekStart = startOfWeekMondayLocal(new Date());
+
+    const [{ count: tc }, { count: wc }] = await Promise.all([
+      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", todayStart.toISOString()),
+      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", weekStart.toISOString()),
+    ]);
+    setTodayCount(tc ?? 0);
+    setWtdCount(wc ?? 0);
+
     setLoading(false);
   }
 
@@ -489,6 +512,8 @@ export default function MorningPage() {
 
     // Mark as completed — do NOT reload (this is what caused reshuffling)
     setCompletedIds((prev) => new Set([...prev, loggingFor]));
+    setTodayCount((n) => n + 1);
+    setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
   }
@@ -765,6 +790,45 @@ export default function MorningPage() {
             weekdays.
           </div>
         ) : null}
+      </div>
+
+      {/* ── Accountability strip ── */}
+      <div className="card cardPad" style={{ marginTop: 12 }}>
+        <div className="rowBetween" style={{ flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+          <div className="row" style={{ gap: 28, flexWrap: "wrap" }}>
+            <div>
+              <div className="label" style={{ marginBottom: 2 }}>Today</div>
+              <div style={{ fontWeight: 900, fontSize: 28, lineHeight: 1, color: todayCount >= rules.totalRecs ? "#0b6b2a" : "var(--ink)" }}>
+                {todayCount}
+                <span style={{ fontWeight: 400, fontSize: 13, color: "rgba(18,18,18,.4)", marginLeft: 4 }}>/ {rules.totalRecs}</span>
+              </div>
+              <div style={{ fontSize: 12, marginTop: 2, fontWeight: 700, color: todayCount >= rules.totalRecs ? "#0b6b2a" : "rgba(18,18,18,.5)" }}>
+                {todayCount >= rules.totalRecs ? "Goal hit ✓" : `${rules.totalRecs - todayCount} to go`}
+              </div>
+            </div>
+
+            <div style={{ width: 1, height: 44, background: "rgba(0,0,0,.08)", flexShrink: 0, alignSelf: "center" }} />
+
+            <div>
+              <div className="label" style={{ marginBottom: 2 }}>This week</div>
+              <div style={{ fontWeight: 900, fontSize: 28, lineHeight: 1 }}>{wtdCount}</div>
+              {(() => {
+                const expected = weekdaysElapsedToday() * rules.totalRecs;
+                const diff = wtdCount - expected;
+                const behind = diff < 0;
+                return (
+                  <div style={{ fontSize: 12, marginTop: 2, fontWeight: 700, color: behind ? "#8a0000" : "#0b6b2a" }}>
+                    {behind ? `${Math.abs(diff)} behind pace` : `+${diff} ahead`}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          <a href="/insights" className="btn" style={{ textDecoration: "none", fontSize: 12 }}>
+            Full report →
+          </a>
+        </div>
       </div>
 
       <div className="section" style={{ marginTop: 12 }}>
