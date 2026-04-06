@@ -53,7 +53,9 @@ export async function GET(req: Request) {
       .order("last_seen_at", { ascending: false })
       .limit(limit);
 
-    if (!includeIgnored) q = q.neq("status", "ignored");
+    if (!includeIgnored) {
+      q = q.not("status", "in", '("ignored","linked","auto_created")');
+    }
     if (cursor) q = q.lt("last_seen_at", cursor);
 
     const { data, error } = await q;

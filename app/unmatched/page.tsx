@@ -185,7 +185,6 @@ export default function UnmatchedPage() {
     const email = createForm.email;
     setCreateForm(null);
     removeRow(email);
-    load(); // background sync
   }
 
   async function ignoreEmail(email: string) {
@@ -204,7 +203,6 @@ export default function UnmatchedPage() {
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Ignore failed"); return; }
     removeRow(email);
-    load();
   }
 
   async function searchContacts(q: string) {
@@ -238,7 +236,6 @@ export default function UnmatchedPage() {
     setContactQuery("");
     setContactResults([]);
     removeRow(email);
-    load();
   }
 
   useEffect(() => {
@@ -246,10 +243,8 @@ export default function UnmatchedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visible = useMemo(
-    () => rows.filter((r) => r.status !== "ignored" && r.status !== "linked" && r.status !== "auto_created"),
-    [rows],
-  );
+  // API already filters ignored/linked/auto_created — rows is the visible set
+  const visible = rows;
 
   if (!ready) return <div className="card cardPad">Loading…</div>;
 
