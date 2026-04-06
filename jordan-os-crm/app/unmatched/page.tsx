@@ -99,34 +99,41 @@ export default function UnmatchedPage() {
 
   const [rows, setRows] = useState<UnmatchedRow[]>([]);
 
-  // Link flow
+  // Which row has link panel open (by email)
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [contactQuery, setContactQuery] = useState("");
   const [contactResults, setContactResults] = useState<ContactLite[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string>("");
 
-  // Create flow — stores the email being created, null = form closed
+  // Which row has create form open (by email)
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
 
-  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  async function getUid(): Promise<string | null> {
+    const { data: sd } = await supabase.auth.getSession();
+    const u = sd.session?.user ?? null;
+    if (!u) { window.location.href = "/login"; return null; }
+    return u.id;
+  }
+
   async function load() {
     setErr(null);
-    setMsg(null);
+    const activeUid = await getUid();
+    if (!activeUid) return;
+    setUid(activeUid);
 
-    const { data } = await supabase.auth.getSession();
-    const user = data.session?.user;
-    if (!user) { window.location.href = "/login"; return; }
-    setUid(user.id);
-
-    const res = await fetch(`/api/unmatched/list?uid=${user.id}`);
+    const res = await fetch(`/api/unmatched/list?uid=${activeUid}`);
     const j = await res.json();
     if (!res.ok) { setErr(j?.error || "Failed to load"); setReady(true); return; }
-
     setRows((j.rows || []) as UnmatchedRow[]);
     setReady(true);
+  }
+
+  // Remove a row optimistically (before re-fetch) so the UI updates instantly
+  function removeRow(email: string) {
+    setRows((prev) => prev.filter((r) => r.email !== email));
   }
 
   function openCreateForm(row: UnmatchedRow) {
@@ -137,20 +144,26 @@ export default function UnmatchedPage() {
       category: rec.suggestedCategory,
       tier: "B",
     });
-    setSelectedEmail(null); // close link panel if open
+    setSelectedEmail(null);
     setErr(null);
-    setMsg(null);
+  }
+
+  function openLinkPanel(email: string) {
+    setSelectedEmail(email);
+    setCreateForm(null);
+    setContactQuery("");
+    setContactResults([]);
+    setSelectedContactId("");
+    setErr(null);
   }
 
   async function submitCreate() {
     if (!createForm) return;
-    const { data: sd } = await supabase.auth.getSession();
-    const activeUid = sd.session?.user?.id ?? uid;
+    const activeUid = uid || await getUid();
     if (!activeUid) return;
 
     setBusy(true);
     setErr(null);
-    setMsg(null);
 
     const res = await fetch(`/api/unmatched/add-contact`, {
       method: "POST",
@@ -169,16 +182,17 @@ export default function UnmatchedPage() {
 
     if (!res.ok) { setErr(j?.error || "Create failed"); return; }
 
-    setMsg(`Created: ${j.display_name}`);
+    const email = createForm.email;
     setCreateForm(null);
-    await load();
+    removeRow(email);
+    load(); // background sync
   }
 
   async function ignoreEmail(email: string) {
-    const { data: sd } = await supabase.auth.getSession();
-    const activeUid = sd.session?.user?.id ?? uid;
+    const activeUid = uid || await getUid();
     if (!activeUid) return;
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true);
+    setErr(null);
 
     const res = await fetch(`/api/unmatched/ignore`, {
       method: "POST",
@@ -189,24 +203,25 @@ export default function UnmatchedPage() {
     const j = await res.json();
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Ignore failed"); return; }
-    setMsg("Ignored.");
-    await load();
+    removeRow(email);
+    load();
   }
 
   async function searchContacts(q: string) {
-    if (!uid || !q.trim()) { setContactResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
+    const activeUid = uid;
+    if (!activeUid || !q.trim()) { setContactResults([]); return; }
+    const res = await fetch(`/api/contacts/search?uid=${activeUid}&q=${encodeURIComponent(q.trim())}`);
     const j = await res.json();
     setContactResults(res.ok ? (j.results || []) as ContactLite[] : []);
   }
 
   async function linkEmail(email: string, contactId: string) {
-    const { data: sd } = await supabase.auth.getSession();
-    const activeUid = sd.session?.user?.id ?? uid;
+    const activeUid = uid || await getUid();
     if (!activeUid) return;
     if (!contactId) { setErr("Pick a contact to link to."); return; }
 
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true);
+    setErr(null);
 
     const res = await fetch(`/api/unmatched/link`, {
       method: "POST",
@@ -218,12 +233,12 @@ export default function UnmatchedPage() {
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Link failed"); return; }
 
-    setMsg("Linked.");
     setSelectedEmail(null);
     setSelectedContactId("");
     setContactQuery("");
     setContactResults([]);
-    await load();
+    removeRow(email);
+    load();
   }
 
   useEffect(() => {
@@ -253,97 +268,17 @@ export default function UnmatchedPage() {
         </div>
       </div>
 
-      {(err || msg) && (
-        <div className={`alert ${err ? "alertError" : "alertOk"}`}>{err || msg}</div>
-      )}
-
-      {/* Link panel */}
-      {selectedEmail && (
-        <div className="card cardPad stack" style={{ background: "rgba(247,244,238,.55)" }}>
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Link email → contact</div>
-          <div className="subtle">Email: <strong>{selectedEmail}</strong></div>
-
-          <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div className="field" style={{ width: 420, minWidth: 260 }}>
-              <div className="label">Search contacts</div>
-              <input
-                className="input"
-                value={contactQuery}
-                onChange={(e) => { setContactQuery(e.target.value); setSelectedContactId(""); searchContacts(e.target.value); }}
-                placeholder="Search by name"
-              />
-            </div>
-            <div className="field" style={{ minWidth: 360, flex: 1 }}>
-              <div className="label">Pick contact</div>
-              <select className="select" value={selectedContactId} onChange={(e) => setSelectedContactId(e.target.value)}>
-                <option value="">Select a contact…</option>
-                {contactResults.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.display_name} • {c.category}{c.tier ? ` • ${c.tier}` : ""}{c.email ? ` • ${c.email}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button className="btn btnPrimary" onClick={() => linkEmail(selectedEmail, selectedContactId)} disabled={busy || !selectedContactId}>Link</button>
-            <button className="btn" onClick={() => { setSelectedEmail(null); setSelectedContactId(""); setContactQuery(""); setContactResults([]); }} disabled={busy}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* Create contact panel */}
-      {createForm && (
-        <div className="card cardPad stack" style={{ background: "rgba(247,244,238,.55)" }}>
-          <div className="rowBetween">
-            <div style={{ fontWeight: 900, fontSize: 16 }}>Create contact</div>
-            <button className="btn" onClick={() => setCreateForm(null)} disabled={busy}>Cancel</button>
-          </div>
-          <div className="subtle">Email: <strong>{createForm.email}</strong></div>
-
-          <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end", gap: 12 }}>
-            <div className="field" style={{ flex: 1, minWidth: 220 }}>
-              <div className="label">Name</div>
-              <input
-                className="input"
-                value={createForm.name}
-                onChange={(e) => setCreateForm((f) => f ? { ...f, name: e.target.value } : f)}
-                placeholder="Full name"
-              />
-            </div>
-
-            <div className="field" style={{ minWidth: 160 }}>
-              <div className="label">Category</div>
-              <select className="select" value={createForm.category} onChange={(e) => setCreateForm((f) => f ? { ...f, category: e.target.value } : f)}>
-                <option>Agent</option>
-                <option>Client</option>
-                <option>Developer</option>
-                <option>Vendor</option>
-                <option>Sphere</option>
-                <option>Other</option>
-              </select>
-            </div>
-
-            <div className="field" style={{ minWidth: 100 }}>
-              <div className="label">Tier</div>
-              <select className="select" value={createForm.tier} onChange={(e) => setCreateForm((f) => f ? { ...f, tier: e.target.value } : f)}>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-              </select>
-            </div>
-
-            <button className="btn btnPrimary" onClick={submitCreate} disabled={busy || !createForm.name.trim()}>
-              {busy ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
-      )}
+      {err && <div className="alert alertError">{err}</div>}
 
       <div className="stack">
         {visible.map((r) => {
           const rec = classifyUnmatched(r.email, r.last_subject, r.last_snippet);
+          const isLinking = selectedEmail === r.email;
           const isCreating = createForm?.email === r.email;
+
           return (
-            <div key={r.id} className="card cardPad">
+            <div key={r.id} className="card cardPad stack">
+              {/* Contact info row */}
               <div className="rowBetween" style={{ alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>{r.email}</div>
@@ -351,33 +286,36 @@ export default function UnmatchedPage() {
                   <div className="row" style={{ marginTop: 10 }}>
                     <span className="badge">Seen {r.seen_count}</span>
                     <span className="badge">Last {new Date(r.last_seen_at).toLocaleString()}</span>
-                    <span className="badge">Status {r.status}</span>
                     <span className="badge">{rec.label} ({Math.round(rec.confidence * 100)}%)</span>
                   </div>
 
                   {r.last_subject && (
-                    <div style={{ marginTop: 12 }}>
+                    <div style={{ marginTop: 10 }}>
                       <div className="label">Subject</div>
                       <div style={{ fontWeight: 800 }}>{r.last_subject}</div>
                     </div>
                   )}
 
                   {r.last_snippet && (
-                    <div style={{ marginTop: 8 }}>
+                    <div style={{ marginTop: 6 }}>
                       <div className="subtle" style={{ color: "rgba(18,18,18,.78)" }}>{r.last_snippet}</div>
                     </div>
                   )}
 
                   {r.last_thread_link && (
-                    <div style={{ marginTop: 8 }}>
+                    <div style={{ marginTop: 6 }}>
                       <a href={r.last_thread_link} target="_blank" rel="noreferrer">Open Gmail thread</a>
                     </div>
                   )}
                 </div>
 
-                <div className="stack" style={{ minWidth: 200 }}>
-                  <button className="btn btnPrimary" onClick={() => { setSelectedEmail(r.email); setCreateForm(null); }} disabled={busy}>
-                    Link to contact
+                <div className="stack" style={{ minWidth: 180, flexShrink: 0 }}>
+                  <button
+                    className={`btn ${isLinking ? "" : "btnPrimary"}`}
+                    onClick={() => isLinking ? setSelectedEmail(null) : openLinkPanel(r.email)}
+                    disabled={busy}
+                  >
+                    {isLinking ? "Cancel link" : "Link to contact"}
                   </button>
                   <button
                     className="btn"
@@ -391,11 +329,97 @@ export default function UnmatchedPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Inline link panel */}
+              {isLinking && (
+                <div className="stack" style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>Link to existing contact</div>
+                  <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
+                    <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                      <div className="label">Search contacts</div>
+                      <input
+                        className="input"
+                        value={contactQuery}
+                        onChange={(e) => { setContactQuery(e.target.value); setSelectedContactId(""); searchContacts(e.target.value); }}
+                        placeholder="Search by name"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                      <div className="label">Pick contact</div>
+                      <select className="select" value={selectedContactId} onChange={(e) => setSelectedContactId(e.target.value)}>
+                        <option value="">Select a contact…</option>
+                        {contactResults.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.display_name} • {c.category}{c.tier ? ` • ${c.tier}` : ""}{c.email ? ` • ${c.email}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      onClick={() => linkEmail(r.email, selectedContactId)}
+                      disabled={busy || !selectedContactId}
+                    >
+                      {busy ? "Linking…" : "Link"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Inline create form */}
+              {isCreating && createForm && (
+                <div className="stack" style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>Create new contact</div>
+                  <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end", gap: 10 }}>
+                    <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                      <div className="label">Name</div>
+                      <input
+                        className="input"
+                        value={createForm.name}
+                        onChange={(e) => setCreateForm((f) => f ? { ...f, name: e.target.value } : f)}
+                        placeholder="Full name"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="field" style={{ minWidth: 150 }}>
+                      <div className="label">Category</div>
+                      <select className="select" value={createForm.category} onChange={(e) => setCreateForm((f) => f ? { ...f, category: e.target.value } : f)}>
+                        <option>Agent</option>
+                        <option>Client</option>
+                        <option>Developer</option>
+                        <option>Vendor</option>
+                        <option>Sphere</option>
+                        <option>Other</option>
+                      </select>
+                    </div>
+                    <div className="field" style={{ minWidth: 90 }}>
+                      <div className="label">Tier</div>
+                      <select className="select" value={createForm.tier} onChange={(e) => setCreateForm((f) => f ? { ...f, tier: e.target.value } : f)}>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                      </select>
+                    </div>
+                    <button
+                      className="btn btnPrimary"
+                      onClick={submitCreate}
+                      disabled={busy || !createForm.name.trim()}
+                    >
+                      {busy ? "Creating…" : "Create"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
 
-        {visible.length === 0 && <div className="subtle">Nothing to review 🎉</div>}
+        {visible.length === 0 && (
+          <div className="card cardPad">
+            <div className="subtle">Nothing to review — inbox is clean.</div>
+          </div>
+        )}
       </div>
     </div>
   );
