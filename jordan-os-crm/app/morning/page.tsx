@@ -586,7 +586,8 @@ export default function MorningPage() {
     ];
     for (const { cat, needed } of guaranteedSlots) {
       if (needed <= 0) continue;
-      const pool = scored.filter((c) => (c.category || "").toLowerCase() === cat && !used.has(c.id));
+      // Only guarantee overdue contacts — don't force recently-contacted people in
+      const pool = scored.filter((c) => (c.category || "").toLowerCase() === cat && !used.has(c.id) && c.overdue);
       const already = top.filter((x) => (x.category || "").toLowerCase() === cat).length;
       const picks = pool.slice(0, Math.max(0, needed - already));
       for (const p of picks) {
