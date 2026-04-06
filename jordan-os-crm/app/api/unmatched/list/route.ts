@@ -54,7 +54,7 @@ export async function GET(req: Request) {
       .limit(limit);
 
     if (!includeIgnored) {
-      q = q.not("status", "in", '("ignored","linked","auto_created")');
+      q = q.neq("status", "ignored").neq("status", "linked").neq("status", "auto_created");
     }
     if (cursor) q = q.lt("last_seen_at", cursor);
 
