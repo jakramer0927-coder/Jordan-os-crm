@@ -94,6 +94,14 @@ function weekdaysElapsedToday(now = new Date()): number {
   return day; // Mon=1 … Fri=5
 }
 
+function startOfWeekMondayLocal(now = new Date()): Date {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  d.setDate(d.getDate() - ((day + 6) % 7));
+  return d;
+}
+
 function cadenceDays(category: string, tier: string | null): number {
   const cat = (category || "").toLowerCase();
   const t = (tier || "").toUpperCase();
