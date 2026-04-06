@@ -22,7 +22,21 @@ type Contact = {
   tier: string | null;
   client_type: string | null;
   created_at: string;
-  user_id?: string; // optional in case you add it to selects later
+  user_id?: string;
+  buyer_budget_min: number | null;
+  buyer_budget_max: number | null;
+  buyer_target_areas: string | null;
+};
+
+type Deal = {
+  id: string;
+  address: string;
+  role: string;
+  status: string;
+  price: number | null;
+  close_date: string | null;
+  notes: string | null;
+  created_at: string;
 };
 
 type Touch = {
@@ -209,6 +223,26 @@ export default function ContactDetailPage() {
   const [distributing, setDistributing] = useState(false);
   const [distributeMsg, setDistributeMsg] = useState<string | null>(null);
 
+  // deals
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [dealFormOpen, setDealFormOpen] = useState(false);
+  const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
+  const [dealAddress, setDealAddress] = useState("");
+  const [dealRole, setDealRole] = useState("buyer");
+  const [dealStatus, setDealStatus] = useState("active");
+  const [dealPrice, setDealPrice] = useState("");
+  const [dealCloseDate, setDealCloseDate] = useState("");
+  const [dealNotes, setDealNotes] = useState("");
+  const [dealBusy, setDealBusy] = useState(false);
+  const [dealErr, setDealErr] = useState<string | null>(null);
+
+  // buyer profile
+  const [buyerBudgetMin, setBuyerBudgetMin] = useState("");
+  const [buyerBudgetMax, setBuyerBudgetMax] = useState("");
+  const [buyerAreas, setBuyerAreas] = useState("");
+  const [savingBuyer, setSavingBuyer] = useState(false);
+  const [buyerMsg, setBuyerMsg] = useState<string | null>(null);
+
   const lastOutbound = useMemo(() => {
     const t = touches.find((x) => x.direction === "outbound");
     return t ? new Date(t.occurred_at) : null;
@@ -235,7 +269,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at, user_id")
+      .select("id, display_name, category, tier, client_type, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -254,6 +288,9 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
+    setBuyerBudgetMin(c.buyer_budget_min != null ? String(c.buyer_budget_min) : "");
+    setBuyerBudgetMax(c.buyer_budget_max != null ? String(c.buyer_budget_max) : "");
+    setBuyerAreas(c.buyer_target_areas || "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -275,6 +312,13 @@ export default function ContactDetailPage() {
     if (linksRes.ok) {
       const lj = await linksRes.json().catch(() => ({}));
       setLinkedContacts(lj.links ?? []);
+    }
+
+    // Load deals
+    const dealsRes = await fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`);
+    if (dealsRes.ok) {
+      const dj = await dealsRes.json().catch(() => ({}));
+      setDeals(dj.deals ?? []);
     }
   }
 
@@ -392,6 +436,84 @@ export default function ContactDetailPage() {
     if (!res.ok) { setDistributeMsg(`Error: ${j?.error || "Failed"}`); setDistributeConfirm(false); return; }
     setDistributeMsg(`Done — ${j.touches_copied} touches copied to ${j.distributed_to.join(" & ")}. This contact has been archived.`);
     setDistributeConfirm(false);
+    await fetchAll();
+  }
+
+  function openNewDeal() {
+    setEditingDeal(null);
+    setDealAddress("");
+    setDealRole("buyer");
+    setDealStatus("active");
+    setDealPrice("");
+    setDealCloseDate("");
+    setDealNotes("");
+    setDealErr(null);
+    setDealFormOpen(true);
+  }
+
+  function openEditDeal(d: Deal) {
+    setEditingDeal(d);
+    setDealAddress(d.address);
+    setDealRole(d.role);
+    setDealStatus(d.status);
+    setDealPrice(d.price != null ? String(d.price) : "");
+    setDealCloseDate(d.close_date ?? "");
+    setDealNotes(d.notes ?? "");
+    setDealErr(null);
+    setDealFormOpen(true);
+  }
+
+  async function saveDeal() {
+    if (!uid || !contact) return;
+    if (!dealAddress.trim()) { setDealErr("Address is required."); return; }
+    setDealBusy(true);
+    setDealErr(null);
+    const res = await fetch("/api/contacts/deals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid,
+        contact_id: contact.id,
+        id: editingDeal?.id,
+        address: dealAddress,
+        role: dealRole,
+        status: dealStatus,
+        price: dealPrice ? Number(dealPrice.replace(/[^0-9.]/g, "")) : null,
+        close_date: dealCloseDate || null,
+        notes: dealNotes,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setDealBusy(false);
+    if (!res.ok) { setDealErr(j?.error || "Save failed"); return; }
+    setDealFormOpen(false);
+    await fetchAll();
+  }
+
+  async function deleteDeal(dealId: string) {
+    if (!uid) return;
+    setDealBusy(true);
+    await fetch("/api/contacts/deals", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, id: dealId }),
+    });
+    setDealBusy(false);
+    await fetchAll();
+  }
+
+  async function saveBuyerProfile() {
+    if (!contact || !uid) return;
+    setSavingBuyer(true);
+    setBuyerMsg(null);
+    const { error } = await supabase.from("contacts").update({
+      buyer_budget_min: buyerBudgetMin ? Number(buyerBudgetMin.replace(/[^0-9]/g, "")) : null,
+      buyer_budget_max: buyerBudgetMax ? Number(buyerBudgetMax.replace(/[^0-9]/g, "")) : null,
+      buyer_target_areas: buyerAreas.trim() || null,
+    }).eq("id", contact.id);
+    setSavingBuyer(false);
+    if (error) { setBuyerMsg(`Error: ${error.message}`); return; }
+    setBuyerMsg("Saved.");
     await fetchAll();
   }
 
@@ -656,6 +778,128 @@ export default function ContactDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Properties / Deals */}
+      <div className="card cardPad stack">
+        <div className="rowBetween" style={{ alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Properties & deals</div>
+            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Transactions tied to this contact</div>
+          </div>
+          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => dealFormOpen ? setDealFormOpen(false) : openNewDeal()}>
+            {dealFormOpen && !editingDeal ? "Cancel" : "+ Add deal"}
+          </button>
+        </div>
+
+        {dealErr && <div className="alert alertError" style={{ fontSize: 13 }}>{dealErr}</div>}
+
+        {/* Inline form */}
+        {dealFormOpen && (
+          <div className="stack" style={{ paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)" }}>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>{editingDeal ? "Edit deal" : "New deal"}</div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+              <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                <div className="label">Address</div>
+                <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
+              </div>
+              <div className="field" style={{ minWidth: 130 }}>
+                <div className="label">Role</div>
+                <select className="select" value={dealRole} onChange={e => setDealRole(e.target.value)}>
+                  <option value="buyer">Buyer</option>
+                  <option value="seller">Seller</option>
+                  <option value="landlord">Landlord</option>
+                  <option value="tenant">Tenant</option>
+                </select>
+              </div>
+              <div className="field" style={{ minWidth: 130 }}>
+                <div className="label">Status</div>
+                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value)}>
+                  <option value="active">Active</option>
+                  <option value="pending">Pending</option>
+                  <option value="closed">Closed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Price (optional)</div>
+                <input className="input" value={dealPrice} onChange={e => setDealPrice(e.target.value)} placeholder="1,250,000" />
+              </div>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Close date (optional)</div>
+                <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="field">
+              <div className="label">Notes (optional)</div>
+              <textarea className="textarea" value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="Any notes about this transaction…" style={{ minHeight: 70 }} />
+            </div>
+            <div className="row">
+              <button className="btn btnPrimary" onClick={saveDeal} disabled={dealBusy}>{dealBusy ? "Saving…" : "Save"}</button>
+              <button className="btn" onClick={() => setDealFormOpen(false)} disabled={dealBusy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Deal list */}
+        {deals.length > 0 ? (
+          <div className="stack" style={{ gap: 0 }}>
+            {deals.map((d, i) => (
+              <div key={d.id} style={{ padding: "10px 0", borderBottom: i < deals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
+                    <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
+                      <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
+                      <span className="badge" style={{ textTransform: "capitalize", ...(d.status === "closed" ? { background: "rgba(11,107,42,.1)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)" } : d.status === "cancelled" ? { color: "rgba(18,18,18,.4)" } : {}) }}>{d.status}</span>
+                      {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
+                      {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                    </div>
+                    {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>{d.notes}</div>}
+                  </div>
+                  <div className="row" style={{ flexShrink: 0, gap: 6 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          !dealFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No deals yet — add one above.</div>
+        )}
+      </div>
+
+      {/* Buyer profile — shown for clients */}
+      {(contact.category || "").toLowerCase() === "client" && (
+        <div className="card cardPad stack">
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Buyer profile</div>
+            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Budget and target areas for active buyers</div>
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+            <div className="field" style={{ minWidth: 150 }}>
+              <div className="label">Min budget</div>
+              <input className="input" value={buyerBudgetMin} onChange={e => setBuyerBudgetMin(e.target.value)} placeholder="800,000" />
+            </div>
+            <div className="field" style={{ minWidth: 150 }}>
+              <div className="label">Max budget</div>
+              <input className="input" value={buyerBudgetMax} onChange={e => setBuyerBudgetMax(e.target.value)} placeholder="1,500,000" />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 220 }}>
+              <div className="label">Target areas</div>
+              <input className="input" value={buyerAreas} onChange={e => setBuyerAreas(e.target.value)} placeholder="Silver Lake, Los Feliz, Echo Park" />
+            </div>
+          </div>
+          <div className="row" style={{ alignItems: "center", gap: 12 }}>
+            <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={saveBuyerProfile} disabled={savingBuyer}>
+              {savingBuyer ? "Saving…" : "Save buyer profile"}
+            </button>
+            {buyerMsg && <span style={{ fontSize: 12, color: buyerMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a", fontWeight: 700 }}>{buyerMsg}</span>}
+          </div>
+        </div>
+      )}
 
       {/* Jordan Voice FIRST */}
       <VoiceDraftPanel contactId={contact.id} />
