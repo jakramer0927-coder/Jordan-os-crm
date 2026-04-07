@@ -32,7 +32,6 @@ export async function POST(req: Request) {
   const { error } = await supabaseAdmin
     .from("unmatched_recipients")
     .update({ status: "linked", created_contact_id: contactId, last_seen_at: new Date().toISOString() })
-    .eq("user_id", uid)
     .eq("email", email);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

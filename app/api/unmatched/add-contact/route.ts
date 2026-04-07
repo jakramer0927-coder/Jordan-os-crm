@@ -112,7 +112,6 @@ export async function POST(req: Request) {
         status: "auto_created",
         created_contact_id: contactId,
       })
-      .eq("user_id", uid)
       .eq("email", email);
 
     if (upErr) {
