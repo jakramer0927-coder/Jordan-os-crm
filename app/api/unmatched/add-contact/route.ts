@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -18,15 +18,6 @@ function displayFromEmail(email: string): string {
   const words = cleaned.split(" ").filter(Boolean);
   const titled = words.map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w));
   return titled.join(" ") || email;
-}
-
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
-  };
 }
 
 type Body = {
@@ -125,8 +116,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, contact_id: contactId, display_name });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("UNMATCHED_ADD_CONTACT_CRASH", se);
-    return NextResponse.json({ error: "Add contact crashed", details: se }, { status: 500 });
+    return serverError("UNMATCHED_ADD_CONTACT_CRASH", e);
   }
 }

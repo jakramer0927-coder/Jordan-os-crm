@@ -44,3 +44,29 @@ export async function getVerifiedUid(): Promise<string | null> {
 export function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
+
+/**
+ * Returns a safe 500 response.
+ * In production, never exposes stack traces or internal details to the client.
+ * In development, includes full error details for debugging.
+ */
+export function serverError(label: string, e: unknown) {
+  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
+  const message = String(anyE?.message || e || "Unknown error");
+  console.error(`[${label}]`, message, anyE?.stack ?? "");
+
+  if (process.env.NODE_ENV !== "production") {
+    return NextResponse.json(
+      {
+        error: message,
+        details: {
+          name: String(anyE?.name || ""),
+          stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
+        },
+      },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
+}

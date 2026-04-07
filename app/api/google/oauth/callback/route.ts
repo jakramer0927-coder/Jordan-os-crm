@@ -17,13 +17,21 @@ export async function GET(req: Request) {
 
   const { data: st, error: stErr } = await supabaseAdmin
     .from("google_oauth_states")
-    .select("user_id")
+    .select("user_id, expires_at")
     .eq("state", state)
     .single();
 
   if (stErr || !st?.user_id) {
     return NextResponse.redirect(
       `${process.env.APP_BASE_URL}/settings/integrations?error=bad_state`,
+    );
+  }
+
+  // Reject expired state tokens
+  if (st.expires_at && new Date(st.expires_at) < new Date()) {
+    await supabaseAdmin.from("google_oauth_states").delete().eq("state", state);
+    return NextResponse.redirect(
+      `${process.env.APP_BASE_URL}/settings/integrations?error=state_expired`,
     );
   }
 

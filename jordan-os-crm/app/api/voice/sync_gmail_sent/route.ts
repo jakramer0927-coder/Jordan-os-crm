@@ -3,7 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -11,14 +11,6 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
-  };
-}
 
 function headerValue(
   headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
@@ -222,8 +214,6 @@ export async function POST(req: Request) {
       note: "Inserted email voice examples from Gmail Sent.",
     });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("VOICE_SYNC_GMAIL_CRASH", se);
-    return NextResponse.json({ error: "Voice sync crashed", details: se }, { status: 500 });
+    return serverError("VOICE_SYNC_GMAIL_CRASH", e);
   }
 }

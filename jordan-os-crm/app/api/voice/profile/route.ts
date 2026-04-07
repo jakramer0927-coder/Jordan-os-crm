@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -8,14 +8,6 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 10).join("\n") : "",
-  };
-}
 
 function normalizeWhitespace(s: string) {
   return s.replace(/\s+/g, " ").trim();
@@ -229,7 +221,6 @@ export async function GET(req: Request) {
       note: "This endpoint builds a simple voice profile from user_voice_examples. Keep adding examples over time to tighten the style.",
     });
   } catch (e) {
-    const se = safeErr(e);
-    return NextResponse.json({ error: "Voice profile crashed", details: se }, { status: 500 });
+    return serverError("VOICE_PROFILE_CRASH", e);
   }
 }

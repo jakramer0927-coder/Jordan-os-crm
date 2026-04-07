@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -8,14 +8,6 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 10).join("\n") : "",
-  };
-}
 
 export async function POST(req: Request) {
   try {
@@ -123,8 +115,6 @@ Provide 3-5 improvements. Be specific — reference actual patterns from the ema
       coaching,
     });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("VOICE_COACH_CRASH", se);
-    return NextResponse.json({ error: "Voice coach crashed", details: se }, { status: 500 });
+    return serverError("VOICE_COACH_CRASH", e);
   }
 }

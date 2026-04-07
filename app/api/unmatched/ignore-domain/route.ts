@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -10,15 +10,6 @@ function isUuid(v: string): boolean {
 
 function normDomain(s: string): string {
   return (s || "").toLowerCase().trim().replace(/^@/, "");
-}
-
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
-  };
 }
 
 type Body = {
@@ -50,8 +41,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, domain, updated: (data ?? []).length });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("UNMATCHED_IGNORE_DOMAIN_CRASH", se);
-    return NextResponse.json({ error: "Ignore domain crashed", details: se }, { status: 500 });
+    return serverError("UNMATCHED_IGNORE_DOMAIN_CRASH", e);
   }
 }

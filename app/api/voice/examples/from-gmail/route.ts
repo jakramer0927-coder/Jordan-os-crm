@@ -4,7 +4,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -20,14 +20,6 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 14).join("\n") : "",
-  };
-}
 
 function parseIntOr(v: string | null, fallback: number) {
   const n = Number(v);
@@ -343,16 +335,6 @@ export async function POST(req: Request) {
       note: "Stores subject+snippet as initial voice examples. Channel is always 'email' to satisfy NOT NULL.",
     });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("VOICE_FROM_GMAIL_CRASH", se);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Voice examples import crashed",
-        details: se,
-        details_message: se.message,
-      },
-      { status: 500 },
-    );
+    return serverError("VOICE_FROM_GMAIL_CRASH", e);
   }
 }

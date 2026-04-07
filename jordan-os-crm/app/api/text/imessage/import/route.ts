@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -8,14 +8,6 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function safeErr(e: unknown) {
-  const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
-  return {
-    message: String(anyE?.message || e || "Unknown error"),
-    name: String(anyE?.name || ""),
-    stack: typeof anyE?.stack === "string" ? anyE.stack.split("\n").slice(0, 12).join("\n") : "",
-  };
-}
 
 type Body = {
   contact_id?: string | null;
@@ -171,8 +163,6 @@ export async function POST(req: Request) {
       note: "sender normalized to satisfy DB constraint; original sender preserved in body prefix.",
     });
   } catch (e) {
-    const se = safeErr(e);
-    console.error("IMESSAGE_IMPORT_CRASH", se);
-    return NextResponse.json({ error: "iMessage import crashed", details: se }, { status: 500 });
+    return serverError("IMESSAGE_IMPORT_CRASH", e);
   }
 }
