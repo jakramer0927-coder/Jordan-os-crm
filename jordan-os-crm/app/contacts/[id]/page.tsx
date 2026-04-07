@@ -26,6 +26,8 @@ type Contact = {
   buyer_budget_min: number | null;
   buyer_budget_max: number | null;
   buyer_target_areas: string | null;
+  ai_context: string | null;
+  ai_context_updated_at: string | null;
 };
 
 type Deal = {
@@ -236,6 +238,12 @@ export default function ContactDetailPage() {
   const [dealBusy, setDealBusy] = useState(false);
   const [dealErr, setDealErr] = useState<string | null>(null);
 
+  // AI insights
+  const [aiContext, setAiContext] = useState<string | null>(null);
+  const [aiContextUpdatedAt, setAiContextUpdatedAt] = useState<string | null>(null);
+  const [extractingContext, setExtractingContext] = useState(false);
+  const [extractContextMsg, setExtractContextMsg] = useState<string | null>(null);
+
   // buyer profile
   const [buyerBudgetMin, setBuyerBudgetMin] = useState("");
   const [buyerBudgetMax, setBuyerBudgetMax] = useState("");
@@ -269,7 +277,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas")
+      .select("id, display_name, category, tier, client_type, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -291,6 +299,8 @@ export default function ContactDetailPage() {
     setBuyerBudgetMin(c.buyer_budget_min != null ? String(c.buyer_budget_min) : "");
     setBuyerBudgetMax(c.buyer_budget_max != null ? String(c.buyer_budget_max) : "");
     setBuyerAreas(c.buyer_target_areas || "");
+    setAiContext(c.ai_context ?? null);
+    setAiContextUpdatedAt(c.ai_context_updated_at ?? null);
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -544,6 +554,31 @@ export default function ContactDetailPage() {
     } catch (e: any) {
       setError(e?.message || "Delete failed");
       setDeleting(false);
+    }
+  }
+
+  async function extractContext() {
+    if (!contact) return;
+    setExtractingContext(true);
+    setExtractContextMsg(null);
+    try {
+      const res = await fetch("/api/contacts/extract_context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contact.id }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setExtractContextMsg(`Error: ${j?.error || "Extraction failed"}`);
+      } else {
+        setAiContext(j.ai_context ?? null);
+        setAiContextUpdatedAt(new Date().toISOString());
+        setExtractContextMsg(null);
+      }
+    } catch (e: any) {
+      setExtractContextMsg(`Error: ${e?.message || "Extraction failed"}`);
+    } finally {
+      setExtractingContext(false);
     }
   }
 
@@ -912,6 +947,42 @@ export default function ContactDetailPage() {
         </div>
         );
       })()}
+
+      {/* AI Insights */}
+      <div className="card cardPad stack">
+        <div className="rowBetween" style={{ alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>AI insights</div>
+            {aiContextUpdatedAt && (
+              <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+                Last extracted {new Date(aiContextUpdatedAt).toLocaleDateString()}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            style={{ fontSize: 12, padding: "2px 10px" }}
+            onClick={extractContext}
+            disabled={extractingContext}
+          >
+            {extractingContext ? "Extracting…" : aiContext ? "Re-extract" : "Extract"}
+          </button>
+        </div>
+
+        {extractContextMsg && (
+          <div className={`alert ${extractContextMsg.startsWith("Error") ? "alertError" : "alertOk"}`} style={{ fontSize: 13 }}>
+            {extractContextMsg}
+          </div>
+        )}
+
+        {aiContext ? (
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.6 }}>{aiContext}</div>
+        ) : (
+          <div className="subtle" style={{ fontSize: 13 }}>
+            No AI context yet. Import text threads or add touch summaries, then click Extract to generate relationship intelligence.
+          </div>
+        )}
+      </div>
 
       {/* Jordan Voice FIRST */}
       <VoiceDraftPanel contactId={contact.id} />
