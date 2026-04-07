@@ -936,10 +936,7 @@ export default function MorningPage() {
                     ✓ Logged today
                   </div>
                 )}
-                <div
-                  className="row"
-                  style={{ justifyContent: "space-between", alignItems: "flex-start" }}
-                >
+                <div className="recCardLayout">
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div
                       className="row"
@@ -992,7 +989,7 @@ export default function MorningPage() {
                     </div>
                   </div>
 
-                  <div style={{ width: 280, display: "grid", gap: 10 }}>
+                  <div className="recCardActions">
                     <a className="btn" href={`/contacts/${c.id}`}>
                       Open contact
                     </a>
