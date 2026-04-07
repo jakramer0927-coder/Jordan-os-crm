@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -7,14 +8,16 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-// GET /api/contacts/deals?contact_id=&uid=
+// GET /api/contacts/deals?contact_id=
 export async function GET(req: Request) {
+  const uid = await getVerifiedUid();
+  if (!uid) return unauthorized();
+
   const url = new URL(req.url);
   const contact_id = url.searchParams.get("contact_id") || "";
-  const uid = url.searchParams.get("uid") || "";
 
-  if (!isUuid(contact_id) || !isUuid(uid))
-    return NextResponse.json({ error: "Invalid params" }, { status: 400 });
+  if (!isUuid(contact_id))
+    return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
   const { data, error } = await supabaseAdmin
     .from("deals")
@@ -29,11 +32,14 @@ export async function GET(req: Request) {
 
 // POST /api/contacts/deals — create or update
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const { uid, contact_id, id, address, role, status, price, close_date, notes } = body;
+  const uid = await getVerifiedUid();
+  if (!uid) return unauthorized();
 
-  if (!isUuid(uid) || !isUuid(contact_id))
-    return NextResponse.json({ error: "Invalid uid or contact_id" }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const { contact_id, id, address, role, status, price, close_date, notes } = body;
+
+  if (!isUuid(contact_id))
+    return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
   if (!address?.trim())
     return NextResponse.json({ error: "Address is required" }, { status: 400 });
 
@@ -71,11 +77,14 @@ export async function POST(req: Request) {
 
 // DELETE /api/contacts/deals
 export async function DELETE(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const { uid, id } = body;
+  const uid = await getVerifiedUid();
+  if (!uid) return unauthorized();
 
-  if (!isUuid(uid) || !isUuid(id))
-    return NextResponse.json({ error: "Invalid params" }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const { id } = body;
+
+  if (!isUuid(id))
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   const { error } = await supabaseAdmin
     .from("deals")

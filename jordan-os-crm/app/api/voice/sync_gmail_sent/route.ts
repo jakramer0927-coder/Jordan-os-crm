@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -93,9 +94,8 @@ type GoogleTokenRow = {
 
 export async function POST(req: Request) {
   try {
-    const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
     const body = await req.json().catch(() => ({}) as any);
     const days = typeof body?.days === "number" ? Math.max(7, Math.min(3650, body.days)) : 365;

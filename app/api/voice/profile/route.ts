@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -95,10 +96,10 @@ function buildVoiceRules(stats: {
 
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
+    const url = new URL(req.url);
     const limit = Math.max(10, Math.min(200, Number(url.searchParams.get("limit") || 80)));
     const minLen = Math.max(0, Math.min(400, Number(url.searchParams.get("minLen") || 140)));
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -14,9 +15,10 @@ function safeStr(v: unknown, max = 8000): string {
 
 export async function POST(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const body = await req.json();
-    const uid = safeStr(body?.uid, 100);
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     const contact_id = body?.contact_id ? safeStr(body.contact_id, 100) : null;
     if (contact_id && !isUuid(contact_id))

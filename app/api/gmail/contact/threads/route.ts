@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -21,11 +22,12 @@ function headerValue(
 
 export async function GET(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
     const email = (url.searchParams.get("email") || "").toLowerCase().trim();
 
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
 
     const { data: tok } = await supabaseAdmin

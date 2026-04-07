@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -27,21 +28,30 @@ function safeEmailFromHeader(v?: string): string | null {
 
 export async function POST(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const body = (await req.json()) as {
-      uid?: string;
       contactId?: string;
       email?: string;
       maxThreads?: number;
     };
-    const uid = body.uid || "";
     const contactId = body.contactId || "";
     const email = (body.email || "").toLowerCase().trim();
     const maxThreads = Math.min(Math.max(Number(body.maxThreads || 5), 1), 10);
 
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (!isUuid(contactId))
       return NextResponse.json({ error: "Invalid contactId" }, { status: 400 });
     if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
+
+    // Verify contact belongs to this user
+    const { data: owned } = await supabaseAdmin
+      .from("contacts")
+      .select("id")
+      .eq("id", contactId)
+      .eq("user_id", uid)
+      .single();
+    if (!owned) return NextResponse.json({ error: "Contact not found" }, { status: 404 });
 
     const { data: tok } = await supabaseAdmin
       .from("google_tokens")

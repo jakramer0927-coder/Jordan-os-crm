@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -97,9 +98,10 @@ type ContactEmailRow = {
 
 export async function GET(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     const { data: tok, error: tokErr } = await supabaseAdmin
       .from("google_tokens")
@@ -172,11 +174,23 @@ export async function GET(req: Request) {
       );
     }
 
-    // Load contact emails
-    const { data: ce, error: ceErr } = await supabaseAdmin
-      .from("contact_emails")
-      .select("contact_id, email")
-      .limit(50000);
+    // Load contact emails scoped to this user's contacts
+    const { data: userContacts, error: ucErr } = await supabaseAdmin
+      .from("contacts")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("archived", false);
+
+    if (ucErr) return NextResponse.json({ error: ucErr.message }, { status: 500 });
+
+    const userContactIds = (userContacts ?? []).map((c: any) => c.id as string);
+
+    const { data: ce, error: ceErr } = userContactIds.length > 0
+      ? await supabaseAdmin
+          .from("contact_emails")
+          .select("contact_id, email")
+          .in("contact_id", userContactIds)
+      : { data: [], error: null };
 
     if (ceErr) return NextResponse.json({ error: ceErr.message }, { status: 500 });
 
@@ -381,10 +395,11 @@ export async function GET(req: Request) {
       const now = new Date().toISOString();
       const allEmails = Array.from(unmatchedCounts.keys());
 
-      // Fetch which emails already exist
+      // Fetch which emails already exist for this user
       const { data: existing, error: fetchErr } = await supabaseAdmin
         .from("unmatched_recipients")
         .select("id, email")
+        .eq("user_id", uid)
         .in("email", allEmails);
 
       if (fetchErr) {
@@ -397,6 +412,7 @@ export async function GET(req: Request) {
           .map((email) => {
             const meta = unmatchedMeta.get(email);
             return {
+              user_id: uid,
               email,
               first_seen_at: now,
               last_seen_at: now,
@@ -432,6 +448,7 @@ export async function GET(req: Request) {
               last_snippet: meta?.snippet ?? null,
               last_thread_link: meta?.threadLink ?? null,
             })
+            .eq("user_id", uid)
             .eq("email", email);
           if (updErr) console.error("UNMATCHED_UPDATE_ERROR", email, updErr.message);
         }

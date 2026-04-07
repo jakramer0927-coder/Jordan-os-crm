@@ -3,6 +3,7 @@ import { parse } from "csv-parse/sync";
 import { google } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -199,9 +200,8 @@ async function insertContactEmail(contactId: string, email: string, isPrimary: b
 
 export async function POST(req: Request) {
   try {
-    const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
     const form = await req.formData();
     const file = form.get("file");
@@ -305,10 +305,11 @@ export async function POST(req: Request) {
         .filter(Boolean)
         .join("\n");
 
-      // Find existing contact by name+category
+      // Find existing contact by name+category, scoped to this user
       const { data: existing } = await supabaseAdmin
         .from("contacts")
         .select("id, notes")
+        .eq("user_id", uid)
         .ilike("display_name", fullName)
         .ilike("category", category)
         .maybeSingle();

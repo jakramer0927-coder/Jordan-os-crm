@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -29,21 +30,21 @@ function safeErr(e: unknown) {
 }
 
 type Body = {
-  uid: string;
   email: string;
-  display_name?: string | null; // optional override from form
+  display_name?: string | null;
   category?: string;
   tier?: string | null;
 };
 
 export async function POST(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const body = (await req.json()) as Body;
 
-    const uid = body?.uid || "";
     const email = normEmail(body?.email || "");
 
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (!email || !email.includes("@"))
       return NextResponse.json({ error: "Invalid email" }, { status: 400 });
 
@@ -112,6 +113,7 @@ export async function POST(req: Request) {
         status: "auto_created",
         created_contact_id: contactId,
       })
+      .eq("user_id", uid)
       .eq("email", email);
 
     if (upErr) {

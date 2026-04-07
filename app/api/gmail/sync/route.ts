@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -34,6 +35,42 @@ function headerValue(
   return found?.value || undefined;
 }
 
+// Domains that generate transactional/automated email — never useful as unmatched contacts
+const BUILTIN_IGNORE_DOMAINS = new Set([
+  // Brokerages
+  "compass.com", "elliman.com", "douglaselliman.com", "sothebysrealty.com",
+  "corcoran.com", "kwrealty.com", "kw.com", "coldwellbanker.com", "bhhs.com",
+  "berkshirehathawayhs.com", "theagencyre.com", "century21.com", "remax.com",
+  "remaxrealty.com", "christiesrealestate.com", "halstead.com", "brownharrisstevens.com",
+  "windermere.com", "longandfoster.com", "betterhomesandgardens.com",
+  // Automated / transactional
+  "notifications.google.com", "accounts.google.com", "mail.google.com",
+  "docusign.net", "docusign.com", "echosign.com", "hellosign.com",
+  "dropbox.com", "box.com", "zoom.us", "calendly.com",
+  "noreply.github.com", "mailchimp.com", "constantcontact.com",
+  "sendgrid.net", "amazonses.com", "mailgun.org",
+]);
+
+// Local-part patterns that indicate automated/no-reply senders
+const NOREPLY_PATTERNS = [
+  "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+  "notifications", "notification", "newsletter", "mailer", "bounce", "bounces",
+  "automated", "automailer", "auto-reply", "autoreply",
+  "support", "helpdesk", "help", "info", "hello", "team", "admin",
+  "billing", "invoices", "receipts", "updates", "alerts",
+];
+
+function shouldIgnoreForUnmatched(email: string): boolean {
+  const [local, domain] = email.toLowerCase().split("@");
+  if (!local || !domain) return true;
+  if (BUILTIN_IGNORE_DOMAINS.has(domain)) return true;
+  // Domain contains known brokerage/automated keywords
+  if (/realt(y|or)|brokerage|mls|escrow|titleco|titlecompany/.test(domain)) return true;
+  // Local part matches no-reply patterns
+  if (NOREPLY_PATTERNS.some((p) => local === p || local.startsWith(p + "-") || local.startsWith(p + "_") || local.startsWith(p + "+"))) return true;
+  return false;
+}
+
 function splitCsv(v: string | null | undefined): string[] {
   return (v || "")
     .split(",")
@@ -51,6 +88,7 @@ type UserSettingsRow = {
   gmail_label_names: string | null;
   gmail_ignore_domains: string | null;
   gmail_ignore_emails: string | null;
+  last_gmail_sync_at: string | null;
 };
 
 type ContactEmailRow = {
@@ -60,9 +98,10 @@ type ContactEmailRow = {
 
 export async function GET(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     const { data: tok, error: tokErr } = await supabaseAdmin
       .from("google_tokens")
@@ -83,7 +122,7 @@ export async function GET(req: Request) {
 
     const { data: settings, error: setErr } = await supabaseAdmin
       .from("user_settings")
-      .select("gmail_label_names, gmail_ignore_domains, gmail_ignore_emails")
+      .select("gmail_label_names, gmail_ignore_domains, gmail_ignore_emails, last_gmail_sync_at")
       .eq("user_id", uid)
       .maybeSingle();
 
@@ -135,11 +174,23 @@ export async function GET(req: Request) {
       );
     }
 
-    // Load contact emails
-    const { data: ce, error: ceErr } = await supabaseAdmin
-      .from("contact_emails")
-      .select("contact_id, email")
-      .limit(50000);
+    // Load contact emails scoped to this user's contacts
+    const { data: userContacts, error: ucErr } = await supabaseAdmin
+      .from("contacts")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("archived", false);
+
+    if (ucErr) return NextResponse.json({ error: ucErr.message }, { status: 500 });
+
+    const userContactIds = (userContacts ?? []).map((c: any) => c.id as string);
+
+    const { data: ce, error: ceErr } = userContactIds.length > 0
+      ? await supabaseAdmin
+          .from("contact_emails")
+          .select("contact_id, email")
+          .in("contact_id", userContactIds)
+      : { data: [], error: null };
 
     if (ceErr) return NextResponse.json({ error: ceErr.message }, { status: 500 });
 
@@ -163,16 +214,33 @@ export async function GET(req: Request) {
     let ignoredByEmail = 0;
 
     const unmatchedCounts = new Map<string, number>();
+    const unmatchedMeta = new Map<string, { subject: string | null; snippet: string | null; threadLink: string | null }>();
     const uniqueRecipients = new Set<string>();
 
+    // Incremental sync: only fetch messages newer than last sync
+    // Pass ?reset=true to clear the cursor and re-process the full 90-day window
+    const resetSync = url.searchParams.get("reset") === "true";
+    if (resetSync) {
+      await supabaseAdmin
+        .from("user_settings")
+        .upsert({ user_id: uid, last_gmail_sync_at: null }, { onConflict: "user_id" });
+    }
+    const lastSyncAt = resetSync ? null : (sRow?.last_gmail_sync_at ?? null);
+    const afterDate = lastSyncAt
+      ? new Date(lastSyncAt)
+      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); // first sync: last 90 days
+    const afterStr = `${afterDate.getFullYear()}/${afterDate.getMonth() + 1}/${afterDate.getDate()}`;
+
     let pageToken: string | undefined = undefined;
-    const maxMessages = 400;
+    const maxMessages = 500;
+    const BATCH = 10; // parallel fetches per round
 
     while (messagesFetched < maxMessages) {
       const listRes: gmail_v1.Schema$ListMessagesResponse = (
         await gmail.users.messages.list({
           userId: "me",
-          labelIds: ["SENT"], // SENT only; label filter happens in query-like logic below
+          labelIds: ["SENT"],
+          q: `after:${afterStr}`,
           maxResults: Math.min(100, maxMessages - messagesFetched),
           pageToken,
         })
@@ -182,26 +250,26 @@ export async function GET(req: Request) {
       pageToken = listRes.nextPageToken ?? undefined;
 
       if (msgs.length === 0) break;
-
-      // We fetched N message IDs
       messagesFetched += msgs.length;
 
-      for (const m of msgs) {
-        if (!m.id) continue;
+      // Fetch metadata in parallel batches of BATCH
+      for (let i = 0; i < msgs.length; i += BATCH) {
+        const batch = msgs.slice(i, i + BATCH).filter((m) => !!m.id);
+        const fulls = await Promise.all(
+          batch.map((m) =>
+            gmail.users.messages.get({
+              userId: "me",
+              id: m.id!,
+              format: "metadata",
+              metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
+            })
+          )
+        );
 
-        const full = await gmail.users.messages.get({
-          userId: "me",
-          id: m.id,
-          format: "metadata",
-          metadataHeaders: ["To", "Cc", "Bcc", "Subject", "Date"],
-        });
+      for (const full of fulls) {
 
-        // Require the configured labels on the message (server-side)
         const msgLabelIds = full.data.labelIds ?? [];
         const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
-        if (!hasAnyConfiguredLabel) {
-          continue;
-        }
 
         messagesParsed += 1;
 
@@ -244,11 +312,22 @@ export async function GET(req: Request) {
 
         const matchedEmail = allRecipients.find((e) => contactIdByEmail.has(e));
         if (!matchedEmail) {
+          // Track unmatched for ALL sent messages, regardless of label
           unmatched += 1;
-          // Count all recipients as potential unmatched candidates
+          const threadId = full.data.threadId || "";
+          const threadLink = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
           for (const e of allRecipients) {
+            if (shouldIgnoreForUnmatched(e)) continue;
             unmatchedCounts.set(e, (unmatchedCounts.get(e) || 0) + 1);
+            if (!unmatchedMeta.has(e)) {
+              unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
+            }
           }
+          continue;
+        }
+
+        // Only create touches for messages with the configured label
+        if (!hasAnyConfiguredLabel) {
           continue;
         }
 
@@ -265,7 +344,7 @@ export async function GET(req: Request) {
           ? `https://mail.google.com/mail/u/0/#all/${threadId}`
           : null;
 
-        const messageId = m.id;
+        const messageId = full.data.id ?? "";
         const summary = (snippet || subject).trim() || null;
 
         // Dedupe by messageId
@@ -304,10 +383,82 @@ export async function GET(req: Request) {
         }
 
         imported += 1;
-      }
+      } // end for (full of fulls)
+      } // end batch loop
 
       if (!pageToken) break;
     }
+
+    // Persist unmatched emails to unmatched_recipients table
+    let unmatchedSaveError: string | null = null;
+    if (unmatchedCounts.size > 0) {
+      const now = new Date().toISOString();
+      const allEmails = Array.from(unmatchedCounts.keys());
+
+      // Fetch which emails already exist for this user
+      const { data: existing, error: fetchErr } = await supabaseAdmin
+        .from("unmatched_recipients")
+        .select("id, email")
+        .eq("user_id", uid)
+        .in("email", allEmails);
+
+      if (fetchErr) {
+        unmatchedSaveError = fetchErr.message;
+      } else {
+        const existingEmailSet = new Set((existing ?? []).map((r: any) => r.email as string));
+
+        const toInsert = allEmails
+          .filter((e) => !existingEmailSet.has(e))
+          .map((email) => {
+            const meta = unmatchedMeta.get(email);
+            return {
+              user_id: uid,
+              email,
+              first_seen_at: now,
+              last_seen_at: now,
+              seen_count: unmatchedCounts.get(email) ?? 1,
+              last_subject: meta?.subject ?? null,
+              last_snippet: meta?.snippet ?? null,
+              last_thread_link: meta?.threadLink ?? null,
+              status: "new",
+            };
+          });
+
+        const toUpdate = allEmails.filter((e) => existingEmailSet.has(e));
+
+        // Insert new rows
+        if (toInsert.length > 0) {
+          for (let i = 0; i < toInsert.length; i += 50) {
+            const { error: insErr } = await supabaseAdmin
+              .from("unmatched_recipients")
+              .insert(toInsert.slice(i, i + 50));
+            if (insErr) { unmatchedSaveError = insErr.message; console.error("UNMATCHED_INSERT_ERROR", insErr); }
+          }
+        }
+
+        // Update existing rows (bump seen_count + refresh meta)
+        for (const email of toUpdate) {
+          const meta = unmatchedMeta.get(email);
+          const { error: updErr } = await supabaseAdmin
+            .from("unmatched_recipients")
+            .update({
+              last_seen_at: now,
+              seen_count: unmatchedCounts.get(email) ?? 1,
+              last_subject: meta?.subject ?? null,
+              last_snippet: meta?.snippet ?? null,
+              last_thread_link: meta?.threadLink ?? null,
+            })
+            .eq("user_id", uid)
+            .eq("email", email);
+          if (updErr) console.error("UNMATCHED_UPDATE_ERROR", email, updErr.message);
+        }
+      }
+    }
+
+    // Save sync timestamp for incremental sync next run
+    await supabaseAdmin
+      .from("user_settings")
+      .upsert({ user_id: uid, last_gmail_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
 
     const topUnmatchedRecipients = Array.from(unmatchedCounts.entries())
       .map(([email, count]) => ({ email, count }))
@@ -318,6 +469,8 @@ export async function GET(req: Request) {
       imported,
       skipped,
       unmatched,
+      unmatchedEmailsQueued: unmatchedCounts.size,
+      unmatchedSaveError,
       messagesFetched,
       messagesParsed,
       matchedRecipients,

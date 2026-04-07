@@ -1,6 +1,7 @@
 // app/api/voice/draft/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,6 @@ function safeErr(e: unknown) {
 }
 
 type Body = {
-    uid: string;
     contact_id: string;
 
     // what you want to send
@@ -95,9 +95,11 @@ async function openaiDraft(args: {
 
 export async function POST(req: Request) {
     try {
+        const uid = await getVerifiedUid();
+        if (!uid) return unauthorized();
+
         const body = (await req.json()) as Body;
 
-        const uid = body?.uid || "";
         const contactId = body?.contact_id || "";
         const channel = body?.channel || "text";
         const intent = body?.intent || "other";
@@ -109,7 +111,6 @@ export async function POST(req: Request) {
         const includeQuestion = body?.include_question ?? true;
         const includeSignature = body?.include_signature ?? (channel === "email");
 
-        if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
         if (!isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
         // 1) Contact

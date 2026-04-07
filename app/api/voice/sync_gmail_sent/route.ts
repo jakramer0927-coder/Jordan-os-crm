@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -48,20 +49,41 @@ function extractTextFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
   const plain = parts.find(
     (p) => (p.mimeType || "").toLowerCase() === "text/plain" && p.body?.data,
   );
-  if (plain?.body?.data) return b64urlToUtf8(plain.body.data);
+  if (plain?.body?.data) return stripQuotedText(b64urlToUtf8(plain.body.data));
 
   const html = parts.find((p) => (p.mimeType || "").toLowerCase() === "text/html" && p.body?.data);
   if (html?.body?.data) {
     const raw = b64urlToUtf8(html.body.data);
-    return raw
+    const stripped = raw
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<blockquote[\s\S]*?<\/blockquote>/gi, "") // strip quoted blocks
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+    return stripQuotedText(stripped);
   }
 
   return "";
+}
+
+// Remove quoted/forwarded text so only Jordan's original words are captured
+function stripQuotedText(text: string): string {
+  const lines = text.split("\n");
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Common markers for where quoted content begins
+    if (trimmed.startsWith(">")) break;
+    if (/^On .{10,} wrote:$/i.test(trimmed)) break;
+    if (/^-{4,}\s*(Original|Forwarded)\s+Message/i.test(trimmed)) break;
+    if (/^From:\s+\S+@\S+/.test(trimmed) && result.length > 4) break;
+    if (/^Sent:\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(trimmed) && result.length > 4) break;
+    result.push(line);
+  }
+
+  return result.join("\n").trim();
 }
 
 type GoogleTokenRow = {
@@ -70,15 +92,10 @@ type GoogleTokenRow = {
   expiry_date: number | null;
 };
 
-type UserSettingsRow = {
-  gmail_label_names: string | null;
-};
-
 export async function POST(req: Request) {
   try {
-    const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
     const body = await req.json().catch(() => ({}) as any);
     const days = typeof body?.days === "number" ? Math.max(7, Math.min(3650, body.days)) : 365;
@@ -101,20 +118,6 @@ export async function POST(req: Request) {
         { status: 400 },
       );
 
-    const { data: settings, error: setErr } = await supabaseAdmin
-      .from("user_settings")
-      .select("gmail_label_names")
-      .eq("user_id", uid)
-      .maybeSingle();
-
-    if (setErr) return NextResponse.json({ error: setErr.message }, { status: 500 });
-
-    const sRow = settings as UserSettingsRow | null;
-    const labelNames = (sRow?.gmail_label_names || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
       access_token: tokenRow.access_token ?? undefined,
@@ -124,21 +127,16 @@ export async function POST(req: Request) {
 
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
 
-    // Optional label filtering (if configured)
-    let labelIds: string[] = [];
-    if (labelNames.length > 0) {
-      const labelsRes = await gmail.users.labels.list({ userId: "me" });
-      const labels = labelsRes.data.labels ?? [];
-      const labelIdByName = new Map<string, string>();
-      labels.forEach((l: gmail_v1.Schema$Label) => {
-        if (l.name && l.id) labelIdByName.set(l.name, l.id);
-      });
+    // Load all already-synced message IDs upfront to avoid per-message DB calls
+    const { data: existingRows } = await supabaseAdmin
+      .from("user_voice_examples")
+      .select("source_message_id")
+      .eq("user_id", uid)
+      .not("source_message_id", "is", null)
+      .limit(5000);
+    const existingIds = new Set((existingRows ?? []).map((r: any) => r.source_message_id as string));
 
-      labelIds = labelNames
-        .map((n) => labelIdByName.get(n))
-        .filter((x: string | undefined): x is string => typeof x === "string" && x.length > 0);
-    }
-
+    // Search ALL sent emails — no label filter. Voice training needs the full picture.
     const q = `in:sent from:me newer_than:${days}d`;
 
     let scanned = 0;
@@ -147,13 +145,11 @@ export async function POST(req: Request) {
     let pageToken: string | undefined = undefined;
 
     while (scanned < maxMessages) {
-      // ✅ Key fix: type the awaited response, then take `.data` into a typed variable.
       const listCall = await gmail.users.messages.list({
         userId: "me",
         q,
         maxResults: Math.min(100, maxMessages - scanned),
         pageToken,
-        ...(labelIds.length > 0 ? { labelIds } : {}),
       });
 
       const listData: gmail_v1.Schema$ListMessagesResponse = listCall.data;
@@ -186,13 +182,16 @@ export async function POST(req: Request) {
           .trim()
           .slice(0, 4000);
 
-        if (!text) {
+        if (!text || text.length < 40) {
           skipped += 1;
           continue;
         }
 
         const threadId = fullData.threadId || "";
         const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
+
+        // Skip duplicates (checked against upfront-loaded set)
+        if (existingIds.has(m.id)) { skipped += 1; continue; }
 
         const { error: insErr } = await supabaseAdmin.from("user_voice_examples").insert({
           user_id: uid,
@@ -220,8 +219,6 @@ export async function POST(req: Request) {
       days,
       maxMessages,
       usedQuery: q,
-      usedLabelNames: labelNames,
-      usedLabelIds: labelIds,
       note: "Inserted email voice examples from Gmail Sent.",
     });
   } catch (e) {

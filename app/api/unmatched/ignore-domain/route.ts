@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -21,29 +22,27 @@ function safeErr(e: unknown) {
 }
 
 type Body = {
-  uid: string; // kept for API consistency + future multi-tenant
   domain: string; // e.g. "smithandberg.com"
 };
 
 export async function POST(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const body = (await req.json()) as Body;
-    const uid = body?.uid || "";
     const domain = normDomain(body?.domain || "");
 
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (!domain || !domain.includes("."))
       return NextResponse.json({ error: "Invalid domain" }, { status: 400 });
 
     // email ilike "%@domain"
     const pattern = `%@${domain}`;
 
-    // NOTE:
-    // unmatched_recipients currently has NO user_id column (single-tenant table).
-    // So we filter ONLY by email pattern.
     const { data, error } = await supabaseAdmin
       .from("unmatched_recipients")
       .update({ status: "ignored" })
+      .eq("user_id", uid)
       .ilike("email", pattern)
       .select("id");
 

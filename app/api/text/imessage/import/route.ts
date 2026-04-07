@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,6 @@ function safeErr(e: unknown) {
 }
 
 type Body = {
-  uid: string;
   contact_id?: string | null;
   title?: string | null;
   raw_text: string;
@@ -105,14 +105,15 @@ async function insertInChunks<T extends object>(table: string, rows: T[], chunkS
 
 export async function POST(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const body = (await req.json()) as Body;
 
-    const uid = body?.uid || "";
     const contactId = body?.contact_id ?? null;
     const title = (body?.title || "").trim() || null;
     const rawText = (body?.raw_text || "").trim();
 
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
     if (contactId && !isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
     if (!rawText || rawText.length < 20) return NextResponse.json({ error: "raw_text is too short" }, { status: 400 });
 

@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-
-function isUuid(v: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-}
 
 function safeErr(e: unknown) {
   const anyE = e as { message?: unknown; name?: unknown; stack?: unknown };
@@ -16,40 +13,20 @@ function safeErr(e: unknown) {
   };
 }
 
-type UnmatchedRow = {
-  id: string;
-  email: string;
-  first_seen_at: string;
-  last_seen_at: string;
-  seen_count: number;
-  last_subject: string | null;
-  last_snippet: string | null;
-  last_thread_link: string | null;
-  status: string;
-  created_contact_id: string | null;
-};
-
 export async function GET(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const url = new URL(req.url);
-
-    // Keep uid as a guardrail (auth contract), even though table is currently single-tenant.
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-
     const includeIgnored = (url.searchParams.get("includeIgnored") || "false") === "true";
-
-    // Keep the list light. You can request more via ?limit=
     const limit = Math.min(300, Math.max(1, Number(url.searchParams.get("limit") || 150)));
-
-    // Cursor pagination: pass the last row’s last_seen_at back in as ?cursor=
-    const cursor = url.searchParams.get("cursor"); // ISO timestamp (last_seen_at)
+    const cursor = url.searchParams.get("cursor");
 
     let q = supabaseAdmin
       .from("unmatched_recipients")
-      .select(
-        "id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id",
-      )
+      .select("id, email, first_seen_at, last_seen_at, seen_count, last_subject, last_snippet, last_thread_link, status, created_contact_id")
+      .eq("user_id", uid)
       .order("last_seen_at", { ascending: false })
       .limit(limit);
 
@@ -61,9 +38,8 @@ export async function GET(req: Request) {
     const { data, error } = await q;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const rows = (data ?? []) as UnmatchedRow[];
+    const rows = data ?? [];
     const nextCursor = rows.length > 0 ? rows[rows.length - 1]!.last_seen_at : null;
-
     return NextResponse.json({ rows, nextCursor, limit, includeIgnored });
   } catch (e) {
     const se = safeErr(e);

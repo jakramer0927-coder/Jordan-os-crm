@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,6 @@ type Intent =
     | "other";
 
 type Body = {
-    uid: string;
     contact_id: string;
     channel?: "text" | "email" | null;
     ask?: string | null;
@@ -42,15 +42,16 @@ function clip(s: string, max = 1400) {
 
 export async function POST(req: Request) {
     try {
+        const uid = await getVerifiedUid();
+        if (!uid) return unauthorized();
+
         const body = (await req.json()) as Body;
 
-        const uid = body?.uid || "";
         const contact_id = body?.contact_id || "";
         const channel = (body?.channel || "text") as "text" | "email";
         const ask = (body?.ask || "").trim();
         const key_points = (body?.key_points || []).filter(Boolean).slice(0, 12);
 
-        if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
         if (!isUuid(contact_id)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
         // Pull contact

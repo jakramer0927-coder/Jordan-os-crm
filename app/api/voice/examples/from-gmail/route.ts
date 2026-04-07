@@ -4,6 +4,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -89,11 +90,10 @@ type VoiceExampleInsert = {
 
 export async function POST(req: Request) {
   try {
-    const url = new URL(req.url);
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid))
-      return NextResponse.json({ ok: false, error: "Invalid uid" }, { status: 400 });
+    const url = new URL(req.url);
 
     // Options
     const days = clamp(parseIntOr(url.searchParams.get("days"), 365), 1, 3650);

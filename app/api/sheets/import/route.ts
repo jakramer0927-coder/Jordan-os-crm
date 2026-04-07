@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -52,9 +53,10 @@ function parseDateLoose(v: unknown): Date | null {
 
 export async function GET(req: Request) {
   try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
+
     const url = new URL(req.url);
-    const uid = url.searchParams.get("uid") || "";
-    if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
 
     // Load user settings to get sheet_url
     const { data: settings, error: setErr } = await supabaseAdmin
@@ -158,10 +160,11 @@ export async function GET(req: Request) {
 
       const clientType = iClientType !== -1 ? safeStr(r[iClientType]) : "";
 
-      // Find existing by (display_name + category), case-insensitive
+      // Find existing by (display_name + category), case-insensitive, scoped to this user
       const { data: existing, error: findErr } = await supabaseAdmin
         .from("contacts")
         .select("id, display_name, category")
+        .eq("user_id", uid)
         .ilike("display_name", name)
         .ilike("category", category)
         .maybeSingle();
@@ -211,6 +214,7 @@ export async function GET(req: Request) {
           const { data: ex2 } = await supabaseAdmin
             .from("contacts")
             .select("id")
+            .eq("user_id", uid)
             .ilike("display_name", name)
             .ilike("category", category)
             .maybeSingle();
