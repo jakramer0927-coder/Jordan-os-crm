@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { encryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
 
@@ -38,12 +39,12 @@ export async function GET(req: Request) {
   const oauth2 = getGoogleOAuthClient();
   const { tokens } = await oauth2.getToken(code);
 
-  // Upsert tokens
+  // Upsert tokens (encrypt sensitive values at rest)
   const { error: upErr } = await supabaseAdmin.from("google_tokens").upsert(
     {
       user_id: st.user_id,
-      access_token: tokens.access_token ?? null,
-      refresh_token: tokens.refresh_token ?? null,
+      access_token: tokens.access_token ? encryptToken(tokens.access_token) : null,
+      refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
       scope: tokens.scope ?? null,
       token_type: tokens.token_type ?? null,
       expiry_date: tokens.expiry_date ?? null,

@@ -3,6 +3,7 @@ import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { decryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
 
@@ -121,8 +122,8 @@ async function syncUser(uid: string, tok: any): Promise<{
   try {
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
-      access_token: tok.access_token ?? undefined,
-      refresh_token: tok.refresh_token ?? undefined,
+      access_token: tok.access_token ? decryptToken(tok.access_token) : undefined,
+      refresh_token: tok.refresh_token ? decryptToken(tok.refresh_token) : undefined,
       expiry_date: tok.expiry_date ?? undefined,
     });
     const gmail = google.gmail({ version: "v1", auth: oauth2 });

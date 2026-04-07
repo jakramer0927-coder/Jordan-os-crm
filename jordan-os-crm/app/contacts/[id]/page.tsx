@@ -21,6 +21,8 @@ type Contact = {
   category: string;
   tier: string | null;
   client_type: string | null;
+  email: string | null;
+  phone: string | null;
   created_at: string;
   user_id?: string;
   buyer_budget_min: number | null;
@@ -277,7 +279,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
+      .select("id, display_name, category, tier, client_type, email, phone, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -985,7 +987,7 @@ export default function ContactDetailPage() {
       </div>
 
       {/* Jordan Voice FIRST */}
-      <VoiceDraftPanel contactId={contact.id} />
+      <VoiceDraftPanel contactId={contact.id} contactEmail={contact.email} />
 
       {/* Text upload NEXT */}
       <TextThreadUploadPanel contactId={contact.id} />

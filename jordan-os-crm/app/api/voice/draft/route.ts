@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -89,6 +90,9 @@ export async function POST(req: Request) {
     try {
         const uid = await getVerifiedUid();
         if (!uid) return unauthorized();
+
+        const limited = await checkRateLimit(uid, "voice_draft", 50);
+        if (limited) return limited;
 
         const body = (await req.json()) as Body;
 

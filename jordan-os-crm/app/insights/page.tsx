@@ -12,6 +12,7 @@ type Touch = {
   direction: "outbound" | "inbound";
   occurred_at: string;
   intent: string | null;
+  channel: string | null;
 };
 
 type Contact = {
@@ -116,6 +117,9 @@ export default function InsightsPage() {
   const [error, setError] = useState<string | null>(null);
   const [dailyGoal, setDailyGoal] = useState(5);
 
+  // Channel breakdown (7d)
+  const [channelBreakdown7, setChannelBreakdown7] = useState<Record<string, number>>({});
+
   // Rolling metrics
   const [out7, setOut7] = useState(0);
   const [out7Prev, setOut7Prev] = useState(0);
@@ -175,7 +179,7 @@ export default function InsightsPage() {
 
     const { data: tRaw, error: tErr } = await supabase
       .from("touches")
-      .select("id, contact_id, direction, occurred_at, intent")
+      .select("id, contact_id, direction, occurred_at, intent, channel")
       .eq("direction", "outbound")
       .gte("occurred_at", since35.toISOString())
       .limit(20000);
@@ -220,6 +224,14 @@ export default function InsightsPage() {
 
     setOut7(t7.length);
     setOut7Prev(tPrev7.length);
+
+    // Channel breakdown for last 7 days
+    const chBreak: Record<string, number> = {};
+    for (const t of t7) {
+      const ch = t.channel || "other";
+      chBreak[ch] = (chBreak[ch] ?? 0) + 1;
+    }
+    setChannelBreakdown7(chBreak);
     setOut30(t30.length);
     setRefAsks30(t30.filter(t => t.intent === "referral_ask").length);
     setReviewAsks30(t30.filter(t => t.intent === "review_ask").length);
@@ -644,6 +656,17 @@ export default function InsightsPage() {
           <div className="label">Mix (7d)</div>
           <div style={{ fontWeight: 900, fontSize: 18, marginTop: 4 }}>{agents7} agents • {clients7} clients</div>
           <div className="subtle" style={{ fontSize: 12 }}>of {out7} outbound • {pct(agents7, out7)} agent share</div>
+          {Object.keys(channelBreakdown7).length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Object.entries(channelBreakdown7)
+                .sort((a, b) => b[1] - a[1])
+                .map(([ch, n]) => (
+                  <span key={ch} className="badge" style={{ fontSize: 11 }}>
+                    {ch}: {n}
+                  </span>
+                ))}
+            </div>
+          )}
         </div>
         <div className="card cardPad">
           <div className="label">Asks (30d)</div>
