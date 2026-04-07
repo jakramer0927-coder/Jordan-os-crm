@@ -631,9 +631,14 @@ export default function MorningPage() {
       }
     }
 
+    // Fill remaining slots — only contacts at least 50% through their cadence
+    // (or never contacted). Never pad with recently-touched people.
     for (const c of scored) {
       if (top.length >= totalRecs) break;
       if (used.has(c.id)) continue;
+      const isNeverContacted = c.days_since_outbound == null;
+      const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.5;
+      if (!isNeverContacted && !isApproachingDue) continue;
       top.push(c);
       used.add(c.id);
     }
