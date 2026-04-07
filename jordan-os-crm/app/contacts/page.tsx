@@ -313,6 +313,7 @@ export default function ContactsPage() {
         <div className="row">
           <a className="btn" href="/morning">Morning</a>
           <a className="btn" href="/unmatched">Unmatched</a>
+          <a className="btn" href="/contacts/import">Import CSV</a>
           <button
             className="btn"
             style={triageMode ? { background: "#fef3c7", borderColor: "#fcd34d", fontWeight: 700 } : {}}

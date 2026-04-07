@@ -20,6 +20,7 @@ type Contact = {
   tier: string | null;
   client_type: string | null;
   email: string | null;
+  phone: string | null;
   created_at: string;
 };
 
@@ -357,6 +358,14 @@ export default function MorningPage() {
   const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
+  // voice draft in log panel
+  const [touchAsk, setTouchAsk] = useState("");
+  const [touchDraft, setTouchDraft] = useState("");
+  const [touchDraftBusy, setTouchDraftBusy] = useState(false);
+  const [touchDraftCopied, setTouchDraftCopied] = useState(false);
+  const [touchSuggestBusy, setTouchSuggestBusy] = useState(false);
+  const [touchSuggestMeta, setTouchSuggestMeta] = useState<{ intent: string; confidence: number; reason: string } | null>(null);
+
   // stable list + completed tracking
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
@@ -384,9 +393,9 @@ export default function MorningPage() {
     return user;
   }
 
-  async function loadVoiceProfile(userId: string) {
+  async function loadVoiceProfile(_userId: string) {
     try {
-      const res = await fetch(`/api/voice/profile?uid=${userId}&limit=120&minLen=140`);
+      const res = await fetch(`/api/voice/profile?limit=120&minLen=140`);
       const j = (await res.json()) as VoiceProfile | { error?: string };
       if (!res.ok) return;
       if ((j as VoiceProfile).ok) setVoice(j as VoiceProfile);
@@ -409,7 +418,7 @@ export default function MorningPage() {
 
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, created_at")
+      .select("id, display_name, category, tier, client_type, email, phone, created_at")
       .neq("archived", true)
       .order("created_at", { ascending: false })
       .limit(2000);
@@ -492,6 +501,10 @@ export default function MorningPage() {
     setTouchSummary("");
     setTouchSource("manual");
     setTouchLink("");
+    setTouchAsk("");
+    setTouchDraft("");
+    setTouchDraftCopied(false);
+    setTouchSuggestMeta(null);
   }
 
   async function saveTouch() {
@@ -524,6 +537,60 @@ export default function MorningPage() {
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
+  }
+
+  // Debounced suggest-intent when user types a prompt in the log panel
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+
+    async function run() {
+      if (!uid || !loggingFor) return;
+      const text = touchAsk.trim();
+      if (text.length < 10) { setTouchSuggestMeta(null); return; }
+
+      setTouchSuggestBusy(true);
+      try {
+        const ch = (touchChannel === "email" || touchChannel === "text") ? touchChannel : "email";
+        const res = await fetch("/api/voice/suggest-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contact_id: loggingFor, channel: ch, ask: text }),
+        });
+        const j = await res.json();
+        if (res.ok) {
+          setTouchSuggestMeta({ intent: j.intent || "other", confidence: j.confidence ?? 0.5, reason: String(j.reason || "") });
+        }
+      } catch { /* ignore */ }
+      finally { setTouchSuggestBusy(false); }
+    }
+
+    t = setTimeout(run, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [touchAsk, uid, loggingFor, touchChannel]);
+
+  async function generateTouchDraft() {
+    if (!uid || !loggingFor || !touchAsk.trim()) return;
+    setTouchDraftBusy(true);
+    try {
+      const ch = (touchChannel === "email" || touchChannel === "text") ? touchChannel : "email";
+      const res = await fetch("/api/voice/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contact_id: loggingFor,
+          channel: ch,
+          intent: touchSuggestMeta?.intent || "check_in",
+          length: "short",
+          ask: touchAsk.trim(),
+          include_question: true,
+          include_signature: touchChannel === "email",
+        }),
+      });
+      const j = await res.json();
+      if (res.ok) setTouchDraft(j.draft || "");
+    } catch { /* ignore */ }
+    finally { setTouchDraftBusy(false); }
   }
 
   useEffect(() => {
@@ -903,6 +970,13 @@ export default function MorningPage() {
                       {agent ? <span className="badge">Agent touch</span> : null}
                     </div>
 
+                    {(c.email || c.phone) && (
+                      <div className="muted small" style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                        {c.email && <a href={`mailto:${c.email}`} style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 2 }}>{c.email}</a>}
+                        {c.phone && <a href={`tel:${c.phone}`} style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 2 }}>{c.phone}</a>}
+                      </div>
+                    )}
+
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
                       <div className="small muted bold" style={{ marginBottom: 6 }}>
                         Suggested outreach (Jordan voice)
@@ -1010,6 +1084,65 @@ export default function MorningPage() {
                         onChange={(e) => setTouchSummary(e.target.value)}
                         placeholder="Quick note about what you sent / what happened"
                       />
+                    </div>
+
+                    {/* Voice draft suggestion */}
+                    <div style={{ marginTop: 10 }}>
+                      <div className="small muted bold" style={{ marginBottom: 6 }}>
+                        Draft a message <span style={{ fontWeight: 400 }}>(optional — generates in your voice)</span>
+                      </div>
+                      <div className="row" style={{ gap: 8 }}>
+                        <input
+                          className="input"
+                          style={{ flex: 1 }}
+                          value={touchAsk}
+                          onChange={(e) => setTouchAsk(e.target.value)}
+                          placeholder='e.g. "Check in, see how the house is going"'
+                        />
+                        <button
+                          className="btn btnPrimary"
+                          type="button"
+                          onClick={generateTouchDraft}
+                          disabled={touchDraftBusy || !touchAsk.trim()}
+                        >
+                          {touchDraftBusy ? "Writing…" : "Draft"}
+                        </button>
+                      </div>
+
+                      <div className="muted small" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <span className="kicker">Suggested intent</span>
+                        {touchSuggestBusy ? (
+                          <span>Thinking…</span>
+                        ) : touchSuggestMeta ? (
+                          <>
+                            <span style={{ fontWeight: 900, color: "var(--ink)" }}>{touchSuggestMeta.intent.replace(/_/g, " ")}</span>
+                            <span>({Math.round(touchSuggestMeta.confidence * 100)}%)</span>
+                            {touchSuggestMeta.reason ? <span>• {touchSuggestMeta.reason}</span> : null}
+                          </>
+                        ) : (
+                          <span>Type a prompt above to get a suggested intent.</span>
+                        )}
+                      </div>
+
+                      {touchDraft ? (
+                        <div className="cardSoft cardPad" style={{ marginTop: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                            <button
+                              className="btn"
+                              type="button"
+                              style={{ fontSize: 12, padding: "2px 10px" }}
+                              onClick={async () => {
+                                await navigator.clipboard.writeText(touchDraft);
+                                setTouchDraftCopied(true);
+                                setTimeout(() => setTouchDraftCopied(false), 1200);
+                              }}
+                            >
+                              {touchDraftCopied ? "Copied" : "Copy"}
+                            </button>
+                          </div>
+                          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 14 }}>{touchDraft}</div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
