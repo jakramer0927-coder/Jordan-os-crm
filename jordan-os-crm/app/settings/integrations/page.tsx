@@ -20,13 +20,15 @@ export default function IntegrationsPage() {
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string; errors: number } | null>(null);
 
   // voice coaching
-  const [coaching, setCoaching] = useState<{
+  type CoachingResult = {
     style_summary: string;
     strengths: string[];
     improvements: { issue: string; recommendation: string; example?: string }[];
     style_guide: string;
     score: { warmth: number; clarity: number; brevity: number; relevance: number; overall: number };
-  } | null>(null);
+  };
+  const [coaching, setCoaching] = useState<CoachingResult | null>(null);
+  const [coachedAt, setCoachedAt] = useState<string | null>(null);
   const [coachRunning, setCoachRunning] = useState(false);
 
   async function load() {
@@ -38,9 +40,15 @@ export default function IntegrationsPage() {
     const { data: tData } = await supabase.from("google_tokens").select("user_id").eq("user_id", user.id).maybeSingle();
     setConnected(!!tData?.user_id);
 
-    const { data: sData } = await supabase.from("user_settings").select("gmail_label_names, sheet_url").eq("user_id", user.id).maybeSingle();
+    const { data: sData } = await supabase
+      .from("user_settings")
+      .select("gmail_label_names, sheet_url, voice_coaching_result, voice_coached_at")
+      .eq("user_id", user.id)
+      .maybeSingle();
     if (sData?.gmail_label_names) setGmailLabels(sData.gmail_label_names);
     if (sData?.sheet_url) setSheetUrl(sData.sheet_url);
+    if (sData?.voice_coaching_result) setCoaching(sData.voice_coaching_result as any);
+    if (sData?.voice_coached_at) setCoachedAt(sData.voice_coached_at);
 
     setReady(true);
   }
@@ -151,6 +159,7 @@ export default function IntegrationsPage() {
     setCoachRunning(false);
     if (!res.ok) { setErr(j?.error || "Voice coach failed"); return; }
     setCoaching(j.coaching);
+    setCoachedAt(new Date().toISOString());
     setMsg(`Analysis complete — ${j.examples_analyzed} emails analyzed.`);
   }
 
@@ -243,17 +252,25 @@ export default function IntegrationsPage() {
 
       {/* Voice coaching */}
       <div className="card cardPad">
-        <div style={{ fontWeight: 900, marginBottom: 4 }}>Voice coaching</div>
-        <div className="muted small" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Voice coaching</div>
+            {coachedAt && (
+              <div className="muted small" style={{ marginTop: 2 }}>
+                Last analyzed {new Date(coachedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+            )}
+          </div>
+          <button className="btn" style={{ fontSize: 12 }} onClick={runVoiceCoach} disabled={coachRunning || !connected}>
+            {coachRunning ? "Analyzing…" : coaching ? "Re-analyze" : "Analyze my outreach style"}
+          </button>
+        </div>
+        <div className="muted small" style={{ marginBottom: coaching ? 16 : 12 }}>
           Analyzes your synced emails with AI to identify your communication style, score it, and give specific improvement recommendations. Also generates a style guide used for future drafts.
         </div>
 
-        <button className="btn" onClick={runVoiceCoach} disabled={coachRunning || !connected}>
-          {coachRunning ? "Analyzing…" : "Analyze my outreach style"}
-        </button>
-
         {coaching && (
-          <div className="stack" style={{ marginTop: 16 }}>
+          <div className="stack">
             <div style={{ fontSize: 14, lineHeight: 1.55 }}>
               <span style={{ fontWeight: 700 }}>Style summary: </span>{coaching.style_summary}
             </div>
@@ -294,9 +311,6 @@ export default function IntegrationsPage() {
               </div>
             )}
 
-            <button className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} onClick={runVoiceCoach} disabled={coachRunning}>
-              Re-analyze
-            </button>
           </div>
         )}
       </div>
