@@ -240,6 +240,14 @@ export default function ContactDetailPage() {
   const [dealBusy, setDealBusy] = useState(false);
   const [dealErr, setDealErr] = useState<string | null>(null);
 
+  // merge
+  const [mergeQ, setMergeQ] = useState("");
+  const [mergeResults, setMergeResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
+  const [mergeTarget, setMergeTarget] = useState<{ id: string; display_name: string } | null>(null);
+  const [mergeConfirm, setMergeConfirm] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState<string | null>(null);
+
   // AI insights
   const [aiContext, setAiContext] = useState<string | null>(null);
   const [aiContextUpdatedAt, setAiContextUpdatedAt] = useState<string | null>(null);
@@ -529,6 +537,38 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
+  async function searchMergeTargets(q: string) {
+    setMergeQ(q);
+    if (q.trim().length < 2) { setMergeResults([]); return; }
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, display_name, category")
+      .neq("archived", true)
+      .neq("id", contact?.id ?? "")
+      .ilike("display_name", `%${q.trim()}%`)
+      .limit(8);
+    setMergeResults((data ?? []) as { id: string; display_name: string; category: string }[]);
+  }
+
+  async function doMerge() {
+    if (!mergeTarget || !contact) return;
+    setMergeBusy(true);
+    setMergeMsg(null);
+    const res = await fetch("/api/contacts/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: contact.id, target_id: mergeTarget.id }),
+    });
+    const j = await res.json();
+    setMergeBusy(false);
+    if (!res.ok) { setMergeMsg(`Error: ${j?.error || "Merge failed"}`); return; }
+    setMergeMsg(`Done — ${j.touchesMoved} touches moved to "${j.targetName}". This contact has been archived.`);
+    setMergeConfirm(false);
+    setMergeTarget(null);
+    setMergeResults([]);
+    setMergeQ("");
+  }
+
   async function deleteContact() {
     if (!contact || !uid) return;
 
@@ -727,6 +767,59 @@ export default function ContactDetailPage() {
             <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
+          </div>
+
+          <div className="hr" />
+
+          {/* Merge duplicate */}
+          <div className="stack">
+            <div style={{ fontWeight: 900 }}>Merge duplicate</div>
+            <div className="subtle" style={{ fontSize: 12 }}>
+              All touches from <strong>{contact?.display_name}</strong> will move to the contact you pick, then this one gets archived.
+            </div>
+
+            {mergeMsg ? (
+              <div className="alert alertOk" style={{ fontSize: 13 }}>{mergeMsg}</div>
+            ) : mergeConfirm && mergeTarget ? (
+              <div className="stack" style={{ gap: 8 }}>
+                <div style={{ fontSize: 13 }}>
+                  Merge <strong>{contact?.display_name}</strong> → <strong>{mergeTarget.display_name}</strong>?
+                  All touches will be combined and this contact archived.
+                </div>
+                <div className="row">
+                  <button className="btn btnPrimary" onClick={doMerge} disabled={mergeBusy}>
+                    {mergeBusy ? "Merging…" : "Confirm merge"}
+                  </button>
+                  <button className="btn" onClick={() => { setMergeConfirm(false); setMergeTarget(null); }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="stack" style={{ gap: 6 }}>
+                <input
+                  className="input"
+                  value={mergeQ}
+                  onChange={(e) => searchMergeTargets(e.target.value)}
+                  placeholder="Search for the contact to merge into…"
+                />
+                {mergeResults.length > 0 && (
+                  <div className="card" style={{ padding: "4px 0" }}>
+                    {mergeResults.map((r) => (
+                      <button
+                        key={r.id}
+                        className="btnGhost"
+                        style={{ width: "100%", textAlign: "left", padding: "9px 14px", fontSize: 13, display: "block", borderRadius: 0 }}
+                        onClick={() => { setMergeTarget(r); setMergeConfirm(true); setMergeResults([]); }}
+                      >
+                        <strong>{r.display_name}</strong>
+                        <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{r.category}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="hr" />

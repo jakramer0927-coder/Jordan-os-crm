@@ -366,9 +366,26 @@ export default function MorningPage() {
   const [touchSuggestBusy, setTouchSuggestBusy] = useState(false);
   const [touchSuggestMeta, setTouchSuggestMeta] = useState<{ intent: string; confidence: number; reason: string } | null>(null);
 
-  // stable list + completed tracking
-  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+  // stable list + completed tracking — persisted in sessionStorage so
+  // navigating to a contact and back doesn't reshuffle the list
+  const SESSION_LOCKED_KEY = "morning_locked_ids_v1";
+  const SESSION_COMPLETED_KEY = "morning_completed_ids_v1";
+
+  const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem(SESSION_LOCKED_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : null;
+    } catch { return null; }
+  });
+
+  const [completedIds, setCompletedIds] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = sessionStorage.getItem(SESSION_COMPLETED_KEY);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
 
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
@@ -726,6 +743,19 @@ export default function MorningPage() {
     }
   }, [recs, lockedIds]);
 
+  // Persist locked list to sessionStorage
+  useEffect(() => {
+    if (lockedIds === null) return;
+    try { sessionStorage.setItem(SESSION_LOCKED_KEY, JSON.stringify(lockedIds)); } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedIds]);
+
+  // Persist completed ids to sessionStorage
+  useEffect(() => {
+    try { sessionStorage.setItem(SESSION_COMPLETED_KEY, JSON.stringify([...completedIds])); } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedIds]);
+
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
     if (lockedIds === null) return recs;
@@ -780,7 +810,15 @@ export default function MorningPage() {
           <a className="btn" href="/unmatched">
             Unmatched
           </a>
-          <button className="btn" onClick={load} disabled={loading}>
+          <button className="btn" onClick={() => {
+            try {
+              sessionStorage.removeItem(SESSION_LOCKED_KEY);
+              sessionStorage.removeItem(SESSION_COMPLETED_KEY);
+            } catch { /* ignore */ }
+            setLockedIds(null);
+            setCompletedIds(new Set());
+            load();
+          }} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
