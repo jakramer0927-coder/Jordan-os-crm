@@ -484,8 +484,39 @@ export default function MorningPage() {
       if (!latestOutbound.has(t.contact_id)) latestOutbound.set(t.contact_id, t);
     }
 
+    // Load contact_links so linked contacts share cadence (Option B)
+    const { data: linksData } = await supabase
+      .from("contact_links")
+      .select("contact_id_a, contact_id_b")
+      .or(ids.map((id) => `contact_id_a.eq.${id},contact_id_b.eq.${id}`).join(","));
+
+    // Build a map: contact_id → [linked contact ids]
+    const linkedMap = new Map<string, string[]>();
+    for (const row of (linksData ?? []) as { contact_id_a: string; contact_id_b: string }[]) {
+      const { contact_id_a: a, contact_id_b: b } = row;
+      if (!linkedMap.has(a)) linkedMap.set(a, []);
+      if (!linkedMap.has(b)) linkedMap.set(b, []);
+      linkedMap.get(a)!.push(b);
+      linkedMap.get(b)!.push(a);
+    }
+
+    // For each contact, pick the most recent outbound across self + all linked contacts
+    function bestOutbound(contactId: string): Touch | null {
+      const candidates: Touch[] = [];
+      const self = latestOutbound.get(contactId);
+      if (self) candidates.push(self);
+      for (const linkedId of linkedMap.get(contactId) ?? []) {
+        const linked = latestOutbound.get(linkedId);
+        if (linked) candidates.push(linked);
+      }
+      if (candidates.length === 0) return null;
+      return candidates.reduce((best, t) =>
+        new Date(t.occurred_at) > new Date(best.occurred_at) ? t : best
+      );
+    }
+
     const merged: ContactWithLastOutbound[] = base.map((c) => {
-      const last = latestOutbound.get(c.id) ?? null;
+      const last = bestOutbound(c.id);
       return {
         ...c,
         last_outbound_at: last ? last.occurred_at : null,

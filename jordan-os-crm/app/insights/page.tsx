@@ -313,6 +313,33 @@ export default function InsightsPage() {
     const loMap = new Map<string, string | null>();
     (loRaw ?? []).forEach((r: any) => loMap.set(r.contact_id, r.last_outbound_at));
 
+    // ── 3b. Apply linked contact cadence sharing (Option B) ───────────────────
+    const allContactIds = cs.map(c => c.id);
+    if (allContactIds.length > 0) {
+      const { data: linksRaw } = await supabase
+        .from("contact_links")
+        .select("contact_id_a, contact_id_b")
+        .or(allContactIds.map(id => `contact_id_a.eq.${id},contact_id_b.eq.${id}`).join(","));
+
+      const linkedMap = new Map<string, string[]>();
+      for (const row of (linksRaw ?? []) as { contact_id_a: string; contact_id_b: string }[]) {
+        const { contact_id_a: a, contact_id_b: b } = row;
+        if (!linkedMap.has(a)) linkedMap.set(a, []);
+        if (!linkedMap.has(b)) linkedMap.set(b, []);
+        linkedMap.get(a)!.push(b);
+        linkedMap.get(b)!.push(a);
+      }
+
+      // For each contact in a link, use the most recent outbound across the household
+      for (const [contactId, partners] of linkedMap.entries()) {
+        const dates = [loMap.get(contactId), ...partners.map(p => loMap.get(p))]
+          .filter((d): d is string => !!d);
+        if (dates.length === 0) continue;
+        const best = dates.reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
+        loMap.set(contactId, best);
+      }
+    }
+
     // A-client health
     const aClients = cs.filter(c => (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A");
     setAClientsTotal(aClients.length);
