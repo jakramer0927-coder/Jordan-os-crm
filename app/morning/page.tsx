@@ -405,83 +405,24 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
 
-    if (!voiceLoaded) await loadVoiceProfile(user.id);
-
-    const { data: cData, error: cErr } = await supabase
-      .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, created_at")
-      .neq("archived", true)
-      .order("created_at", { ascending: false })
-      .limit(2000);
-
-    if (cErr) {
-      setError(`Contacts fetch error: ${cErr.message}`);
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    const base = (cData ?? []) as Contact[];
-    if (base.length === 0) {
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    const ids = base.map((c) => c.id);
-    const { data: tData, error: tErr } = await supabase
-      .from("touches")
-      .select(
-        "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
-      )
-      .in("contact_id", ids)
-      .eq("direction", "outbound")
-      .order("occurred_at", { ascending: false })
-      .limit(8000);
-
-    if (tErr) {
-      setError(`Touches fetch error: ${tErr.message}`);
-      const mergedFail: ContactWithLastOutbound[] = base.map((c) => ({
-        ...c,
-        last_outbound_at: null,
-        last_outbound_channel: null,
-        days_since_outbound: null,
-      }));
-      setContacts(mergedFail);
-      setLoading(false);
-      return;
-    }
-
-    const touches = (tData ?? []) as Touch[];
-    const latestOutbound = new Map<string, Touch>();
-    for (const t of touches) {
-      if (!latestOutbound.has(t.contact_id)) latestOutbound.set(t.contact_id, t);
-    }
-
-    const merged: ContactWithLastOutbound[] = base.map((c) => {
-      const last = latestOutbound.get(c.id) ?? null;
-      return {
-        ...c,
-        last_outbound_at: last ? last.occurred_at : null,
-        last_outbound_channel: last ? last.channel : null,
-        days_since_outbound: last ? daysSince(last.occurred_at) : null,
-      };
-    });
-
-    setContacts(merged);
-
-    // Accountability strip counts
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekStart = startOfWeekMondayLocal(new Date());
-
-    const [{ count: tc }, { count: wc }] = await Promise.all([
-      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", todayStart.toISOString()),
-      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", weekStart.toISOString()),
+    // Fetch contacts+touches+counts and voice profile in parallel
+    const [contactsRes] = await Promise.all([
+      fetch("/api/morning/contacts"),
+      voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
     ]);
+
+    if (!contactsRes.ok) {
+      const j = await contactsRes.json().catch(() => ({}));
+      setError(`Load error: ${(j as any).error ?? contactsRes.statusText}`);
+      setLoading(false);
+      return;
+    }
+
+    const { contacts: merged, todayCount: tc, wtdCount: wc } = await contactsRes.json();
+
+    setContacts((merged ?? []) as ContactWithLastOutbound[]);
     setTodayCount(tc ?? 0);
     setWtdCount(wc ?? 0);
-
     setLoading(false);
   }
 

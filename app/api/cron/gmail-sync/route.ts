@@ -219,9 +219,6 @@ async function syncUser(uid: string, tok: any): Promise<{
         );
 
         for (const full of fulls) {
-          const msgLabelIds = full.data.labelIds ?? [];
-          const hasConfiguredLabel = labelIds.length === 0 || msgLabelIds.some((lid) => labelIds.includes(lid));
-
           const headers = full.data.payload?.headers ?? [];
           const allRecipientsRaw = Array.from(new Set([
             ...parseEmails(headerValue(headers, "To")),
@@ -259,9 +256,6 @@ async function syncUser(uid: string, tok: any): Promise<{
             }
             continue;
           }
-
-          // Only create touches for labeled messages (or no label configured)
-          if (!hasConfiguredLabel) continue;
 
           const contactId = contactIdByEmail.get(matchedEmail);
           if (!contactId) continue;

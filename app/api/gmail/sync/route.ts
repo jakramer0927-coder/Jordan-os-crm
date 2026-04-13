@@ -259,10 +259,6 @@ export async function GET(req: Request) {
         );
 
       for (const full of fulls) {
-
-        const msgLabelIds = full.data.labelIds ?? [];
-        const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
-
         messagesParsed += 1;
 
         const headers = full.data.payload?.headers ?? [];
@@ -315,11 +311,6 @@ export async function GET(req: Request) {
               unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
             }
           }
-          continue;
-        }
-
-        // Only create touches for messages with the configured label
-        if (!hasAnyConfiguredLabel) {
           continue;
         }
 
