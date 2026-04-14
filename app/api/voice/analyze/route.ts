@@ -20,8 +20,8 @@ export async function POST(req: Request) {
 
     if (!text || text.length < 10) return NextResponse.json({ observations: [], score: null });
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
 
     // Load coaching tips from user_settings
     const { data: settings } = await supabaseAdmin
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
 
     const tipsSummary = tips.length > 0
       ? tips.map((t, i) => `${i + 1}. ${t.issue}: ${t.recommendation}`).join("\n")
@@ -62,21 +62,22 @@ If the message is strong, say so briefly.
 
 Return JSON: { "observations": ["...", "..."], "score": 1-10 }`;
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        max_tokens: 512,
         temperature: 0.2,
-        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }],
       }),
     });
 
     const j = await res.json();
     if (!res.ok) return NextResponse.json({ observations: [], score: null });
 
-    const parsed = JSON.parse(j?.choices?.[0]?.message?.content || "{}");
+    const raw = j?.content?.[0]?.text || "{}";
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
     return NextResponse.json({
       observations: parsed.observations || [],
       score: parsed.score || null,

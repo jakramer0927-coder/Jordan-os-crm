@@ -125,33 +125,32 @@ Rules:
             recent_texts: recentTexts,
         };
 
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
 
-        // Chat Completions API  [oai_citation:1‡OpenAI Platform](https://platform.openai.com/docs/api-reference/chat?_clear=true&lang=node.js&utm_source=chatgpt.com)
-        const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
-                Authorization: `Bearer ${apiKey}`,
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+                model: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001",
+                max_tokens: 256,
                 temperature: 0.2,
-                response_format: { type: "json_object" },
-                messages: [
-                    { role: "system", content: system },
-                    { role: "user", content: JSON.stringify(user) },
-                ],
+                system,
+                messages: [{ role: "user", content: JSON.stringify(user) }],
             }),
         });
 
         const j = await resp.json();
         if (!resp.ok) {
-            return NextResponse.json({ error: j?.error?.message || "OpenAI error", details: j }, { status: 500 });
+            return NextResponse.json({ error: j?.error?.message || "Anthropic error", details: j }, { status: 500 });
         }
 
-        const content = j?.choices?.[0]?.message?.content || "{}";
+        const raw = j?.content?.[0]?.text || "{}";
+        const content = raw.match(/\{[\s\S]*\}/)?.[0] || "{}";
 
         let parsed: any = {};
         try {

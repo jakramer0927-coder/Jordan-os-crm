@@ -35,9 +35,9 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
+    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
     const sampleText = examples.slice(0, 30).map((t, i) => `--- Email ${i + 1} ---\n${t}`).join("\n\n");
 
@@ -75,27 +75,25 @@ Return a JSON object with exactly these fields:
 
 Provide 3-5 improvements. Be specific — reference actual patterns from the emails where possible.`;
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
+        max_tokens: 2048,
         temperature: 0.3,
-        response_format: { type: "json_object" },
+        system,
+        messages: [{ role: "user", content: user }],
       }),
     });
 
     const j = await res.json();
     if (!res.ok) {
-      return NextResponse.json({ error: j?.error?.message || `OpenAI error ${res.status}` }, { status: 500 });
+      return NextResponse.json({ error: j?.error?.message || `Anthropic error ${res.status}` }, { status: 500 });
     }
 
-    const raw = j?.choices?.[0]?.message?.content || "{}";
-    const coaching = JSON.parse(raw);
+    const raw = j?.content?.[0]?.text || "{}";
+    const coaching = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
 
     // Persist full coaching result + style guide + tips
     await supabaseAdmin
