@@ -301,7 +301,6 @@ type Recommendation = ContactWithLastOutbound & {
   score: number;
   reasons: string[];
   suggested_channel: Touch["channel"];
-  suggested_draft: string;
 };
 
 type MorningRules = {
@@ -319,6 +318,34 @@ const DEFAULT_RULES: MorningRules = {
 };
 
 const RULES_KEY = "morning_rules_v1";
+const LOCK_KEY = "morning_lock_v1";
+
+function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function loadLockedIds(): string[] | null {
+  try {
+    const raw = localStorage.getItem(LOCK_KEY);
+    if (!raw) return null;
+    const { date, ids } = JSON.parse(raw) as { date: string; ids: string[] };
+    if (date !== todayDateString()) return null;
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+function saveLockedIds(ids: string[]) {
+  try {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ date: todayDateString(), ids }));
+  } catch { /* ignore */ }
+}
+
+function clearLockedIds() {
+  try { localStorage.removeItem(LOCK_KEY); } catch { /* ignore */ }
+}
 
 function loadRules(): MorningRules {
   try {
@@ -357,9 +384,16 @@ export default function MorningPage() {
   const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
-  // stable list + completed tracking
-  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
+  // stable list + completed tracking — persisted per calendar day
+  const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
+    if (typeof window === "undefined") return null;
+    return loadLockedIds();
+  });
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+
+  // AI-generated drafts keyed by contact ID
+  const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
+  const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
 
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
@@ -401,6 +435,9 @@ export default function MorningPage() {
     setError(null);
     setMsg(null);
     setLoading(true);
+    // Clear the lock so a fresh top-N is picked from the new data
+    setLockedIds(null);
+    clearLockedIds();
 
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
@@ -532,14 +569,7 @@ export default function MorningPage() {
 
       const suggested_channel = pickChannel(c);
 
-      const suggested_draft = buildDraftWithVoice({
-        contact: c,
-        intent: "check_in",
-        channel: suggested_channel,
-        voice,
-      });
-
-      return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
+      return { ...c, cadence, overdue, score, reasons, suggested_channel };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -596,9 +626,66 @@ export default function MorningPage() {
 
   useEffect(() => {
     if (lockedIds === null && recs.length > 0) {
-      setLockedIds(recs.map((r) => r.id));
+      const ids = recs.map((r) => r.id);
+      setLockedIds(ids);
+      saveLockedIds(ids);
+      generateDrafts(recs);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds]);
+
+  async function generateDrafts(contacts: Recommendation[]) {
+    const pending = new Set(contacts.map((c) => c.id));
+    setDraftsGenerating(pending);
+    await Promise.all(
+      contacts.map(async (c) => {
+        try {
+          const res = await fetch("/api/voice/draft", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contact_id: c.id,
+              channel: c.suggested_channel,
+              intent: "check_in",
+              length: "short",
+            }),
+          });
+          const j = await res.json();
+          if (res.ok && j.draft) {
+            setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
+          }
+        } catch {
+          // silently fall back to template
+        } finally {
+          setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
+        }
+      })
+    );
+  }
+
+  async function regenerateDraft(c: Recommendation) {
+    setDraftsGenerating((prev) => new Set(prev).add(c.id));
+    try {
+      const res = await fetch("/api/voice/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contact_id: c.id,
+          channel: c.suggested_channel,
+          intent: "check_in",
+          length: "short",
+        }),
+      });
+      const j = await res.json();
+      if (res.ok && j.draft) {
+        setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
+    }
+  }
 
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
@@ -845,16 +932,26 @@ export default function MorningPage() {
                     </div>
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Suggested outreach (Jordan voice)
+                      <div className="rowBetween" style={{ marginBottom: 6 }}>
+                        <div className="small muted bold">
+                          {aiDrafts[c.id] ? "Draft (Jordan AI)" : draftsGenerating.has(c.id) ? "Generating draft…" : "Draft (template)"}
+                        </div>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "1px 8px" }}
+                          disabled={draftsGenerating.has(c.id)}
+                          onClick={() => regenerateDraft(c)}
+                        >
+                          {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
+                        </button>
                       </div>
                       <div className="row">
                         <span className="badge">Channel: {c.suggested_channel}</span>
                         <span className="badge">Intent: check_in</span>
                       </div>
 
-                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                        {c.suggested_draft}
+                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45, opacity: draftsGenerating.has(c.id) ? 0.4 : 1 }}>
+                        {aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: "check_in", channel: c.suggested_channel, voice })}
                       </div>
                     </div>
                   </div>
