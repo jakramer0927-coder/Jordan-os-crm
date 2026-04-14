@@ -33,6 +33,25 @@ type Contact = {
   ai_context_updated_at: string | null;
 };
 
+type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
+
+const DEAL_STAGES: { value: DealStage; label: string }[] = [
+  { value: "lead",           label: "Lead" },
+  { value: "showing",        label: "Showing" },
+  { value: "offer_in",       label: "Offer In" },
+  { value: "under_contract", label: "Under Contract" },
+  { value: "closed_won",     label: "Closed ✓" },
+  { value: "closed_lost",    label: "Closed ✗" },
+];
+
+function stageColor(s: string): React.CSSProperties {
+  if (s === "closed_won")     return { background: "rgba(11,107,42,.1)",   color: "#0b6b2a",           borderColor: "rgba(11,107,42,.25)" };
+  if (s === "closed_lost")    return { background: "rgba(0,0,0,.05)",       color: "rgba(18,18,18,.4)", borderColor: "transparent" };
+  if (s === "under_contract") return { background: "rgba(11,60,140,.08)",   color: "#1a3f8a",           borderColor: "rgba(11,60,140,.2)" };
+  if (s === "offer_in")       return { background: "rgba(120,60,0,.08)",    color: "rgba(120,60,0,.9)", borderColor: "rgba(120,60,0,.2)" };
+  return {};
+}
+
 type Deal = {
   id: string;
   address: string;
@@ -42,6 +61,8 @@ type Deal = {
   close_date: string | null;
   notes: string | null;
   created_at: string;
+  referral_source_contact_id: string | null;
+  referral_source_name?: string | null;
 };
 
 type Touch = {
@@ -316,10 +337,14 @@ export default function ContactDetailPage() {
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [dealAddress, setDealAddress] = useState("");
   const [dealRole, setDealRole] = useState("buyer");
-  const [dealStatus, setDealStatus] = useState("active");
+  const [dealStatus, setDealStatus] = useState<DealStage>("showing");
   const [dealPrice, setDealPrice] = useState("");
   const [dealCloseDate, setDealCloseDate] = useState("");
   const [dealNotes, setDealNotes] = useState("");
+  const [dealRefSourceId, setDealRefSourceId] = useState("");
+  const [dealRefSourceName, setDealRefSourceName] = useState("");
+  const [dealRefQuery, setDealRefQuery] = useState("");
+  const [dealRefResults, setDealRefResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
   const [dealBusy, setDealBusy] = useState(false);
   const [dealErr, setDealErr] = useState<string | null>(null);
 
@@ -416,7 +441,11 @@ export default function ContactDetailPage() {
     const dealsRes = await fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`);
     if (dealsRes.ok) {
       const dj = await dealsRes.json().catch(() => ({}));
-      setDeals(dj.deals ?? []);
+      const rawDeals = (dj.deals ?? []) as any[];
+      setDeals(rawDeals.map((d: any) => ({
+        ...d,
+        referral_source_name: (d.referral_source as any)?.display_name ?? null,
+      })));
     }
   }
 
@@ -553,10 +582,14 @@ export default function ContactDetailPage() {
     setEditingDeal(null);
     setDealAddress("");
     setDealRole("buyer");
-    setDealStatus("active");
+    setDealStatus("showing");
     setDealPrice("");
     setDealCloseDate("");
     setDealNotes("");
+    setDealRefSourceId("");
+    setDealRefSourceName("");
+    setDealRefQuery("");
+    setDealRefResults([]);
     setDealErr(null);
     setDealFormOpen(true);
   }
@@ -565,12 +598,26 @@ export default function ContactDetailPage() {
     setEditingDeal(d);
     setDealAddress(d.address);
     setDealRole(d.role);
-    setDealStatus(d.status);
+    setDealStatus(d.status as DealStage);
     setDealPrice(d.price != null ? String(d.price) : "");
     setDealCloseDate(d.close_date ?? "");
     setDealNotes(d.notes ?? "");
+    setDealRefSourceId(d.referral_source_contact_id ?? "");
+    setDealRefSourceName(d.referral_source_name ?? "");
+    setDealRefQuery(d.referral_source_name ?? "");
+    setDealRefResults([]);
     setDealErr(null);
     setDealFormOpen(true);
+  }
+
+  async function searchRefSource(q: string) {
+    setDealRefQuery(q);
+    setDealRefSourceId("");
+    setDealRefSourceName("");
+    if (!q.trim() || q.trim().length < 2) { setDealRefResults([]); return; }
+    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setDealRefResults(res.ok ? (j.results ?? []) : []);
   }
 
   async function saveDeal() {
@@ -591,6 +638,7 @@ export default function ContactDetailPage() {
         price: dealPrice ? Number(dealPrice.replace(/[^0-9.]/g, "")) : null,
         close_date: dealCloseDate || null,
         notes: dealNotes,
+        referral_source_contact_id: dealRefSourceId || null,
       }),
     });
     const j = await res.json().catch(() => ({}));
@@ -987,13 +1035,10 @@ export default function ContactDetailPage() {
                   <option value="tenant">Tenant</option>
                 </select>
               </div>
-              <div className="field" style={{ minWidth: 130 }}>
-                <div className="label">Status</div>
-                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value)}>
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="closed">Closed</option>
-                  <option value="cancelled">Cancelled</option>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Stage</div>
+                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
+                  {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
             </div>
@@ -1006,6 +1051,35 @@ export default function ContactDetailPage() {
                 <div className="label">Close date (optional)</div>
                 <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
               </div>
+            </div>
+            <div className="field">
+              <div className="label">Referral source (optional)</div>
+              <input
+                className="input"
+                value={dealRefQuery}
+                onChange={e => searchRefSource(e.target.value)}
+                placeholder="Search contacts…"
+              />
+              {dealRefResults.length > 0 && (
+                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                  {dealRefResults.slice(0, 5).map(c => (
+                    <button
+                      key={c.id}
+                      className="btn"
+                      style={{ borderRadius: 0, textAlign: "left", justifyContent: "flex-start", fontSize: 13 }}
+                      onClick={() => { setDealRefSourceId(c.id); setDealRefSourceName(c.display_name); setDealRefQuery(c.display_name); setDealRefResults([]); }}
+                    >
+                      {c.display_name} <span style={{ color: "rgba(18,18,18,.4)", marginLeft: 6 }}>{c.category}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {dealRefSourceId && (
+                <div style={{ marginTop: 4, fontSize: 12, color: "rgba(18,18,18,.5)" }}>
+                  Linked: <strong>{dealRefSourceName}</strong>
+                  <button style={{ marginLeft: 8, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setDealRefSourceId(""); setDealRefSourceName(""); setDealRefQuery(""); }}>remove</button>
+                </div>
+              )}
             </div>
             <div className="field">
               <div className="label">Notes (optional)</div>
@@ -1028,9 +1102,12 @@ export default function ContactDetailPage() {
                     <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
                     <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
                       <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
-                      <span className="badge" style={{ textTransform: "capitalize", ...(d.status === "closed" ? { background: "rgba(11,107,42,.1)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)" } : d.status === "cancelled" ? { color: "rgba(18,18,18,.4)" } : {}) }}>{d.status}</span>
+                      <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
+                        {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                      </span>
                       {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
                       {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                      {d.referral_source_name && <span className="badge">Ref: {d.referral_source_name}</span>}
                     </div>
                     {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>{d.notes}</div>}
                   </div>

@@ -26,6 +26,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
             <nav className="nav">
               <NavLink href="/morning" label="Morning" />
               <NavLink href="/contacts" label="Contacts" />
+              <NavLink href="/pipeline" label="Pipeline" />
               <NavLink href="/unmatched" label="Unmatched" />
               <NavLink href="/insights" label="Insights" />
               <NavLink href="/settings/integrations" label="Integrations" />

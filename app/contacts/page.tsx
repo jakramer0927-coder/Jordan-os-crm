@@ -11,6 +11,7 @@ type ContactLite = {
   tier: string | null;
   email: string | null;
   company?: string | null;
+  active_deals?: number;
 };
 
 const CATEGORIES = ["All", "Client", "Agent", "Developer", "Vendor", "Sphere", "Other"];
@@ -72,7 +73,24 @@ export default function ContactsPage() {
       return;
     }
 
-    setRows((data ?? []) as ContactLite[]);
+    const contacts = (data ?? []) as ContactLite[];
+
+    // Attach active deal counts
+    const ids = contacts.map(c => c.id);
+    let dealMap: Record<string, number> = {};
+    if (ids.length > 0) {
+      const { data: dealRows } = await supabase
+        .from("deals")
+        .select("contact_id")
+        .eq("user_id", userId)
+        .not("status", "in", '("closed_won","closed_lost")')
+        .in("contact_id", ids);
+      for (const row of dealRows ?? []) {
+        dealMap[row.contact_id] = (dealMap[row.contact_id] ?? 0) + 1;
+      }
+    }
+
+    setRows(contacts.map(c => ({ ...c, active_deals: dealMap[c.id] ?? 0 })));
   }
 
   async function search(term: string) {
@@ -319,7 +337,14 @@ export default function ContactsPage() {
               style={{ textDecoration: "none" }}
             >
               <div className="rowBetween">
-                <div style={{ fontWeight: 900 }}>{c.display_name}</div>
+                <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <div style={{ fontWeight: 900 }}>{c.display_name}</div>
+                  {(c.active_deals ?? 0) > 0 && (
+                    <span className="badge" style={{ fontSize: 11, background: "rgba(11,107,42,.08)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.2)", fontWeight: 700 }}>
+                      {c.active_deals} deal{c.active_deals !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
                 <div className="muted small">
                   {c.category}
                   {c.tier ? ` • Tier ${c.tier}` : ""}

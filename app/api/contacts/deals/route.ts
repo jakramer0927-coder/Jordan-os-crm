@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("deals")
-    .select("id, address, role, status, price, close_date, notes, created_at")
+    .select("id, address, role, status, price, close_date, notes, created_at, referral_source_contact_id, stage_entered_at, referral_source:referral_source_contact_id(display_name)")
     .eq("contact_id", contact_id)
     .eq("user_id", uid)
     .order("close_date", { ascending: false, nullsFirst: false });
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   if (!uid) return unauthorized();
 
   const body = await req.json().catch(() => ({}));
-  const { contact_id, id, address, role, status, price, close_date, notes } = body;
+  const { contact_id, id, address, role, status, price, close_date, notes, referral_source_contact_id } = body;
 
   if (!isUuid(contact_id))
     return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
@@ -48,10 +48,11 @@ export async function POST(req: Request) {
     contact_id,
     address: address.trim(),
     role: role || "buyer",
-    status: status || "active",
+    status: status || "showing",
     price: price ? Number(price) : null,
     close_date: close_date || null,
     notes: notes?.trim() || null,
+    referral_source_contact_id: referral_source_contact_id || null,
   };
 
   if (id && isUuid(id)) {
