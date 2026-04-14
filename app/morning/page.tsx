@@ -6,6 +6,7 @@ const supabase = createSupabaseBrowserClient();
 
 type TouchIntent =
   | "check_in"
+  | "follow_up"
   | "referral_ask"
   | "review_ask"
   | "deal_followup"
@@ -394,6 +395,8 @@ export default function MorningPage() {
   // AI-generated drafts keyed by contact ID
   const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
   const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
+  // Per-contact intent selection
+  const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
 
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
@@ -663,7 +666,8 @@ export default function MorningPage() {
     );
   }
 
-  async function regenerateDraft(c: Recommendation) {
+  async function regenerateDraft(c: Recommendation, intent?: TouchIntent) {
+    const resolvedIntent = intent ?? draftIntents[c.id] ?? "check_in";
     setDraftsGenerating((prev) => new Set(prev).add(c.id));
     try {
       const res = await fetch("/api/voice/draft", {
@@ -672,7 +676,7 @@ export default function MorningPage() {
         body: JSON.stringify({
           contact_id: c.id,
           channel: c.suggested_channel,
-          intent: "check_in",
+          intent: resolvedIntent,
           length: "short",
         }),
       });
@@ -932,7 +936,7 @@ export default function MorningPage() {
                     </div>
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="rowBetween" style={{ marginBottom: 6 }}>
+                      <div className="rowBetween" style={{ marginBottom: 8 }}>
                         <div className="small muted bold">
                           {aiDrafts[c.id] ? "Draft (Jordan AI)" : draftsGenerating.has(c.id) ? "Generating draft…" : "Draft (template)"}
                         </div>
@@ -945,13 +949,36 @@ export default function MorningPage() {
                           {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
                         </button>
                       </div>
-                      <div className="row">
+
+                      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                         <span className="badge">Channel: {c.suggested_channel}</span>
-                        <span className="badge">Intent: check_in</span>
+                        {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
+                          const active = (draftIntents[c.id] ?? "check_in") === intent;
+                          return (
+                            <button
+                              key={intent}
+                              className="btn"
+                              style={{
+                                fontSize: 11,
+                                padding: "1px 8px",
+                                fontWeight: active ? 900 : 400,
+                                background: active ? "var(--ink)" : undefined,
+                                color: active ? "var(--paper)" : undefined,
+                              }}
+                              onClick={() => {
+                                setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
+                                regenerateDraft(c, intent);
+                              }}
+                              disabled={draftsGenerating.has(c.id)}
+                            >
+                              {intent.replace("_", " ")}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45, opacity: draftsGenerating.has(c.id) ? 0.4 : 1 }}>
-                        {aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: "check_in", channel: c.suggested_channel, voice })}
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, opacity: draftsGenerating.has(c.id) ? 0.4 : 1 }}>
+                        {aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice })}
                       </div>
                     </div>
                   </div>

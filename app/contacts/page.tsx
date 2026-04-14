@@ -13,6 +13,9 @@ type ContactLite = {
   company?: string | null;
 };
 
+const CATEGORIES = ["All", "Client", "Agent", "Developer", "Vendor", "Sphere", "Other"];
+const TIERS = ["All", "A", "B", "C"];
+
 export default function ContactsPage() {
   const [ready, setReady] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -21,6 +24,9 @@ export default function ContactsPage() {
   const [rows, setRows] = useState<ContactLite[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [tierFilter, setTierFilter] = useState("All");
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -39,12 +45,12 @@ export default function ContactsPage() {
     setBusy(true);
     setErr(null);
 
-    // Uses RLS via supabase client. If you don’t have RLS policies, this will fail — but most setups do.
     const { data, error } = await supabase
       .from("contacts")
       .select("id, display_name, category, tier, email, company")
+      .neq("archived", true)
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(500);
 
     setBusy(false);
 
@@ -62,15 +68,12 @@ export default function ContactsPage() {
 
     const qRaw = term.trim();
     if (!qRaw) {
-      // empty search -> show recent
       await loadRecent(uid);
       return;
     }
 
-    // guard to keep it snappy
     if (qRaw.length < 2) return;
 
-    // cancel in-flight request
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -93,14 +96,12 @@ export default function ContactsPage() {
 
       setRows((j.results || []) as ContactLite[]);
     } catch (e: any) {
-      // ignore abort errors
       if (e?.name !== "AbortError") setErr(e?.message || "Search failed");
     } finally {
       setBusy(false);
     }
   }
 
-  // init
   useEffect(() => {
     requireSession().then((u) => {
       if (!u) return;
@@ -110,24 +111,29 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // debounce search
   useEffect(() => {
     if (!uid) return;
-    const t = setTimeout(() => {
-      search(q);
-    }, 220);
-
+    const t = setTimeout(() => { search(q); }, 220);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, uid]);
 
+  const filtered = useMemo(() => {
+    return rows.filter((c) => {
+      if (categoryFilter !== "All" && (c.category || "").toLowerCase() !== categoryFilter.toLowerCase()) return false;
+      if (tierFilter !== "All" && (c.tier || "").toUpperCase() !== tierFilter) return false;
+      return true;
+    });
+  }, [rows, categoryFilter, tierFilter]);
+
   const hint = useMemo(() => {
     const qt = q.trim();
-    if (!qt) return busy ? "Loading recent…" : `${rows.length} recent`;
-    if (qt.length < 2) return "Type 2+ characters…";
+    const hasFilter = categoryFilter !== "All" || tierFilter !== "All";
+    if (!qt && !hasFilter) return busy ? "Loading…" : `${filtered.length} contacts`;
+    if (qt.length === 1) return "Type 2+ characters…";
     if (busy) return "Searching…";
-    return `${rows.length} result(s)`;
-  }, [q, busy, rows.length]);
+    return `${filtered.length} result(s)`;
+  }, [q, busy, filtered.length, categoryFilter, tierFilter]);
 
   if (!ready) return <div className="page">Loading…</div>;
 
@@ -142,32 +148,65 @@ export default function ContactsPage() {
         </div>
 
         <div className="row">
-          <a className="btn" href="/morning">
-            Morning
-          </a>
-          <a className="btn" href="/unmatched">
-            Unmatched
-          </a>
+          <a className="btn" href="/morning">Morning</a>
+          <a className="btn" href="/unmatched">Unmatched</a>
         </div>
       </div>
 
       {err ? <div className="alert alertError">{err}</div> : null}
 
-      <div className="card cardPad">
+      <div className="card cardPad stack" style={{ gap: 10 }}>
         <input
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search contacts…"
         />
-        <div className="muted small" style={{ marginTop: 8 }}>
-          Tip: leave blank to see your most recently updated contacts.
+
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <div className="row" style={{ gap: 4 }}>
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                className="btn"
+                style={{
+                  fontSize: 12,
+                  padding: "2px 10px",
+                  fontWeight: categoryFilter === cat ? 900 : 400,
+                  background: categoryFilter === cat ? "var(--ink)" : undefined,
+                  color: categoryFilter === cat ? "var(--paper)" : undefined,
+                }}
+                onClick={() => setCategoryFilter(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="row" style={{ gap: 4 }}>
+            {TIERS.map((t) => (
+              <button
+                key={t}
+                className="btn"
+                style={{
+                  fontSize: 12,
+                  padding: "2px 10px",
+                  fontWeight: tierFilter === t ? 900 : 400,
+                  background: tierFilter === t ? "var(--ink)" : undefined,
+                  color: tierFilter === t ? "var(--paper)" : undefined,
+                }}
+                onClick={() => setTierFilter(t)}
+              >
+                {t === "All" ? "All tiers" : `Tier ${t}`}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="section" style={{ marginTop: 14 }}>
         <div className="stack">
-          {rows.map((c) => (
+          {filtered.map((c) => (
             <a
               key={c.id}
               className="card cardPad"
@@ -178,7 +217,7 @@ export default function ContactsPage() {
                 <div style={{ fontWeight: 900 }}>{c.display_name}</div>
                 <div className="muted small">
                   {c.category}
-                  {c.tier ? ` • ${c.tier}` : ""}
+                  {c.tier ? ` • Tier ${c.tier}` : ""}
                   {c.company ? ` • ${c.company}` : ""}
                   {c.email ? ` • ${c.email}` : ""}
                 </div>
@@ -186,7 +225,7 @@ export default function ContactsPage() {
             </a>
           ))}
 
-          {!busy && rows.length === 0 ? <div className="muted">No matches.</div> : null}
+          {!busy && filtered.length === 0 ? <div className="muted">No matches.</div> : null}
         </div>
       </div>
     </div>

@@ -21,11 +21,14 @@ type Contact = {
   category: string;
   tier: string | null;
   client_type: string | null;
+  email: string | null;
+  phone: string | null;
   created_at: string;
   user_id?: string;
   buyer_budget_min: number | null;
   buyer_budget_max: number | null;
   buyer_target_areas: string | null;
+  notes: string | null;
   ai_context: string | null;
   ai_context_updated_at: string | null;
 };
@@ -277,6 +280,9 @@ export default function ContactDetailPage() {
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [notes, setNotes] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
@@ -356,7 +362,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -375,6 +381,9 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
+    setEmail(c.email || "");
+    setPhone(c.phone || "");
+    setNotes(c.notes || "");
     setBuyerBudgetMin(c.buyer_budget_min != null ? String(c.buyer_budget_min) : "");
     setBuyerBudgetMax(c.buyer_budget_max != null ? String(c.buyer_budget_max) : "");
     setBuyerAreas(c.buyer_target_areas || "");
@@ -423,16 +432,28 @@ export default function ContactDetailPage() {
         category,
         tier,
         client_type: clientType.trim() ? clientType.trim() : null,
+        email: email.trim() ? email.trim().toLowerCase() : null,
+        phone: phone.trim() ? phone.trim() : null,
+        notes: notes.trim() ? notes.trim() : null,
       })
       .eq("id", contact.id);
 
-    setSavingContact(false);
-
     if (error) {
+      setSavingContact(false);
       setError(`Update contact error: ${error.message}`);
       return;
     }
 
+    // Keep contact_emails table in sync with the primary email
+    const newEmail = email.trim().toLowerCase();
+    if (newEmail) {
+      // Upsert into contact_emails so Gmail sync can match this address
+      await supabase
+        .from("contact_emails")
+        .upsert({ contact_id: contact.id, email: newEmail }, { onConflict: "contact_id,email" });
+    }
+
+    setSavingContact(false);
     setEditing(false);
     await fetchAll();
   }
@@ -730,7 +751,14 @@ export default function ContactDetailPage() {
 
             <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
               Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+              {contact.email ? <span> · {contact.email}</span> : null}
+              {contact.phone ? <span> · {contact.phone}</span> : null}
             </div>
+            {contact.notes ? (
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                {contact.notes}
+              </div>
+            ) : null}
           </div>
 
           <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
@@ -797,6 +825,40 @@ export default function ContactDetailPage() {
               value={clientType}
               onChange={(e) => setClientType(e.target.value)}
               placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..."
+            />
+          </div>
+
+          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
+            <div className="field" style={{ flex: 1, minWidth: 220 }}>
+              <div className="label">Email (optional)</div>
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 180 }}>
+              <div className="label">Phone (optional)</div>
+              <input
+                className="input"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(310) 555-0100"
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="label">Notes (optional)</div>
+            <textarea
+              className="textarea"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Context for AI drafts, relationship notes, key details…"
+              style={{ minHeight: 80 }}
             />
           </div>
 
