@@ -109,6 +109,19 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function workdaysElapsedInMonth(d = new Date()): number {
+  let count = 0;
+  const cur = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d);
+  end.setHours(23, 59, 59, 999);
+  while (cur <= end) {
+    const day = cur.getDay();
+    if (day >= 1 && day <= 5) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function InsightsPage() {
@@ -129,6 +142,10 @@ export default function InsightsPage() {
   const [wtdOutbound, setWtdOutbound] = useState(0);
   const [wtdAgents, setWtdAgents] = useState(0);
   const [wtdReferralAsks, setWtdReferralAsks] = useState(0);
+
+  // MTD
+  const [mtdOutbound, setMtdOutbound] = useState(0);
+  const [mtdReferralAsks, setMtdReferralAsks] = useState(0);
 
   // Accountability
   const [todayCount, setTodayCount] = useState(0);
@@ -152,7 +169,12 @@ export default function InsightsPage() {
   const isOnPace = useMemo(() => wtdOutbound >= wtdPace * 0.8, [wtdOutbound, wtdPace]);
   const wtdDeficit = useMemo(() => Math.max(0, wtdPace - wtdOutbound), [wtdPace, wtdOutbound]);
 
-  const healthScore = useMemo(() => {
+  const mtdWorkdays = useMemo(() => workdaysElapsedInMonth(), [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mtdGoal = useMemo(() => mtdWorkdays * dailyGoal, [mtdWorkdays, dailyGoal]);
+  const mtdRefGoal = 4; // 4 referral asks per month
+  const mtdOnPace = useMemo(() => mtdOutbound >= mtdGoal * 0.8, [mtdOutbound, mtdGoal]);
+
+  const health = useMemo(() => {
     const aComp = aClientsTotal > 0
       ? clamp(Math.round(30 * (1 - aClientsDueOrOverdue / aClientsTotal)), 0, 30) : 30;
     const velocity = clamp(Math.round((out30 / (dailyGoal * 20)) * 25), 0, 25);
@@ -160,7 +182,7 @@ export default function InsightsPage() {
     const agent = clamp(Math.round((agentShare / 0.4) * 20), 0, 20);
     const ask = clamp(Math.round((refAsks30 / 4) * 15), 0, 15);
     const growth = clamp(Math.round((contactsTotal / 200) * 10), 0, 10);
-    return aComp + velocity + agent + ask + growth;
+    return { total: aComp + velocity + agent + ask + growth, aComp, velocity, agent, ask, growth };
   }, [aClientsTotal, aClientsDueOrOverdue, out30, dailyGoal, out7, agents7, refAsks30, contactsTotal]);
 
   async function fetchAll() {
@@ -192,17 +214,25 @@ export default function InsightsPage() {
     setTouchesByDay(byDay);
     setTodayCount(byDay[today] ?? 0);
 
-    // Streak: consecutive past weekdays that hit goal
+    // Streak: consecutive weekdays that hit goal, including today if already done
     {
       let s = 0;
       const check = new Date(now);
       check.setHours(12, 0, 0, 0);
-      check.setDate(check.getDate() - 1);
-      for (let i = 0; i < 35; i++) {
+      for (let i = 0; i < 36; i++) {
         if (isWeekendDay(check)) { check.setDate(check.getDate() - 1); continue; }
         const ds = localDateStr(check);
-        if ((byDay[ds] ?? 0) >= dailyGoal) { s++; check.setDate(check.getDate() - 1); }
-        else break;
+        const isToday = ds === today;
+        const count = byDay[ds] ?? 0;
+        if (count >= dailyGoal) {
+          s++;
+          check.setDate(check.getDate() - 1);
+        } else if (isToday) {
+          // today not hit yet — doesn't break the streak, just skip to yesterday
+          check.setDate(check.getDate() - 1);
+        } else {
+          break;
+        }
       }
       setStreak(s);
     }
@@ -225,6 +255,11 @@ export default function InsightsPage() {
     setReviewAsks30(t30.filter(t => t.intent === "review_ask").length);
     setWtdOutbound(tWtd.length);
     setWtdReferralAsks(tWtd.filter(t => t.intent === "referral_ask").length);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const tMtd = tAll.filter(t => new Date(t.occurred_at) >= startOfMonth);
+    setMtdOutbound(tMtd.length);
+    setMtdReferralAsks(tMtd.filter(t => t.intent === "referral_ask").length);
 
     // Weekly history (4 weeks)
     const weeks: WeekSummary[] = [];
@@ -429,7 +464,7 @@ export default function InsightsPage() {
               <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>Day streak</div>
             </div>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 900, fontSize: 36, lineHeight: 1 }}>{healthScore}</div>
+              <div style={{ fontWeight: 900, fontSize: 36, lineHeight: 1 }}>{health.total}</div>
               <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>Score / 100</div>
             </div>
           </div>
@@ -602,7 +637,7 @@ export default function InsightsPage() {
         </div>
       )}
 
-      {/* ── WTD Pace ────────────────────────────────────────────────────────── */}
+      {/* ── WTD + MTD Pace ──────────────────────────────────────────────────── */}
       <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10 }}>Week-to-date pace</div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -615,10 +650,10 @@ export default function InsightsPage() {
               fontWeight: 700,
             }}
           >
-            Outreach: {wtdOutbound} / {wtdPace} pace
+            WTD outreach: {wtdOutbound} / {wtdPace} pace
           </span>
           <span className="badge">Agents: {wtdAgents} / {wdElapsed * 2} pace</span>
-          <span className="badge">Ref asks: {wtdReferralAsks} / 1 weekly</span>
+          <span className="badge">Ref asks this week: {wtdReferralAsks} / 1</span>
           <span className="badge">WoW: {wow >= 0 ? `+${wow}%` : `${wow}%`}</span>
           {aClientsDueOrOverdue > 0 && (
             <span className="badge" style={{ borderColor: "rgba(200,0,0,.25)", background: "rgba(200,0,0,.05)", color: "#8a0000", fontWeight: 700 }}>
@@ -626,14 +661,61 @@ export default function InsightsPage() {
             </span>
           )}
         </div>
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10, marginTop: 18 }}>Month-to-date pace</div>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <span
+            className="badge"
+            style={{
+              borderColor: mtdOnPace ? "rgba(11,107,42,.3)" : "rgba(200,0,0,.25)",
+              background: mtdOnPace ? "rgba(11,107,42,.07)" : "rgba(200,0,0,.05)",
+              color: mtdOnPace ? "#0b6b2a" : "#8a0000",
+              fontWeight: 700,
+            }}
+          >
+            MTD outreach: {mtdOutbound} / {mtdGoal} pace ({mtdWorkdays}d × {dailyGoal})
+          </span>
+          <span
+            className="badge"
+            style={{
+              borderColor: mtdReferralAsks >= mtdRefGoal ? "rgba(11,107,42,.3)" : undefined,
+              background: mtdReferralAsks >= mtdRefGoal ? "rgba(11,107,42,.07)" : undefined,
+              color: mtdReferralAsks >= mtdRefGoal ? "#0b6b2a" : undefined,
+              fontWeight: mtdReferralAsks >= mtdRefGoal ? 700 : 400,
+            }}
+          >
+            Ref asks this month: {mtdReferralAsks} / {mtdRefGoal}{mtdReferralAsks >= mtdRefGoal ? " ✓" : ""}
+          </span>
+        </div>
       </div>
 
       {/* ── Metrics (secondary) ─────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
         <div className="card cardPad">
-          <div className="label">Score</div>
-          <div style={{ fontWeight: 900, fontSize: 26, marginTop: 4 }}>{healthScore}<span className="subtle" style={{ fontSize: 13, fontWeight: 400 }}>/100</span></div>
-          <div className="subtle" style={{ fontSize: 12 }}>Compliance + velocity + asks</div>
+          <div className="label">Score breakdown</div>
+          <div style={{ fontWeight: 900, fontSize: 26, marginTop: 4 }}>{health.total}<span className="subtle" style={{ fontSize: 13, fontWeight: 400 }}>/100</span></div>
+          <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+            {([
+              { label: "A-client compliance", value: health.aComp, max: 30 },
+              { label: "Outreach velocity", value: health.velocity, max: 25 },
+              { label: "Agent share", value: health.agent, max: 20 },
+              { label: "Ask activity", value: health.ask, max: 15 },
+              { label: "Database size", value: health.growth, max: 10 },
+            ] as Array<{ label: string; value: number; max: number }>).map(({ label, value, max }) => {
+              const ratio = max > 0 ? value / max : 0;
+              const color = ratio >= 0.8 ? "#0b6b2a" : ratio >= 0.5 ? "rgba(130,80,0,.9)" : "#8a0000";
+              return (
+                <div key={label}>
+                  <div className="rowBetween" style={{ marginBottom: 3 }}>
+                    <span style={{ fontSize: 11, color: "rgba(18,18,18,.55)" }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color }}>{value}/{max}</span>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "rgba(0,0,0,.08)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.round(ratio * 100)}%`, background: color, borderRadius: 2 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="card cardPad">
           <div className="label">Velocity</div>

@@ -15,6 +15,7 @@ type ContactLite = {
 
 const CATEGORIES = ["All", "Client", "Agent", "Developer", "Vendor", "Sphere", "Other"];
 const TIERS = ["All", "A", "B", "C"];
+const NEW_CATEGORIES = ["Client", "Agent", "Developer", "Vendor", "Sphere", "Other"];
 
 export default function ContactsPage() {
   const [ready, setReady] = useState(false);
@@ -27,6 +28,17 @@ export default function ContactsPage() {
 
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [tierFilter, setTierFilter] = useState("All");
+
+  // quick-add form
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCategory, setNewCategory] = useState("Client");
+  const [newTier, setNewTier] = useState("A");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -102,6 +114,48 @@ export default function ContactsPage() {
     }
   }
 
+  async function addContact() {
+    if (!newName.trim()) { setAddErr("Name is required."); return; }
+    setAdding(true);
+    setAddErr(null);
+    try {
+      const res = await fetch("/api/contacts/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: [{
+            display_name: newName.trim(),
+            category: newCategory.toLowerCase(),
+            tier: newTier,
+            client_type: "",
+            email: newEmail.trim(),
+            phone: newPhone.trim(),
+            company: "",
+            notes: newNotes.trim(),
+          }],
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.errors?.length) {
+        setAddErr(j.errors?.[0]?.error ?? j.error ?? "Failed to add contact.");
+        return;
+      }
+      if (j.skipped > 0 && j.inserted === 0) {
+        setAddErr("A contact with that name already exists.");
+        return;
+      }
+      // Reset form and reload
+      setNewName(""); setNewCategory("Client"); setNewTier("A");
+      setNewEmail(""); setNewPhone(""); setNewNotes("");
+      setAddOpen(false);
+      if (uid) await loadRecent(uid);
+    } catch (e: any) {
+      setAddErr(e?.message ?? "Unexpected error.");
+    } finally {
+      setAdding(false);
+    }
+  }
+
   useEffect(() => {
     requireSession().then((u) => {
       if (!u) return;
@@ -150,10 +204,61 @@ export default function ContactsPage() {
         <div className="row">
           <a className="btn" href="/morning">Morning</a>
           <a className="btn" href="/unmatched">Unmatched</a>
+          <button className="btn btnPrimary" onClick={() => { setAddOpen((v) => !v); setAddErr(null); }}>
+            {addOpen ? "Cancel" : "+ Add contact"}
+          </button>
         </div>
       </div>
 
       {err ? <div className="alert alertError">{err}</div> : null}
+
+      {addOpen && (
+        <div className="card cardPad stack">
+          <div style={{ fontWeight: 900, fontSize: 15 }}>New contact</div>
+          {addErr && <div className="alert alertError" style={{ fontSize: 13 }}>{addErr}</div>}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+            <div className="field">
+              <div className="label">Name *</div>
+              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full name" autoFocus />
+            </div>
+            <div className="field">
+              <div className="label">Category</div>
+              <select className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
+                {NEW_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <div className="label">Tier</div>
+              <select className="select" value={newTier} onChange={(e) => setNewTier(e.target.value)}>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </select>
+            </div>
+            <div className="field">
+              <div className="label">Email</div>
+              <input className="input" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@example.com" />
+            </div>
+            <div className="field">
+              <div className="label">Phone</div>
+              <input className="input" type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="(310) 555-0100" />
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="label">Notes (optional)</div>
+            <textarea className="textarea" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="Context, relationship notes…" style={{ minHeight: 60 }} />
+          </div>
+
+          <div className="row">
+            <button className="btn btnPrimary" onClick={addContact} disabled={adding}>
+              {adding ? "Adding…" : "Add contact"}
+            </button>
+            <button className="btn" onClick={() => { setAddOpen(false); setAddErr(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       <div className="card cardPad stack" style={{ gap: 10 }}>
         <input

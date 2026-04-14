@@ -40,6 +40,7 @@ type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
   days_since_outbound: number | null;
+  last_inbound_at: string | null;
 };
 
 type VoiceProfile = {
@@ -551,24 +552,47 @@ export default function MorningPage() {
       if (isAgentA(c)) reasons.push("Agent-A priority");
       if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
 
-      let score = 0;
-      if (isAClient(c)) score += 1000;
-      if (overdue) score += 300;
-      if (d == null) score += 200; // never reached out — boost above minimally-overdue contacts
-      score += (d ?? cadence) * 2;
+      // Recency protection: contacts touched in last 3 days are deprioritized
+      const recentlyTouched = d != null && d <= 3;
+      if (recentlyTouched) reasons.push("Touched recently — deprioritized");
 
+      // Inbound recency: if they replied recently, less urgent to reach out
+      const daysSinceInbound = c.last_inbound_at
+        ? Math.max(0, Math.floor((Date.now() - new Date(c.last_inbound_at).getTime()) / 86400000))
+        : null;
+      const inboundRecent7 = daysSinceInbound != null && daysSinceInbound <= 7;
+      const inboundRecent3 = daysSinceInbound != null && daysSinceInbound <= 3;
+
+      // Cadence ratio: normalized urgency (1.0 = exactly at cadence, >1 = overdue)
+      const ratio = (d ?? cadence) / cadence;
+
+      let score = ratio * 100;
+
+      // Never contacted gets a meaningful boost
+      if (d == null) score += 30;
+
+      // A-client always floats to top
+      if (isAClient(c)) score += 100;
+
+      // Category priority weights
       const cat = (c.category || "").toLowerCase();
-      if (cat === "agent") score += 60;
-      if (cat === "developer") score += 40;
-      if (cat === "client") score += 80;
-      if (cat === "vendor") score += 30;
-      if (cat === "sphere") score += 50;
+      if (cat === "client") score += 20;
+      if (cat === "agent") score += 15;
+      if (cat === "sphere") score += 10;
+      if (cat === "developer") score += 10;
+      if (cat === "vendor") score += 5;
 
+      // Tier weights
       const t = (c.tier || "").toUpperCase();
-      if (t === "A") score += 40;
-      if (t === "B") score += 20;
+      if (t === "A") score += 20;
+      if (t === "B") score += 10;
 
-      if (!weekday) score -= 30;
+      // Inbound recency reduces urgency
+      if (inboundRecent3) { score -= 40; reasons.push("Replied within 3 days — less urgent"); }
+      else if (inboundRecent7) { score -= 20; reasons.push("Replied within 7 days"); }
+
+      // Recency protection: sink recently-touched contacts
+      if (recentlyTouched) score = -999;
 
       const suggested_channel = pickChannel(c);
 
@@ -607,14 +631,25 @@ export default function MorningPage() {
 
     // Fill remaining slots — only contacts at least 50% through their cadence
     // (or never contacted). Never pad with recently-touched people.
+    // Category diversity cap: max 2 per category in fill phase.
+    const fillCategoryCounts: Record<string, number> = {};
+    for (const c of top) {
+      const cat = (c.category || "other").toLowerCase();
+      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+    }
+
     for (const c of scored) {
       if (top.length >= totalRecs) break;
       if (used.has(c.id)) continue;
+      if (c.score === -999) continue; // recency-protected
       const isNeverContacted = c.days_since_outbound == null;
       const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.5;
       if (!isNeverContacted && !isApproachingDue) continue;
+      const cat = (c.category || "other").toLowerCase();
+      if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
       top.push(c);
       used.add(c.id);
+      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
     }
 
     return top;
@@ -710,6 +745,12 @@ export default function MorningPage() {
   if (!ready) return <div className="page">Loading…</div>;
 
   const weekday = isWeekdayLocal();
+  const lateNudge = (() => {
+    if (!weekday) return false;
+    if (todayCount >= rules.totalRecs) return false;
+    const hour = new Date().getHours();
+    return hour >= 15; // 3pm+
+  })();
 
   return (
     <div>
@@ -764,6 +805,17 @@ export default function MorningPage() {
             }}
           >
             {error || msg}
+          </div>
+        </div>
+      )}
+
+      {lateNudge && (
+        <div className="card cardPad" style={{ borderColor: "rgba(200,100,0,.3)", background: "rgba(200,100,0,.05)" }}>
+          <div style={{ fontWeight: 900, color: "rgba(140,60,0,.9)", fontSize: 14 }}>
+            End-of-day push — {rules.totalRecs - todayCount} touch{rules.totalRecs - todayCount !== 1 ? "es" : ""} left to hit your goal
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(140,60,0,.7)", marginTop: 4 }}>
+            You've done {todayCount} of {rules.totalRecs} today. The contacts below are ready — don't let the day slip.
           </div>
         </div>
       )}
