@@ -108,12 +108,16 @@ function extractTextFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
 
 async function syncUser(uid: string, tok: any): Promise<{
   touches: { imported: number; skipped: number };
+  inbound: { imported: number; skipped: number };
+  calendar: { imported: number; skipped: number };
   unmatched: { inserted: number; updated: number };
   voice: { inserted: number; skipped: number };
   error?: string;
 }> {
   const result = {
     touches: { imported: 0, skipped: 0 },
+    inbound: { imported: 0, skipped: 0 },
+    calendar: { imported: 0, skipped: 0 },
     unmatched: { inserted: 0, updated: 0 },
     voice: { inserted: 0, skipped: 0 },
   };
@@ -341,6 +345,189 @@ async function syncUser(uid: string, tok: any): Promise<{
           .eq("email", email);
         result.unmatched.updated++;
       }
+    }
+
+    // ── Inbound sync (inbox messages from known contacts) ────────────────
+    // Get user's own email so we can skip self-sent messages
+    let ownEmail = "";
+    try {
+      const profile = await gmail.users.getProfile({ userId: "me" });
+      ownEmail = (profile.data.emailAddress || "").toLowerCase();
+    } catch { /* ignore — just means self-sent messages may create duplicate inbound touches */ }
+
+    let inPageToken: string | undefined;
+    let inFetched = 0;
+    const IN_MAX = 500;
+
+    while (inFetched < IN_MAX) {
+      const listRes: gmail_v1.Schema$ListMessagesResponse = (
+        await gmail.users.messages.list({
+          userId: "me",
+          labelIds: ["INBOX"],
+          q: `after:${afterStr}`,
+          maxResults: Math.min(100, IN_MAX - inFetched),
+          pageToken: inPageToken,
+        })
+      ).data;
+
+      const msgs = listRes.messages ?? [];
+      inPageToken = listRes.nextPageToken ?? undefined;
+      if (msgs.length === 0) break;
+      inFetched += msgs.length;
+
+      for (let i = 0; i < msgs.length; i += BATCH) {
+        const batch = msgs.slice(i, i + BATCH).filter((m) => !!m.id);
+        const fulls = await Promise.all(
+          batch.map((m) =>
+            gmail.users.messages.get({
+              userId: "me",
+              id: m.id!,
+              format: "metadata",
+              metadataHeaders: ["From", "Subject", "Date"],
+            })
+          )
+        );
+
+        for (const full of fulls) {
+          const headers = full.data.payload?.headers ?? [];
+          const fromEmails = parseEmails(headerValue(headers, "From"));
+          const fromEmail = fromEmails[0];
+
+          if (!fromEmail) continue;
+          if (fromEmail === ownEmail) continue; // skip self-sent
+          if (ignoreEmails.has(fromEmail)) continue;
+          const fromDomain = fromEmail.split("@")[1]?.toLowerCase() || "";
+          if (ignoreDomains.has(fromDomain)) continue;
+          if (shouldIgnoreForUnmatched(fromEmail)) continue;
+
+          const contactId = contactIdByEmail.get(fromEmail);
+          if (!contactId) continue;
+
+          const messageId = full.data.id ?? "";
+          const subject = headerValue(headers, "Subject") || "";
+          const snippet = (full.data.snippet || "").trim();
+          const internalDateMs = Number(full.data.internalDate || 0);
+          const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
+          const threadId = full.data.threadId || "";
+          const threadLink = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
+
+          const { data: existing } = await supabaseAdmin
+            .from("touches")
+            .select("id")
+            .eq("contact_id", contactId)
+            .eq("source", "gmail")
+            .eq("source_message_id", messageId)
+            .limit(1);
+
+          if ((existing ?? []).length > 0) { result.inbound.skipped++; continue; }
+
+          const { error: insErr } = await supabaseAdmin.from("touches").insert({
+            contact_id: contactId,
+            channel: "email",
+            direction: "inbound",
+            occurred_at: occurredAt,
+            intent: null,
+            summary: (snippet || subject).trim() || null,
+            source: "gmail",
+            source_link: threadLink,
+            source_message_id: messageId,
+          });
+
+          if (insErr) result.inbound.skipped++;
+          else result.inbound.imported++;
+        }
+      }
+
+      if (!inPageToken) break;
+    }
+
+    // ── Calendar sync ─────────────────────────────────────────────────────
+    try {
+      const { data: calSettings } = await supabaseAdmin
+        .from("user_settings")
+        .select("last_calendar_sync_at")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      const calAfterDate = calSettings?.last_calendar_sync_at
+        ? new Date(calSettings.last_calendar_sync_at)
+        : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+      const calendar = google.calendar({ version: "v3", auth: oauth2 });
+      let calPageToken: string | undefined;
+      let calFetched = 0;
+      const CAL_MAX = 500;
+
+      while (calFetched < CAL_MAX) {
+        const res = await calendar.events.list({
+          calendarId: "primary",
+          timeMin: calAfterDate.toISOString(),
+          maxResults: Math.min(250, CAL_MAX - calFetched),
+          singleEvents: true,
+          orderBy: "startTime",
+          pageToken: calPageToken,
+          fields: "nextPageToken,items(id,summary,status,start,attendees,htmlLink,hangoutLink)",
+        });
+
+        const events = res.data.items ?? [];
+        calPageToken = res.data.nextPageToken ?? undefined;
+        if (events.length === 0) break;
+        calFetched += events.length;
+
+        for (const event of events) {
+          if (event.status === "cancelled") continue;
+          if (!event.start?.dateTime) continue;
+
+          const attendees = event.attendees ?? [];
+          const selfAttendee = attendees.find((a) => (a.email || "").toLowerCase() === ownEmail);
+          if (selfAttendee?.responseStatus === "declined") continue;
+
+          const otherAttendees = attendees.filter((a) => (a.email || "").toLowerCase() !== ownEmail);
+          if (otherAttendees.length === 0) continue;
+
+          const matchedAttendee = otherAttendees.find((a) =>
+            contactIdByEmail.has((a.email || "").toLowerCase())
+          );
+          if (!matchedAttendee) continue;
+
+          const contactId = contactIdByEmail.get((matchedAttendee.email || "").toLowerCase());
+          if (!contactId) continue;
+
+          const eventId = event.id ?? "";
+          const { data: existing } = await supabaseAdmin
+            .from("touches")
+            .select("id")
+            .eq("contact_id", contactId)
+            .eq("source", "calendar")
+            .eq("source_message_id", eventId)
+            .limit(1);
+
+          if ((existing ?? []).length > 0) { result.calendar.skipped++; continue; }
+
+          const { error: insErr } = await supabaseAdmin.from("touches").insert({
+            contact_id: contactId,
+            channel: "in_person",
+            direction: "outbound",
+            occurred_at: new Date(event.start.dateTime).toISOString(),
+            intent: "check_in",
+            summary: event.summary || null,
+            source: "calendar",
+            source_link: event.htmlLink || event.hangoutLink || null,
+            source_message_id: eventId,
+          });
+
+          if (insErr) result.calendar.skipped++;
+          else result.calendar.imported++;
+        }
+
+        if (!calPageToken) break;
+      }
+
+      await supabaseAdmin
+        .from("user_settings")
+        .upsert({ user_id: uid, last_calendar_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
+    } catch (calErr: any) {
+      console.error("CALENDAR_SYNC_ERROR", uid, calErr?.message);
     }
 
     // ── Update sync cursor ────────────────────────────────────────────────

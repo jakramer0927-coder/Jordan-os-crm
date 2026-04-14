@@ -68,7 +68,11 @@ function fmtDT(v: string) {
 }
 
 function dirPill(direction: Touch["direction"]) {
-  return direction === "outbound" ? "Outbound" : "Inbound";
+  const label = direction === "outbound" ? "Outbound" : "Inbound";
+  const color = direction === "outbound" ? "#0b6b2a" : "#1a4fa0";
+  return (
+    <span style={{ color, fontWeight: 700 }}>{label}</span>
+  );
 }
 
 function channelLabel(c: Touch["channel"]) {
@@ -176,6 +180,81 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
           Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
           thread is saved.
         </div>
+      </div>
+    </div>
+  );
+}
+
+type TouchFilter = "all" | "outbound" | "inbound";
+
+function TouchHistory({ touches }: { touches: Touch[] }) {
+  const [filter, setFilter] = useState<TouchFilter>("all");
+
+  const filtered = filter === "all" ? touches : touches.filter((t) => t.direction === filter);
+  const outboundCount = touches.filter((t) => t.direction === "outbound").length;
+  const inboundCount = touches.filter((t) => t.direction === "inbound").length;
+
+  return (
+    <div className="card cardPad" style={{ marginTop: 18 }}>
+      <div className="rowResponsiveBetween" style={{ marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>
+            Touch history <span className="subtle" style={{ fontWeight: 400 }}>({touches.length})</span>
+          </div>
+          <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+            {outboundCount} outbound · {inboundCount} inbound
+          </div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {(["all", "outbound", "inbound"] as TouchFilter[]).map((f) => (
+            <button
+              key={f}
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: "2px 10px",
+                fontWeight: filter === f ? 900 : 400,
+                background: filter === f ? "var(--ink)" : undefined,
+                color: filter === f ? "var(--paper)" : undefined,
+              }}
+              onClick={() => setFilter(f)}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="stack">
+        {filtered.length === 0 ? (
+          <div className="subtle">No touches{filter !== "all" ? ` (${filter})` : ""} yet.</div>
+        ) : (
+          filtered.map((t) => (
+            <div key={t.id} className="card cardPad">
+              <div className="rowResponsiveBetween">
+                <div style={{ fontWeight: 700 }}>
+                  {dirPill(t.direction)}
+                  <span style={{ color: "var(--ink)", fontWeight: 400 }}> · {channelLabel(t.channel)}</span>
+                  {t.intent ? <span className="subtle"> · {t.intent}</span> : null}
+                  {t.source ? <span className="subtle"> · {t.source}</span> : null}
+                </div>
+                <div className="subtle" style={{ flexShrink: 0 }}>{fmtDT(t.occurred_at)}</div>
+              </div>
+
+              {t.summary ? (
+                <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>{t.summary}</div>
+              ) : null}
+
+              {t.source_link ? (
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  <a href={t.source_link} target="_blank" rel="noreferrer" className="subtle">
+                    open in {t.source ?? "source"} →
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -990,49 +1069,8 @@ export default function ContactDetailPage() {
       {/* Text upload NEXT */}
       <TextThreadUploadPanel contactId={contact.id} />
 
-      {/* Touch history: collapsed + calm */}
-      <details className="card cardPad" open={false}>
-        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none" as any }}>
-          Touch history <span className="subtle">({touches.length})</span>
-        </summary>
-
-        <div className="stack" style={{ marginTop: 12 }}>
-          {touches.length === 0 ? (
-            <div className="subtle">No touches yet.</div>
-          ) : (
-            touches.map((t) => (
-              <div key={t.id} className="card cardPad">
-                <div className="rowResponsiveBetween">
-                  <div style={{ fontWeight: 900 }}>
-                    {dirPill(t.direction)} • {channelLabel(t.channel)}
-                    {t.intent ? <span className="subtle"> • {t.intent}</span> : null}
-                  </div>
-                  <div className="subtle">{fmtDT(t.occurred_at)}</div>
-                </div>
-
-                {t.summary ? (
-                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
-                ) : null}
-
-                {(t.source || t.source_link) ? (
-                  <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
-                    {t.source ? `source: ${t.source}` : ""}
-                    {t.source_link ? (
-                      <>
-                        {" "}
-                        •{" "}
-                        <a href={t.source_link} target="_blank" rel="noreferrer">
-                          open link
-                        </a>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </details>
+      {/* Touch history */}
+      <TouchHistory touches={touches} />
 
       {/* Log touch modal (kept functional but less noisy text) */}
       {logOpen && (
