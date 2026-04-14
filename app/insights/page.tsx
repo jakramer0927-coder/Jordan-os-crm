@@ -155,6 +155,18 @@ export default function InsightsPage() {
   const [avoidedContacts, setAvoidedContacts] = useState<AvoidedContact[]>([]);
   const [catCompliance, setCatCompliance] = useState<Record<string, CatCompliance>>({});
 
+  // Referral pipeline
+  type ReferralRow = {
+    id: string;
+    contact_id: string;
+    occurred_at: string;
+    summary: string | null;
+    outcome: "pending" | "converted" | "closed" | null;
+    contacts: { display_name: string; category: string; tier: string | null } | null;
+  };
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [refUpdating, setRefUpdating] = useState<string | null>(null);
+
   // Database health
   const [contactsTotal, setContactsTotal] = useState(0);
   const [agentsTotal, setAgentsTotal] = useState(0);
@@ -380,6 +392,24 @@ export default function InsightsPage() {
       comp[cat] = { total: group.length, onCadence };
     }
     setCatCompliance(comp);
+
+    // ── 4. Referral pipeline ──────────────────────────────────────────────────
+    const refRes = await fetch("/api/referrals");
+    if (refRes.ok) {
+      const rj = await refRes.json().catch(() => ({}));
+      setReferrals((rj.referrals ?? []) as ReferralRow[]);
+    }
+  }
+
+  async function updateOutcome(touchId: string, outcome: "pending" | "converted" | "closed") {
+    setRefUpdating(touchId);
+    await fetch("/api/referrals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ touch_id: touchId, outcome }),
+    });
+    setReferrals((prev) => prev.map((r) => r.id === touchId ? { ...r, outcome } : r));
+    setRefUpdating(null);
   }
 
   useEffect(() => {
@@ -525,6 +555,115 @@ export default function InsightsPage() {
           <span style={{ color: "rgba(130,80,0,.9)", fontWeight: 700 }}>■ Partial</span>{" "}
           <span style={{ color: "rgba(140,0,0,.65)", fontWeight: 700 }}>■ Missed</span>
         </div>
+      </div>
+
+      {/* ── WoW Bar Chart ───────────────────────────────────────────────────── */}
+      {weeklyHistory.length > 0 && (() => {
+        const weeks = [...weeklyHistory].reverse(); // oldest → newest
+        const maxVal = Math.max(...weeks.map(w => w.outbound), dailyGoal * 5, 1);
+        const BAR_H = 80;
+        return (
+          <div className="card cardPad">
+            <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Week-over-week outreach</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+              {weeks.map((week, wi) => {
+                const isCurrentWeek = wi === weeks.length - 1;
+                const goalLine = week.daysGoal;
+                const pct = Math.min(week.outbound / maxVal, 1);
+                const goalPct = Math.min(goalLine / maxVal, 1);
+                const onPace = week.outbound >= week.daysGoal * 0.8;
+                const barColor = isCurrentWeek
+                  ? (onPace ? "#0b6b2a" : "#8a0000")
+                  : (onPace ? "rgba(11,107,42,.5)" : "rgba(140,0,0,.4)");
+                return (
+                  <div key={wi} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)" }}>{week.outbound}</div>
+                    <div style={{ position: "relative", width: "100%", height: BAR_H, background: "rgba(0,0,0,.05)", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${pct * 100}%`, background: barColor, borderRadius: "4px 4px 0 0", transition: "height .3s" }} />
+                      {/* goal line */}
+                      <div style={{ position: "absolute", left: 0, right: 0, bottom: `${goalPct * 100}%`, height: 1, background: "rgba(0,0,0,.25)" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "rgba(18,18,18,.45)", textAlign: "center", whiteSpace: "nowrap" }}>
+                      {isCurrentWeek ? "This wk" : week.label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: "rgba(18,18,18,.4)" }}>
+              Bars = total outreach • line = weekly goal • {" "}
+              <span style={{ color: "#0b6b2a", fontWeight: 700 }}>■ On pace</span>{" "}
+              <span style={{ color: "#8a0000", fontWeight: 700 }}>■ Behind</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Referral Pipeline ───────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral pipeline</div>
+        {(() => {
+          const pending = referrals.filter(r => !r.outcome || r.outcome === "pending");
+          const converted = referrals.filter(r => r.outcome === "converted");
+          const closed = referrals.filter(r => r.outcome === "closed");
+          return (
+            <>
+              <div className="row" style={{ gap: 20, marginBottom: 14, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13 }}><strong>{pending.length}</strong> <span className="subtle">pending</span></span>
+                <span style={{ fontSize: 13, color: "#0b6b2a" }}><strong>{converted.length}</strong> <span style={{ color: "#0b6b2a", opacity: 0.7 }}>converted</span></span>
+                <span style={{ fontSize: 13, color: "rgba(18,18,18,.4)" }}><strong>{closed.length}</strong> <span style={{ opacity: 0.7 }}>closed/no-go</span></span>
+                {referrals.length > 0 && converted.length > 0 && (
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>
+                    {Math.round(converted.length / referrals.length * 100)}% conversion
+                  </span>
+                )}
+              </div>
+              {referrals.length === 0 && (
+                <div className="subtle" style={{ fontSize: 13 }}>No referral asks logged yet. Tag a touch with "referral ask" intent to start tracking.</div>
+              )}
+              {referrals.length > 0 && (
+                <div className="stack" style={{ gap: 0 }}>
+                  {referrals.slice(0, 20).map((r, i) => {
+                    const outcome = r.outcome ?? "pending";
+                    const name = (r.contacts as any)?.display_name ?? "Unknown";
+                    const outcomeBadgeColor = outcome === "converted" ? "#0b6b2a" : outcome === "closed" ? "rgba(18,18,18,.35)" : "rgba(140,80,0,.8)";
+                    return (
+                      <div key={r.id} style={{ padding: "10px 0", borderBottom: i < Math.min(referrals.length, 20) - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{name}</div>
+                          <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 1 }}>
+                            {new Date(r.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            {r.summary ? ` · ${r.summary}` : ""}
+                          </div>
+                        </div>
+                        <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                          {(["pending", "converted", "closed"] as const).map((o) => (
+                            <button
+                              key={o}
+                              className="btn"
+                              style={{
+                                fontSize: 11,
+                                padding: "2px 8px",
+                                fontWeight: outcome === o ? 900 : 400,
+                                background: outcome === o ? outcomeBadgeColor : undefined,
+                                color: outcome === o ? "white" : undefined,
+                                opacity: refUpdating === r.id ? 0.5 : 1,
+                              }}
+                              onClick={() => updateOutcome(r.id, o)}
+                              disabled={refUpdating === r.id || outcome === o}
+                            >
+                              {o}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* ── Weekly Summary Table ────────────────────────────────────────────── */}

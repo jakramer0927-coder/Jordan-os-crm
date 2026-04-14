@@ -25,8 +25,28 @@ export async function GET() {
         : null,
     }));
 
+    // Attach active deal count per contact (single extra query)
+    const contactIds = contacts.map((c: any) => c.id);
+    let dealMap: Record<string, number> = {};
+    if (contactIds.length > 0) {
+      const { data: dealRows } = await supabaseAdmin
+        .from("deals")
+        .select("contact_id")
+        .eq("user_id", uid)
+        .eq("status", "active")
+        .in("contact_id", contactIds);
+      for (const row of dealRows ?? []) {
+        dealMap[row.contact_id] = (dealMap[row.contact_id] ?? 0) + 1;
+      }
+    }
+
+    const contactsWithDeals = contacts.map((c: any) => ({
+      ...c,
+      active_deals: dealMap[c.id] ?? 0,
+    }));
+
     return NextResponse.json({
-      contacts,
+      contacts: contactsWithDeals,
       todayCount: data?.today_count ?? 0,
       wtdCount: data?.wtd_count ?? 0,
     });

@@ -41,6 +41,7 @@ type ContactWithLastOutbound = Contact & {
   last_outbound_channel: Touch["channel"] | null;
   days_since_outbound: number | null;
   last_inbound_at: string | null;
+  active_deals: number;
 };
 
 type VoiceProfile = {
@@ -67,6 +68,15 @@ type VoiceProfile = {
     len: number;
   }>;
 };
+
+function syncAgo(iso: string | null): { label: string; stale: boolean } {
+  if (!iso) return { label: "never", stale: true };
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 60) return { label: `${mins}m ago`, stale: false };
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return { label: `${hrs}h ago`, stale: hrs >= 4 };
+  return { label: `${Math.floor(hrs / 24)}d ago`, stale: true };
+}
 
 function daysSince(iso: string): number {
   const then = new Date(iso).getTime();
@@ -399,9 +409,21 @@ export default function MorningPage() {
   // Per-contact intent selection
   const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
 
+  // Bulk touch logging
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkChannel, setBulkChannel] = useState<Touch["channel"]>("email");
+  const [bulkIntent, setBulkIntent] = useState<TouchIntent>("check_in");
+  const [bulkSummary, setBulkSummary] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
   const [wtdCount, setWtdCount] = useState(0);
+
+  // sync health
+  const [syncGmail, setSyncGmail] = useState<string | null>(null);
+  const [syncCalendar, setSyncCalendar] = useState<string | null>(null);
 
   // operating rules — load synchronously on first render to avoid re-render loop
   const [rules, setRules] = useState<MorningRules>(() => {
@@ -446,11 +468,18 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
 
-    // Fetch contacts+touches+counts and voice profile in parallel
-    const [contactsRes] = await Promise.all([
+    // Fetch contacts+touches+counts, voice profile, and sync status in parallel
+    const [contactsRes, syncRes] = await Promise.all([
       fetch("/api/morning/contacts"),
+      fetch("/api/sync/status"),
       voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
     ]);
+
+    if (syncRes.ok) {
+      const sj = await syncRes.json().catch(() => ({}));
+      setSyncGmail(sj.gmail ?? null);
+      setSyncCalendar(sj.calendar ?? null);
+    }
 
     if (!contactsRes.ok) {
       const j = await contactsRes.json().catch(() => ({}));
@@ -506,6 +535,36 @@ export default function MorningPage() {
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
+  }
+
+  async function saveBulkTouch() {
+    if (displayRecs.length === 0) return;
+    setBulkSaving(true);
+    setBulkMsg(null);
+
+    const now = new Date().toISOString();
+    const rows = displayRecs.map((c) => ({
+      contact_id: c.id,
+      channel: bulkChannel,
+      direction: "outbound" as const,
+      intent: bulkIntent,
+      occurred_at: now,
+      summary: bulkSummary.trim() || null,
+      source: "manual",
+    }));
+
+    const { error } = await supabase.from("touches").insert(rows);
+    setBulkSaving(false);
+
+    if (error) { setBulkMsg(`Error: ${error.message}`); return; }
+
+    const ids = displayRecs.map((c) => c.id);
+    setCompletedIds((prev) => new Set([...prev, ...ids]));
+    setTodayCount((n) => n + ids.length);
+    setWtdCount((n) => n + ids.length);
+    setBulkMsg(`${ids.length} touches logged ✓`);
+    setBulkOpen(false);
+    setBulkSummary("");
   }
 
   useEffect(() => {
@@ -777,6 +836,21 @@ export default function MorningPage() {
               <strong>Voice rules:</strong> {voice.rules.slice(0, 3).join(" • ")}
             </div>
           ) : null}
+
+          {(syncGmail !== undefined || syncCalendar !== undefined) && (() => {
+            const g = syncAgo(syncGmail);
+            const c = syncAgo(syncCalendar);
+            return (
+              <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+                <span className="badge" style={{ fontSize: 11, color: g.stale ? "#8a0000" : "rgba(18,18,18,.5)", borderColor: g.stale ? "rgba(200,0,0,.25)" : undefined }}>
+                  Gmail sync: {g.label}
+                </span>
+                <span className="badge" style={{ fontSize: 11, color: c.stale ? "#8a0000" : "rgba(18,18,18,.5)", borderColor: c.stale ? "rgba(200,0,0,.25)" : undefined }}>
+                  Calendar sync: {c.label}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="row">
@@ -922,11 +996,64 @@ export default function MorningPage() {
             </div>
           </div>
 
-          <a href="/insights" className="btn" style={{ textDecoration: "none", fontSize: 12 }}>
-            Full report →
-          </a>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              className="btn"
+              style={{ fontSize: 12 }}
+              onClick={() => { setBulkOpen((v) => !v); setBulkMsg(null); }}
+            >
+              {bulkOpen ? "Cancel bulk" : "Log all"}
+            </button>
+            <a href="/insights" className="btn" style={{ textDecoration: "none", fontSize: 12 }}>
+              Full report →
+            </a>
+          </div>
         </div>
       </div>
+
+      {bulkOpen && (
+        <div className="card cardPad stack" style={{ marginTop: 8 }}>
+          <div style={{ fontWeight: 900, fontSize: 14 }}>Log a touch for all {displayRecs.length} contacts</div>
+          <div className="subtle" style={{ fontSize: 12, marginTop: -4 }}>
+            Same channel + intent logged to every contact in today's list. Use for events, open houses, or mass check-ins.
+          </div>
+          {bulkMsg && <div className="alert alertOk">{bulkMsg}</div>}
+          <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+            <div className="field">
+              <div className="label">Channel</div>
+              <select className="select" value={bulkChannel} onChange={(e) => setBulkChannel(e.target.value as Touch["channel"])}>
+                <option value="email">Email</option>
+                <option value="text">Text</option>
+                <option value="call">Call</option>
+                <option value="in_person">In person</option>
+                <option value="social_dm">Social DM</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div className="field">
+              <div className="label">Intent</div>
+              <select className="select" value={bulkIntent} onChange={(e) => setBulkIntent(e.target.value as TouchIntent)}>
+                <option value="check_in">Check-in</option>
+                <option value="follow_up">Follow-up</option>
+                <option value="referral_ask">Referral ask</option>
+                <option value="review_ask">Review ask</option>
+                <option value="event_invite">Event invite</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <div className="label">Notes (optional)</div>
+            <input className="input" value={bulkSummary} onChange={(e) => setBulkSummary(e.target.value)} placeholder="e.g. Met at open house on 123 Main" />
+          </div>
+          <div className="row">
+            <button className="btn btnPrimary" onClick={saveBulkTouch} disabled={bulkSaving}>
+              {bulkSaving ? "Logging…" : `Log ${displayRecs.length} touches`}
+            </button>
+            <button className="btn" onClick={() => setBulkOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
@@ -985,6 +1112,11 @@ export default function MorningPage() {
                       )}
                       <span className="badge">{overdue ? "Overdue" : "On track"}</span>
                       {agent ? <span className="badge">Agent touch</span> : null}
+                      {c.active_deals > 0 && (
+                        <span className="badge" style={{ borderColor: "rgba(11,107,42,.3)", background: "rgba(11,107,42,.07)", color: "#0b6b2a", fontWeight: 700 }}>
+                          {c.active_deals} active deal{c.active_deals !== 1 ? "s" : ""}
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
