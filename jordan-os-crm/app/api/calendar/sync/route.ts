@@ -62,14 +62,6 @@ export async function POST(req: Request) {
       if (c.email) emailToContactId.set(c.email.toLowerCase().trim(), c.id);
     }
 
-    // Get user's own email to exclude self
-    const { data: tokenMeta } = await supabaseAdmin
-      .from("google_tokens")
-      .select("email")
-      .eq("user_id", uid)
-      .maybeSingle();
-    const myEmail = tokenMeta?.email?.toLowerCase() ?? null;
-
     let imported = 0;
     let skipped = 0;
 
@@ -79,18 +71,17 @@ export async function POST(req: Request) {
       // Skip cancelled events
       if (event.status === "cancelled") continue;
       // Skip events the user declined
-      const mySelf = event.attendees?.find(
-        (a) => a.self || (myEmail && a.email?.toLowerCase() === myEmail)
-      );
+      const mySelf = event.attendees?.find((a) => a.self);
       if (mySelf && mySelf.responseStatus === "declined") continue;
 
       const occurredAt = event.start.dateTime;
       const summary = event.summary?.trim() || "Meeting";
 
-      // Find attendees that match contacts
+      // Find attendees that match contacts (exclude self)
       const attendeeEmails = (event.attendees ?? [])
+        .filter((a) => !a.self)
         .map((a) => a.email?.toLowerCase() ?? "")
-        .filter((e) => e && e !== myEmail);
+        .filter(Boolean);
 
       const matchedContactIds = new Set<string>();
       for (const email of attendeeEmails) {
