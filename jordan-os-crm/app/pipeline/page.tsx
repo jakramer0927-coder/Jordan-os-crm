@@ -61,6 +61,25 @@ export default function PipelinePage() {
   const [movingTo, setMovingTo] = useState<DealStage | "">("");
   const [saving, setSaving] = useState(false);
 
+  // New deal modal
+  const [newDealOpen, setNewDealOpen] = useState(false);
+  const [ndContactQuery, setNdContactQuery] = useState("");
+  const [ndContactResults, setNdContactResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
+  const [ndContactId, setNdContactId] = useState("");
+  const [ndContactName, setNdContactName] = useState("");
+  const [ndAddress, setNdAddress] = useState("");
+  const [ndRole, setNdRole] = useState("buyer");
+  const [ndStatus, setNdStatus] = useState<DealStage>("lead");
+  const [ndPrice, setNdPrice] = useState("");
+  const [ndCloseDate, setNdCloseDate] = useState("");
+  const [ndNotes, setNdNotes] = useState("");
+  const [ndRefQuery, setNdRefQuery] = useState("");
+  const [ndRefResults, setNdRefResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
+  const [ndRefId, setNdRefId] = useState("");
+  const [ndRefName, setNdRefName] = useState("");
+  const [ndSaving, setNdSaving] = useState(false);
+  const [ndError, setNdError] = useState<string | null>(null);
+
   async function load() {
     const { data } = await supabase.auth.getSession();
     if (!data.session) { window.location.href = "/login"; return; }
@@ -86,6 +105,61 @@ export default function PipelinePage() {
     setDeals(prev => prev.map(d => d.id === movingDeal.id ? { ...d, status: movingTo as DealStage } : d));
     setMovingDeal(null);
     setMovingTo("");
+  }
+
+  async function searchContacts(q: string) {
+    setNdContactQuery(q);
+    setNdContactId("");
+    setNdContactName("");
+    if (!q.trim() || q.trim().length < 2) { setNdContactResults([]); return; }
+    const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setNdContactResults(res.ok ? (j.results ?? []) : []);
+  }
+
+  async function searchRefSource(q: string) {
+    setNdRefQuery(q);
+    setNdRefId("");
+    setNdRefName("");
+    if (!q.trim() || q.trim().length < 2) { setNdRefResults([]); return; }
+    const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setNdRefResults(res.ok ? (j.results ?? []) : []);
+  }
+
+  function openNewDeal() {
+    setNdContactQuery(""); setNdContactResults([]); setNdContactId(""); setNdContactName("");
+    setNdAddress(""); setNdRole("buyer"); setNdStatus("lead");
+    setNdPrice(""); setNdCloseDate(""); setNdNotes("");
+    setNdRefQuery(""); setNdRefResults([]); setNdRefId(""); setNdRefName("");
+    setNdError(null);
+    setNewDealOpen(true);
+  }
+
+  async function saveNewDeal() {
+    if (!ndContactId) { setNdError("Select a contact first."); return; }
+    if (!ndAddress.trim()) { setNdError("Address is required."); return; }
+    setNdSaving(true);
+    setNdError(null);
+    const res = await fetch("/api/contacts/deals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contact_id: ndContactId,
+        address: ndAddress.trim(),
+        role: ndRole,
+        status: ndStatus,
+        price: ndPrice ? Number(ndPrice.replace(/[^0-9.]/g, "")) : null,
+        close_date: ndCloseDate || null,
+        notes: ndNotes.trim() || null,
+        referral_source_contact_id: ndRefId || null,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setNdSaving(false);
+    if (!res.ok) { setNdError(j?.error || "Save failed"); return; }
+    setNewDealOpen(false);
+    load();
   }
 
   useEffect(() => { load(); }, []);
@@ -116,6 +190,7 @@ export default function PipelinePage() {
             </div>
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={openNewDeal}>+ New deal</button>
             <button className="btn" style={{ fontSize: 12 }} onClick={() => setShowClosed(v => !v)}>
               {showClosed ? "Hide closed" : "Show closed"}
             </button>
@@ -211,6 +286,132 @@ export default function PipelinePage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* New deal modal */}
+      {newDealOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 999, overflowY: "auto" }}>
+          <div className="card cardPad" style={{ width: "min(540px, 100%)", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ fontWeight: 900, fontSize: 17, marginBottom: 16 }}>New deal</div>
+
+            {ndError && <div style={{ color: "#8a0000", fontSize: 13, fontWeight: 700, marginBottom: 12 }}>{ndError}</div>}
+
+            {/* Contact search */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Contact *</div>
+              {ndContactId ? (
+                <div className="row" style={{ gap: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>{ndContactName}</div>
+                  <button className="btn" style={{ fontSize: 11 }} onClick={() => { setNdContactId(""); setNdContactName(""); setNdContactQuery(""); }}>Change</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    className="input"
+                    placeholder="Search by name…"
+                    value={ndContactQuery}
+                    onChange={e => searchContacts(e.target.value)}
+                    autoFocus
+                  />
+                  {ndContactResults.length > 0 && (
+                    <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {ndContactResults.slice(0, 6).map(r => (
+                        <div
+                          key={r.id}
+                          style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid rgba(0,0,0,.06)" }}
+                          onClick={() => { setNdContactId(r.id); setNdContactName(r.display_name); setNdContactResults([]); setNdContactQuery(""); }}
+                        >
+                          <strong>{r.display_name}</strong>
+                          <span style={{ marginLeft: 8, color: "rgba(18,18,18,.45)", fontSize: 12 }}>{r.category}{r.tier ? ` · Tier ${r.tier}` : ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Address */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Address *</div>
+              <input className="input" placeholder="123 Main St" value={ndAddress} onChange={e => setNdAddress(e.target.value)} />
+            </div>
+
+            {/* Role + Stage */}
+            <div className="row" style={{ gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Role</div>
+                <select className="select" value={ndRole} onChange={e => setNdRole(e.target.value)}>
+                  <option value="buyer">Buyer</option>
+                  <option value="seller">Seller</option>
+                  <option value="landlord">Landlord</option>
+                  <option value="tenant">Tenant</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Stage</div>
+                <select className="select" value={ndStatus} onChange={e => setNdStatus(e.target.value as DealStage)}>
+                  {STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Price + Close date */}
+            <div className="row" style={{ gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Price</div>
+                <input className="input" placeholder="e.g. 2500000" value={ndPrice} onChange={e => setNdPrice(e.target.value)} />
+              </div>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Expected close date</div>
+                <input className="input" type="date" value={ndCloseDate} onChange={e => setNdCloseDate(e.target.value)} />
+              </div>
+            </div>
+
+            {/* Referral source */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Referral source (optional)</div>
+              {ndRefId ? (
+                <div className="row" style={{ gap: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>{ndRefName}</div>
+                  <button className="btn" style={{ fontSize: 11 }} onClick={() => { setNdRefId(""); setNdRefName(""); setNdRefQuery(""); }}>Clear</button>
+                </div>
+              ) : (
+                <>
+                  <input className="input" placeholder="Search contact…" value={ndRefQuery} onChange={e => searchRefSource(e.target.value)} />
+                  {ndRefResults.length > 0 && (
+                    <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {ndRefResults.slice(0, 4).map(r => (
+                        <div
+                          key={r.id}
+                          style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid rgba(0,0,0,.06)" }}
+                          onClick={() => { setNdRefId(r.id); setNdRefName(r.display_name); setNdRefResults([]); setNdRefQuery(""); }}
+                        >
+                          <strong>{r.display_name}</strong>
+                          <span style={{ marginLeft: 8, color: "rgba(18,18,18,.45)", fontSize: 12 }}>{r.category}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Notes */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Notes</div>
+              <textarea className="textarea" rows={3} placeholder="Any context on this deal…" value={ndNotes} onChange={e => setNdNotes(e.target.value)} />
+            </div>
+
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btnPrimary" onClick={saveNewDeal} disabled={ndSaving}>
+                {ndSaving ? "Saving…" : "Create deal"}
+              </button>
+              <button className="btn" onClick={() => setNewDealOpen(false)}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
