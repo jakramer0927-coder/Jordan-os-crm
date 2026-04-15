@@ -155,6 +155,22 @@ export default function InsightsPage() {
   const [avoidedContacts, setAvoidedContacts] = useState<AvoidedContact[]>([]);
   const [catCompliance, setCatCompliance] = useState<Record<string, CatCompliance>>({});
 
+  // Referral ask opportunities
+  type RefAskOpportunity = {
+    id: string;
+    display_name: string;
+    category: string;
+    tier: string | null;
+    daysSinceLastAsk: number | null;
+    daysSinceOutbound: number | null;
+    closedDeals: number;
+    score: number;
+    reason: string;
+  };
+  const [refOpportunities, setRefOpportunities] = useState<RefAskOpportunity[]>([]);
+  const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
+  const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
+
   // Referral source analytics
   type RefSourceRow = {
     contact_id: string;
@@ -429,6 +445,71 @@ export default function InsightsPage() {
       const rj = await refRes.json().catch(() => ({}));
       setReferrals((rj.referrals ?? []) as ReferralRow[]);
     }
+
+    // ── 6. Referral ask opportunities ─────────────────────────────────────────
+    const [refAskRaw, closedDealRaw] = await Promise.all([
+      supabase.from("touches").select("contact_id, occurred_at")
+        .eq("intent", "referral_ask").eq("direction", "outbound")
+        .order("occurred_at", { ascending: false }).limit(5000),
+      supabase.from("deals").select("contact_id").eq("status", "closed_won").limit(5000),
+    ]);
+
+    // Last ask date per contact
+    const lastAskMap = new Map<string, string>();
+    for (const t of refAskRaw.data ?? []) {
+      if (!lastAskMap.has(t.contact_id)) lastAskMap.set(t.contact_id, t.occurred_at);
+    }
+
+    // Closed deal count per contact
+    const closedDealCount = new Map<string, number>();
+    for (const d of closedDealRaw.data ?? []) {
+      closedDealCount.set(d.contact_id, (closedDealCount.get(d.contact_id) ?? 0) + 1);
+    }
+
+    const ASK_CADENCE = 90;
+    const opps: RefAskOpportunity[] = [];
+    for (const c of cs) {
+      const cat = (c.category || "").toLowerCase();
+      if (cat !== "client" && cat !== "sphere" && cat !== "agent") continue;
+
+      const lastAsk = lastAskMap.get(c.id) ?? null;
+      const daysSinceLastAsk = lastAsk ? daysSince(lastAsk) : null;
+      if (daysSinceLastAsk !== null && daysSinceLastAsk < 30) continue; // asked recently
+
+      const lastOut = loMap.get(c.id) ?? null;
+      const daysSinceOutbound = lastOut ? daysSince(lastOut) : null;
+      const closedDeals = closedDealCount.get(c.id) ?? 0;
+      const tier = (c.tier || "").toUpperCase();
+
+      let score = 0;
+      let reason = "";
+
+      if (daysSinceLastAsk === null) {
+        score += 100;
+        reason = "Never asked for a referral";
+      } else if (daysSinceLastAsk >= ASK_CADENCE) {
+        score += 60;
+        reason = `Last asked ${daysSinceLastAsk}d ago`;
+      } else {
+        score += 20;
+        reason = `Last asked ${daysSinceLastAsk}d ago`;
+      }
+
+      if (cat === "client" && closedDeals > 0) {
+        score += 50;
+        reason = closedDeals > 1 ? `Closed ${closedDeals} deals together` : "Past client — closed a deal together";
+      }
+
+      if (tier === "A") score += 30;
+      else if (tier === "B") score += 15;
+
+      // Warm relationship boost — recently in touch
+      if (daysSinceOutbound !== null && daysSinceOutbound <= 21) score += 20;
+
+      opps.push({ id: c.id, display_name: c.display_name, category: c.category, tier: c.tier, daysSinceLastAsk, daysSinceOutbound, closedDeals, score, reason });
+    }
+    opps.sort((a, b) => b.score - a.score);
+    setRefOpportunities(opps.slice(0, 10));
   }
 
   async function updateOutcome(touchId: string, outcome: "pending" | "converted" | "closed") {
@@ -440,6 +521,22 @@ export default function InsightsPage() {
     });
     setReferrals((prev) => prev.map((r) => r.id === touchId ? { ...r, outcome } : r));
     setRefUpdating(null);
+  }
+
+  async function logReferralAsk(contactId: string) {
+    setLoggingAsk(contactId);
+    await supabase.from("touches").insert({
+      contact_id: contactId,
+      channel: "text",
+      direction: "outbound",
+      intent: "referral_ask",
+      occurred_at: new Date().toISOString(),
+      source: "manual",
+    });
+    setLoggedAskIds((prev) => new Set([...prev, contactId]));
+    setLoggingAsk(null);
+    setRefAsks30((n) => n + 1);
+    setMtdReferralAsks((n) => n + 1);
   }
 
   useEffect(() => {
@@ -726,6 +823,79 @@ export default function InsightsPage() {
           );
         })()}
       </div>
+
+      {/* ── Referral Ask Opportunities ──────────────────────────────────────── */}
+      {refOpportunities.length > 0 && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral ask opportunities</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>
+            People in your network you should be asking — ranked by relationship strength + time since last ask
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {refOpportunities.map((opp, i) => {
+              const logged = loggedAskIds.has(opp.id);
+              return (
+                <div
+                  key={opp.id}
+                  style={{
+                    padding: "12px 0",
+                    borderBottom: i < refOpportunities.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined,
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    opacity: logged ? 0.45 : 1,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                      <a href={`/contacts/${opp.id}`} style={{ fontWeight: 800, fontSize: 14 }}>
+                        {opp.display_name}
+                      </a>
+                      <span className="badge" style={{ fontSize: 11 }}>
+                        {opp.category}{opp.tier ? ` · Tier ${opp.tier}` : ""}
+                      </span>
+                      {opp.closedDeals > 0 && (
+                        <span className="badge" style={{ fontSize: 11, background: "rgba(11,107,42,.08)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.2)", fontWeight: 700 }}>
+                          {opp.closedDeals} closed deal{opp.closedDeals !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: "rgba(18,18,18,.55)", marginTop: 4, fontWeight: 600 }}>
+                      {opp.reason}
+                      {opp.daysSinceOutbound !== null && opp.daysSinceOutbound <= 21
+                        ? " · touched recently"
+                        : opp.daysSinceOutbound !== null
+                        ? ` · last outbound ${opp.daysSinceOutbound}d ago`
+                        : " · no outbound on record"}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                    <a
+                      className="btn"
+                      href={`/contacts/${opp.id}`}
+                      style={{ fontSize: 12, textDecoration: "none" }}
+                    >
+                      Open
+                    </a>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ fontSize: 12 }}
+                      disabled={loggingAsk === opp.id || logged}
+                      onClick={() => logReferralAsk(opp.id)}
+                    >
+                      {logged ? "Logged ✓" : loggingAsk === opp.id ? "…" : "Log ask"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="subtle" style={{ fontSize: 11, marginTop: 12 }}>
+            Refreshes on next page load. Only shows contacts not asked in the last 30 days.
+          </div>
+        </div>
+      )}
 
       {/* ── Weekly Summary Table ────────────────────────────────────────────── */}
       <div className="card cardPad">
