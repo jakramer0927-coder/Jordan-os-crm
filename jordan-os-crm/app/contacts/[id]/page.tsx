@@ -864,6 +864,7 @@ export default function ContactDetailPage() {
   const overdueFollowUps = followUps.filter((f) => f.due_date < new Date().toISOString().slice(0, 10));
 
   // Milestone check helper
+  const c = contact;
   function getMilestones() {
     const today = new Date();
     const milestones: { label: string; date: string; daysAway: number }[] = [];
@@ -875,10 +876,10 @@ export default function ContactDetailPage() {
       const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
       if (days <= 30) milestones.push({ label, date: next.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
     };
-    checkRecurring(contact.birthday, "Birthday");
-    checkRecurring(contact.close_anniversary, "Close anniversary");
-    if (contact.move_in_date) {
-      const d = new Date(contact.move_in_date);
+    checkRecurring(c.birthday, "Birthday");
+    checkRecurring(c.close_anniversary, "Close anniversary");
+    if (c.move_in_date) {
+      const d = new Date(c.move_in_date);
       const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
       if (days >= 0 && days <= 30) milestones.push({ label: "Move-in", date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
     }
