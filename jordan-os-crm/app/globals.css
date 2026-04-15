@@ -1,5 +1,15 @@
 /* app/globals.css */
 
+/* ===== Animations ===== */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ===== Reset ===== */
 * {
   box-sizing: border-box;

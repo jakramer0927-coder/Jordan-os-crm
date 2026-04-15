@@ -1,5 +1,15 @@
 /* app/globals.css */
 
+/* ===== Animations ===== */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ===== Reset ===== */
 * {
   box-sizing: border-box;
@@ -641,14 +651,128 @@ main a {
   align-items: center;
 }
 
-@media (max-width: 640px) {
+/* ===== Morning page recommendation card ===== */
+.recCardLayout {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.recCardActions {
+  width: 220px;
+  flex-shrink: 0;
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+  .recCardLayout {
+    flex-direction: column;
+  }
+
+  .recCardActions {
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Hamburger — hidden on desktop */
+.hamburger {
+  display: none;
+}
+
+/* Desktop nav — always visible on desktop */
+.navDesktop {
+  display: flex;
+}
+
+/* Desktop logout — always visible on desktop */
+.navLogout {
+  display: inline-flex;
+}
+
+/* Mobile nav drawer */
+.mobileNav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Show hamburger, hide desktop nav + logout */
+  .hamburger {
+    display: inline-flex;
+  }
+
+  .navDesktop {
+    display: none;
+  }
+
+  .navLogout {
+    display: none;
+  }
+
+  /* Mobile drawer */
+  .mobileNav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px 14px;
+    border-top: 1px solid var(--line2);
+  }
+
+  .mobileNav .navLink {
+    padding: 12px 14px;
+    font-size: 15px;
+    border-radius: var(--radiusSm);
+  }
+
+  /* App shell — tighter on mobile */
+  .appShell {
+    padding: 14px 12px 60px;
+  }
+
   .h1 {
     font-size: 22px;
   }
 
+  /* Stack page headers vertically */
+  .pageHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .pageHeader .row {
+    flex-wrap: wrap;
+  }
+
+  /* Cards full-bleed feel */
+  .cardPad {
+    padding: 14px 12px;
+  }
+
+  /* Buttons full-width on mobile when flagged */
   .btnFullMobile {
     width: 100%;
     justify-content: center;
+  }
+
+  /* Tables scroll horizontally */
+  .tableScroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Inputs — bigger tap targets */
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px; /* prevents iOS zoom on focus */
+    padding: 11px 12px;
+  }
+
+  .btn {
+    min-height: 42px;
   }
 
   .fieldGridMobile {
@@ -667,5 +791,15 @@ main a {
     border-radius: 16px 16px 0 0 !important;
     max-height: 88vh;
     overflow: auto;
+  }
+
+  /* Topbar — tighter */
+  .topbarInner {
+    padding: 10px 12px;
+    flex-wrap: nowrap;
+  }
+
+  .brandSub {
+    display: none;
   }
 }

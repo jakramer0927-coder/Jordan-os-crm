@@ -1328,61 +1328,88 @@ export default function MorningPage() {
                       ))}
                     </div>
 
-                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="rowBetween" style={{ marginBottom: 8 }}>
-                        <div className="small muted bold">
-                          {aiDrafts[c.id] ? "Draft (Jordan AI)" : draftsGenerating.has(c.id) ? "Generating draft…" : "Draft (template)"}
-                        </div>
-                        <div className="row" style={{ gap: 4 }}>
-                          <button
-                            className="btn"
-                            style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
-                            onClick={() => copyDraft(c.id, aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice }))}
-                          >
-                            {copiedId === c.id ? "Copied ✓" : "Copy"}
-                          </button>
-                          <button
-                            className="btn"
-                            style={{ fontSize: 11, padding: "1px 8px" }}
-                            disabled={draftsGenerating.has(c.id)}
-                            onClick={() => regenerateDraft(c)}
-                          >
-                            {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
-                          </button>
-                        </div>
-                      </div>
+                    {(() => {
+                      const generating = draftsGenerating.has(c.id);
+                      const draft = aiDrafts[c.id];
+                      const fallback = !draft && !generating
+                        ? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice })
+                        : null;
+                      return (
+                        <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                          <div className="rowBetween" style={{ marginBottom: 8 }}>
+                            <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                              <span className="small muted bold">
+                                {draft ? "Jordan AI draft" : fallback ? "Template draft" : ""}
+                              </span>
+                              {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
+                                const active = (draftIntents[c.id] ?? "check_in") === intent;
+                                return (
+                                  <button
+                                    key={intent}
+                                    className="btn"
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "1px 8px",
+                                      fontWeight: active ? 900 : 400,
+                                      background: active ? "var(--ink)" : undefined,
+                                      color: active ? "var(--paper)" : undefined,
+                                    }}
+                                    onClick={() => {
+                                      setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
+                                      regenerateDraft(c, intent);
+                                    }}
+                                    disabled={generating}
+                                  >
+                                    {intent.replace("_", " ")}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="row" style={{ gap: 4 }}>
+                              {!generating && (draft || fallback) && (
+                                <button
+                                  className="btn"
+                                  style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
+                                  onClick={() => copyDraft(c.id, draft ?? fallback ?? "")}
+                                >
+                                  {copiedId === c.id ? "Copied ✓" : "Copy"}
+                                </button>
+                              )}
+                              <button
+                                className="btn"
+                                style={{ fontSize: 11, padding: "1px 8px" }}
+                                disabled={generating}
+                                onClick={() => regenerateDraft(c)}
+                              >
+                                {generating ? "…" : "Regenerate"}
+                              </button>
+                            </div>
+                          </div>
 
-                      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                        <span className="badge">Channel: {c.suggested_channel}</span>
-                        {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
-                          const active = (draftIntents[c.id] ?? "check_in") === intent;
-                          return (
-                            <button
-                              key={intent}
-                              className="btn"
-                              style={{
-                                fontSize: 11,
-                                padding: "1px 8px",
-                                fontWeight: active ? 900 : 400,
-                                background: active ? "var(--ink)" : undefined,
-                                color: active ? "var(--paper)" : undefined,
-                              }}
-                              onClick={() => {
-                                setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
-                                regenerateDraft(c, intent);
-                              }}
-                              disabled={draftsGenerating.has(c.id)}
-                            >
-                              {intent.replace("_", " ")}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, opacity: draftsGenerating.has(c.id) ? 0.4 : 1 }}>
-                        {aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice })}
-                      </div>
-                    </div>
+                          {generating ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 2 }}>
+                              {[0.85, 0.65, 0.45].map((w, i) => (
+                                <div
+                                  key={i}
+                                  style={{
+                                    height: 13,
+                                    borderRadius: 4,
+                                    width: `${w * 100}%`,
+                                    background: "rgba(0,0,0,.08)",
+                                    animation: "pulse 1.4s ease-in-out infinite",
+                                    animationDelay: `${i * 0.15}s`,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14, animation: draft ? "fadeIn .3s ease" : undefined }}>
+                              {draft ?? fallback}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div style={{ width: 280, display: "grid", gap: 10 }}>
