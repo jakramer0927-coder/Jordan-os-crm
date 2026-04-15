@@ -19,7 +19,7 @@ export async function GET(req: Request) {
       .select(`
         id, address, role, status, price, close_date, notes, created_at,
         contact_id,
-        contacts ( id, display_name, category, tier, phone, email ),
+        contacts!contact_id ( id, display_name, category, tier, phone, email ),
         referral_source:referral_source_contact_id ( id, display_name )
       `)
       .eq("user_id", uid)
