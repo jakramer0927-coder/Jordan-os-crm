@@ -12,7 +12,6 @@ type Touch = {
   direction: "outbound" | "inbound";
   occurred_at: string;
   intent: string | null;
-  channel: string | null;
 };
 
 type Contact = {
@@ -110,15 +109,25 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function workdaysElapsedInMonth(d = new Date()): number {
+  let count = 0;
+  const cur = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d);
+  end.setHours(23, 59, 59, 999);
+  while (cur <= end) {
+    const day = cur.getDay();
+    if (day >= 1 && day <= 5) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function InsightsPage() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dailyGoal, setDailyGoal] = useState(5);
-
-  // Channel breakdown (7d)
-  const [channelBreakdown7, setChannelBreakdown7] = useState<Record<string, number>>({});
 
   // Rolling metrics
   const [out7, setOut7] = useState(0);
@@ -134,6 +143,10 @@ export default function InsightsPage() {
   const [wtdAgents, setWtdAgents] = useState(0);
   const [wtdReferralAsks, setWtdReferralAsks] = useState(0);
 
+  // MTD
+  const [mtdOutbound, setMtdOutbound] = useState(0);
+  const [mtdReferralAsks, setMtdReferralAsks] = useState(0);
+
   // Accountability
   const [todayCount, setTodayCount] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -141,6 +154,29 @@ export default function InsightsPage() {
   const [weeklyHistory, setWeeklyHistory] = useState<WeekSummary[]>([]);
   const [avoidedContacts, setAvoidedContacts] = useState<AvoidedContact[]>([]);
   const [catCompliance, setCatCompliance] = useState<Record<string, CatCompliance>>({});
+
+  // Referral source analytics
+  type RefSourceRow = {
+    contact_id: string;
+    display_name: string;
+    deals_total: number;
+    deals_closed: number;
+    pipeline_value: number;
+    closed_value: number;
+  };
+  const [refSources, setRefSources] = useState<RefSourceRow[]>([]);
+
+  // Referral pipeline
+  type ReferralRow = {
+    id: string;
+    contact_id: string;
+    occurred_at: string;
+    summary: string | null;
+    outcome: "pending" | "converted" | "closed" | null;
+    contacts: { display_name: string; category: string; tier: string | null } | null;
+  };
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [refUpdating, setRefUpdating] = useState<string | null>(null);
 
   // Database health
   const [contactsTotal, setContactsTotal] = useState(0);
@@ -156,7 +192,12 @@ export default function InsightsPage() {
   const isOnPace = useMemo(() => wtdOutbound >= wtdPace * 0.8, [wtdOutbound, wtdPace]);
   const wtdDeficit = useMemo(() => Math.max(0, wtdPace - wtdOutbound), [wtdPace, wtdOutbound]);
 
-  const healthScore = useMemo(() => {
+  const mtdWorkdays = useMemo(() => workdaysElapsedInMonth(), [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mtdGoal = useMemo(() => mtdWorkdays * dailyGoal, [mtdWorkdays, dailyGoal]);
+  const mtdRefGoal = 4; // 4 referral asks per month
+  const mtdOnPace = useMemo(() => mtdOutbound >= mtdGoal * 0.8, [mtdOutbound, mtdGoal]);
+
+  const health = useMemo(() => {
     const aComp = aClientsTotal > 0
       ? clamp(Math.round(30 * (1 - aClientsDueOrOverdue / aClientsTotal)), 0, 30) : 30;
     const velocity = clamp(Math.round((out30 / (dailyGoal * 20)) * 25), 0, 25);
@@ -164,7 +205,7 @@ export default function InsightsPage() {
     const agent = clamp(Math.round((agentShare / 0.4) * 20), 0, 20);
     const ask = clamp(Math.round((refAsks30 / 4) * 15), 0, 15);
     const growth = clamp(Math.round((contactsTotal / 200) * 10), 0, 10);
-    return aComp + velocity + agent + ask + growth;
+    return { total: aComp + velocity + agent + ask + growth, aComp, velocity, agent, ask, growth };
   }, [aClientsTotal, aClientsDueOrOverdue, out30, dailyGoal, out7, agents7, refAsks30, contactsTotal]);
 
   async function fetchAll() {
@@ -179,7 +220,7 @@ export default function InsightsPage() {
 
     const { data: tRaw, error: tErr } = await supabase
       .from("touches")
-      .select("id, contact_id, direction, occurred_at, intent, channel")
+      .select("id, contact_id, direction, occurred_at, intent")
       .eq("direction", "outbound")
       .gte("occurred_at", since35.toISOString())
       .limit(20000);
@@ -196,17 +237,25 @@ export default function InsightsPage() {
     setTouchesByDay(byDay);
     setTodayCount(byDay[today] ?? 0);
 
-    // Streak: consecutive past weekdays that hit goal
+    // Streak: consecutive weekdays that hit goal, including today if already done
     {
       let s = 0;
       const check = new Date(now);
       check.setHours(12, 0, 0, 0);
-      check.setDate(check.getDate() - 1);
-      for (let i = 0; i < 35; i++) {
+      for (let i = 0; i < 36; i++) {
         if (isWeekendDay(check)) { check.setDate(check.getDate() - 1); continue; }
         const ds = localDateStr(check);
-        if ((byDay[ds] ?? 0) >= dailyGoal) { s++; check.setDate(check.getDate() - 1); }
-        else break;
+        const isToday = ds === today;
+        const count = byDay[ds] ?? 0;
+        if (count >= dailyGoal) {
+          s++;
+          check.setDate(check.getDate() - 1);
+        } else if (isToday) {
+          // today not hit yet — doesn't break the streak, just skip to yesterday
+          check.setDate(check.getDate() - 1);
+        } else {
+          break;
+        }
       }
       setStreak(s);
     }
@@ -224,19 +273,16 @@ export default function InsightsPage() {
 
     setOut7(t7.length);
     setOut7Prev(tPrev7.length);
-
-    // Channel breakdown for last 7 days
-    const chBreak: Record<string, number> = {};
-    for (const t of t7) {
-      const ch = t.channel || "other";
-      chBreak[ch] = (chBreak[ch] ?? 0) + 1;
-    }
-    setChannelBreakdown7(chBreak);
     setOut30(t30.length);
     setRefAsks30(t30.filter(t => t.intent === "referral_ask").length);
     setReviewAsks30(t30.filter(t => t.intent === "review_ask").length);
     setWtdOutbound(tWtd.length);
     setWtdReferralAsks(tWtd.filter(t => t.intent === "referral_ask").length);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const tMtd = tAll.filter(t => new Date(t.occurred_at) >= startOfMonth);
+    setMtdOutbound(tMtd.length);
+    setMtdReferralAsks(tMtd.filter(t => t.intent === "referral_ask").length);
 
     // Weekly history (4 weeks)
     const weeks: WeekSummary[] = [];
@@ -313,33 +359,6 @@ export default function InsightsPage() {
     const loMap = new Map<string, string | null>();
     (loRaw ?? []).forEach((r: any) => loMap.set(r.contact_id, r.last_outbound_at));
 
-    // ── 3b. Apply linked contact cadence sharing (Option B) ───────────────────
-    const allContactIds = cs.map(c => c.id);
-    if (allContactIds.length > 0) {
-      const { data: linksRaw } = await supabase
-        .from("contact_links")
-        .select("contact_id_a, contact_id_b")
-        .or(allContactIds.map(id => `contact_id_a.eq.${id},contact_id_b.eq.${id}`).join(","));
-
-      const linkedMap = new Map<string, string[]>();
-      for (const row of (linksRaw ?? []) as { contact_id_a: string; contact_id_b: string }[]) {
-        const { contact_id_a: a, contact_id_b: b } = row;
-        if (!linkedMap.has(a)) linkedMap.set(a, []);
-        if (!linkedMap.has(b)) linkedMap.set(b, []);
-        linkedMap.get(a)!.push(b);
-        linkedMap.get(b)!.push(a);
-      }
-
-      // For each contact in a link, use the most recent outbound across the household
-      for (const [contactId, partners] of linkedMap.entries()) {
-        const dates = [loMap.get(contactId), ...partners.map(p => loMap.get(p))]
-          .filter((d): d is string => !!d);
-        if (dates.length === 0) continue;
-        const best = dates.reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
-        loMap.set(contactId, best);
-      }
-    }
-
     // A-client health
     const aClients = cs.filter(c => (c.category || "").toLowerCase() === "client" && (c.tier || "").toUpperCase() === "A");
     setAClientsTotal(aClients.length);
@@ -384,6 +403,43 @@ export default function InsightsPage() {
       comp[cat] = { total: group.length, onCadence };
     }
     setCatCompliance(comp);
+
+    // ── 4. Referral source analytics ─────────────────────────────────────────
+    const pipelineRes = await fetch("/api/pipeline?include_closed=1");
+    if (pipelineRes.ok) {
+      const pj = await pipelineRes.json().catch(() => ({}));
+      const allDeals: any[] = pj.deals ?? [];
+      const sourceMap = new Map<string, RefSourceRow>();
+      for (const d of allDeals) {
+        const src = d.referral_source as any;
+        if (!src?.id) continue;
+        const existing = sourceMap.get(src.id) ?? { contact_id: src.id, display_name: src.display_name, deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0 };
+        existing.deals_total++;
+        if (d.status === "closed_won") { existing.deals_closed++; existing.closed_value += d.price ?? 0; }
+        else { existing.pipeline_value += d.price ?? 0; }
+        sourceMap.set(src.id, existing);
+      }
+      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_value + b.pipeline_value) - (a.closed_value + a.pipeline_value));
+      setRefSources(sorted);
+    }
+
+    // ── 5. Referral pipeline ──────────────────────────────────────────────────
+    const refRes = await fetch("/api/referrals");
+    if (refRes.ok) {
+      const rj = await refRes.json().catch(() => ({}));
+      setReferrals((rj.referrals ?? []) as ReferralRow[]);
+    }
+  }
+
+  async function updateOutcome(touchId: string, outcome: "pending" | "converted" | "closed") {
+    setRefUpdating(touchId);
+    await fetch("/api/referrals", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ touch_id: touchId, outcome }),
+    });
+    setReferrals((prev) => prev.map((r) => r.id === touchId ? { ...r, outcome } : r));
+    setRefUpdating(null);
   }
 
   useEffect(() => {
@@ -468,7 +524,7 @@ export default function InsightsPage() {
               <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>Day streak</div>
             </div>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 900, fontSize: 36, lineHeight: 1 }}>{healthScore}</div>
+              <div style={{ fontWeight: 900, fontSize: 36, lineHeight: 1 }}>{health.total}</div>
               <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>Score / 100</div>
             </div>
           </div>
@@ -529,6 +585,146 @@ export default function InsightsPage() {
           <span style={{ color: "rgba(130,80,0,.9)", fontWeight: 700 }}>■ Partial</span>{" "}
           <span style={{ color: "rgba(140,0,0,.65)", fontWeight: 700 }}>■ Missed</span>
         </div>
+      </div>
+
+      {/* ── WoW Bar Chart ───────────────────────────────────────────────────── */}
+      {weeklyHistory.length > 0 && (() => {
+        const weeks = [...weeklyHistory].reverse(); // oldest → newest
+        const maxVal = Math.max(...weeks.map(w => w.outbound), dailyGoal * 5, 1);
+        const BAR_H = 80;
+        return (
+          <div className="card cardPad">
+            <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Week-over-week outreach</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+              {weeks.map((week, wi) => {
+                const isCurrentWeek = wi === weeks.length - 1;
+                const goalLine = week.daysGoal;
+                const pct = Math.min(week.outbound / maxVal, 1);
+                const goalPct = Math.min(goalLine / maxVal, 1);
+                const onPace = week.outbound >= week.daysGoal * 0.8;
+                const barColor = isCurrentWeek
+                  ? (onPace ? "#0b6b2a" : "#8a0000")
+                  : (onPace ? "rgba(11,107,42,.5)" : "rgba(140,0,0,.4)");
+                return (
+                  <div key={wi} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)" }}>{week.outbound}</div>
+                    <div style={{ position: "relative", width: "100%", height: BAR_H, background: "rgba(0,0,0,.05)", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${pct * 100}%`, background: barColor, borderRadius: "4px 4px 0 0", transition: "height .3s" }} />
+                      {/* goal line */}
+                      <div style={{ position: "absolute", left: 0, right: 0, bottom: `${goalPct * 100}%`, height: 1, background: "rgba(0,0,0,.25)" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "rgba(18,18,18,.45)", textAlign: "center", whiteSpace: "nowrap" }}>
+                      {isCurrentWeek ? "This wk" : week.label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: "rgba(18,18,18,.4)" }}>
+              Bars = total outreach • line = weekly goal • {" "}
+              <span style={{ color: "#0b6b2a", fontWeight: 700 }}>■ On pace</span>{" "}
+              <span style={{ color: "#8a0000", fontWeight: 700 }}>■ Behind</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Referral Source ROI ─────────────────────────────────────────────── */}
+      {refSources.length > 0 && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral source ROI</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Contacts who have sent you deal flow — sorted by total value</div>
+          <div className="stack" style={{ gap: 0 }}>
+            {refSources.map((s, i) => (
+              <div key={s.contact_id} style={{ padding: "10px 0", borderBottom: i < refSources.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <a href={`/contacts/${s.contact_id}`} style={{ fontWeight: 800, fontSize: 14 }}>{s.display_name}</a>
+                  <div className="row" style={{ marginTop: 4, gap: 6, flexWrap: "wrap" }}>
+                    <span className="badge">{s.deals_total} deal{s.deals_total !== 1 ? "s" : ""} referred</span>
+                    {s.deals_closed > 0 && (
+                      <span className="badge" style={{ background: "rgba(11,107,42,.08)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.2)", fontWeight: 700 }}>
+                        {s.deals_closed} closed{s.closed_value > 0 ? ` · $${s.closed_value.toLocaleString()}` : ""}
+                      </span>
+                    )}
+                    {s.pipeline_value > 0 && (
+                      <span className="badge">${s.pipeline_value.toLocaleString()} in pipeline</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontWeight: 900, fontSize: 18, flexShrink: 0, color: s.closed_value > 0 ? "#0b6b2a" : "var(--ink)" }}>
+                  ${(s.closed_value + s.pipeline_value).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Referral Pipeline ───────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral pipeline</div>
+        {(() => {
+          const pending = referrals.filter(r => !r.outcome || r.outcome === "pending");
+          const converted = referrals.filter(r => r.outcome === "converted");
+          const closed = referrals.filter(r => r.outcome === "closed");
+          return (
+            <>
+              <div className="row" style={{ gap: 20, marginBottom: 14, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13 }}><strong>{pending.length}</strong> <span className="subtle">pending</span></span>
+                <span style={{ fontSize: 13, color: "#0b6b2a" }}><strong>{converted.length}</strong> <span style={{ color: "#0b6b2a", opacity: 0.7 }}>converted</span></span>
+                <span style={{ fontSize: 13, color: "rgba(18,18,18,.4)" }}><strong>{closed.length}</strong> <span style={{ opacity: 0.7 }}>closed/no-go</span></span>
+                {referrals.length > 0 && converted.length > 0 && (
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>
+                    {Math.round(converted.length / referrals.length * 100)}% conversion
+                  </span>
+                )}
+              </div>
+              {referrals.length === 0 && (
+                <div className="subtle" style={{ fontSize: 13 }}>No referral asks logged yet. Tag a touch with "referral ask" intent to start tracking.</div>
+              )}
+              {referrals.length > 0 && (
+                <div className="stack" style={{ gap: 0 }}>
+                  {referrals.slice(0, 20).map((r, i) => {
+                    const outcome = r.outcome ?? "pending";
+                    const name = (r.contacts as any)?.display_name ?? "Unknown";
+                    const outcomeBadgeColor = outcome === "converted" ? "#0b6b2a" : outcome === "closed" ? "rgba(18,18,18,.35)" : "rgba(140,80,0,.8)";
+                    return (
+                      <div key={r.id} style={{ padding: "10px 0", borderBottom: i < Math.min(referrals.length, 20) - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{name}</div>
+                          <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 1 }}>
+                            {new Date(r.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                            {r.summary ? ` · ${r.summary}` : ""}
+                          </div>
+                        </div>
+                        <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                          {(["pending", "converted", "closed"] as const).map((o) => (
+                            <button
+                              key={o}
+                              className="btn"
+                              style={{
+                                fontSize: 11,
+                                padding: "2px 8px",
+                                fontWeight: outcome === o ? 900 : 400,
+                                background: outcome === o ? outcomeBadgeColor : undefined,
+                                color: outcome === o ? "white" : undefined,
+                                opacity: refUpdating === r.id ? 0.5 : 1,
+                              }}
+                              onClick={() => updateOutcome(r.id, o)}
+                              disabled={refUpdating === r.id || outcome === o}
+                            >
+                              {o}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* ── Weekly Summary Table ────────────────────────────────────────────── */}
@@ -641,7 +837,7 @@ export default function InsightsPage() {
         </div>
       )}
 
-      {/* ── WTD Pace ────────────────────────────────────────────────────────── */}
+      {/* ── WTD + MTD Pace ──────────────────────────────────────────────────── */}
       <div className="card cardPad">
         <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10 }}>Week-to-date pace</div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -654,10 +850,10 @@ export default function InsightsPage() {
               fontWeight: 700,
             }}
           >
-            Outreach: {wtdOutbound} / {wtdPace} pace
+            WTD outreach: {wtdOutbound} / {wtdPace} pace
           </span>
           <span className="badge">Agents: {wtdAgents} / {wdElapsed * 2} pace</span>
-          <span className="badge">Ref asks: {wtdReferralAsks} / 1 weekly</span>
+          <span className="badge">Ref asks this week: {wtdReferralAsks} / 1</span>
           <span className="badge">WoW: {wow >= 0 ? `+${wow}%` : `${wow}%`}</span>
           {aClientsDueOrOverdue > 0 && (
             <span className="badge" style={{ borderColor: "rgba(200,0,0,.25)", background: "rgba(200,0,0,.05)", color: "#8a0000", fontWeight: 700 }}>
@@ -665,14 +861,61 @@ export default function InsightsPage() {
             </span>
           )}
         </div>
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 10, marginTop: 18 }}>Month-to-date pace</div>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <span
+            className="badge"
+            style={{
+              borderColor: mtdOnPace ? "rgba(11,107,42,.3)" : "rgba(200,0,0,.25)",
+              background: mtdOnPace ? "rgba(11,107,42,.07)" : "rgba(200,0,0,.05)",
+              color: mtdOnPace ? "#0b6b2a" : "#8a0000",
+              fontWeight: 700,
+            }}
+          >
+            MTD outreach: {mtdOutbound} / {mtdGoal} pace ({mtdWorkdays}d × {dailyGoal})
+          </span>
+          <span
+            className="badge"
+            style={{
+              borderColor: mtdReferralAsks >= mtdRefGoal ? "rgba(11,107,42,.3)" : undefined,
+              background: mtdReferralAsks >= mtdRefGoal ? "rgba(11,107,42,.07)" : undefined,
+              color: mtdReferralAsks >= mtdRefGoal ? "#0b6b2a" : undefined,
+              fontWeight: mtdReferralAsks >= mtdRefGoal ? 700 : 400,
+            }}
+          >
+            Ref asks this month: {mtdReferralAsks} / {mtdRefGoal}{mtdReferralAsks >= mtdRefGoal ? " ✓" : ""}
+          </span>
+        </div>
       </div>
 
       {/* ── Metrics (secondary) ─────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
         <div className="card cardPad">
-          <div className="label">Score</div>
-          <div style={{ fontWeight: 900, fontSize: 26, marginTop: 4 }}>{healthScore}<span className="subtle" style={{ fontSize: 13, fontWeight: 400 }}>/100</span></div>
-          <div className="subtle" style={{ fontSize: 12 }}>Compliance + velocity + asks</div>
+          <div className="label">Score breakdown</div>
+          <div style={{ fontWeight: 900, fontSize: 26, marginTop: 4 }}>{health.total}<span className="subtle" style={{ fontSize: 13, fontWeight: 400 }}>/100</span></div>
+          <div className="stack" style={{ gap: 6, marginTop: 10 }}>
+            {([
+              { label: "A-client compliance", value: health.aComp, max: 30 },
+              { label: "Outreach velocity", value: health.velocity, max: 25 },
+              { label: "Agent share", value: health.agent, max: 20 },
+              { label: "Ask activity", value: health.ask, max: 15 },
+              { label: "Database size", value: health.growth, max: 10 },
+            ] as Array<{ label: string; value: number; max: number }>).map(({ label, value, max }) => {
+              const ratio = max > 0 ? value / max : 0;
+              const color = ratio >= 0.8 ? "#0b6b2a" : ratio >= 0.5 ? "rgba(130,80,0,.9)" : "#8a0000";
+              return (
+                <div key={label}>
+                  <div className="rowBetween" style={{ marginBottom: 3 }}>
+                    <span style={{ fontSize: 11, color: "rgba(18,18,18,.55)" }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color }}>{value}/{max}</span>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "rgba(0,0,0,.08)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${Math.round(ratio * 100)}%`, background: color, borderRadius: 2 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="card cardPad">
           <div className="label">Velocity</div>
@@ -683,17 +926,6 @@ export default function InsightsPage() {
           <div className="label">Mix (7d)</div>
           <div style={{ fontWeight: 900, fontSize: 18, marginTop: 4 }}>{agents7} agents • {clients7} clients</div>
           <div className="subtle" style={{ fontSize: 12 }}>of {out7} outbound • {pct(agents7, out7)} agent share</div>
-          {Object.keys(channelBreakdown7).length > 0 && (
-            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {Object.entries(channelBreakdown7)
-                .sort((a, b) => b[1] - a[1])
-                .map(([ch, n]) => (
-                  <span key={ch} className="badge" style={{ fontSize: 11 }}>
-                    {ch}: {n}
-                  </span>
-                ))}
-            </div>
-          )}
         </div>
         <div className="card cardPad">
           <div className="label">Asks (30d)</div>

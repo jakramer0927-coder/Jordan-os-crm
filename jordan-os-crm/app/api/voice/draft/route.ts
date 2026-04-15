@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
-import { checkRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -36,63 +35,48 @@ type Body = {
     include_signature?: boolean; // default false for text, true-ish for email
 };
 
-async function openaiDraft(args: {
+async function claudeDraft(args: {
     system: string;
     user: string;
-    model?: string;
 }): Promise<string> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
-    // Use Responses API style call (works well on Vercel Node runtime)
-    const model = args.model || process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
-    const res = await fetch("https://api.openai.com/v1/responses", {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
-            Authorization: `Bearer ${apiKey}`,
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
             model,
-            input: [
-                { role: "system", content: args.system },
-                { role: "user", content: args.user },
-            ],
+            max_tokens: 1024,
             temperature: 0.5,
+            system: args.system,
+            messages: [{ role: "user", content: args.user }],
         }),
     });
 
     const j = await res.json();
 
     if (!res.ok) {
-        const msg = j?.error?.message || `OpenAI error (${res.status})`;
+        const msg = j?.error?.message || `Anthropic error (${res.status})`;
         throw new Error(msg);
     }
 
-    // responses API returns output_text convenience in many SDKs; here we’ll extract manually
-    const out = j?.output ?? [];
-    for (const item of out) {
-        const content = item?.content ?? [];
-        for (const c of content) {
-            if (c?.type === "output_text" && typeof c?.text === "string") return c.text.trim();
-        }
-    }
+    const text = j?.content?.[0]?.text;
+    if (typeof text === "string" && text.trim()) return text.trim();
 
-    // fallback
-    const t = j?.output_text;
-    if (typeof t === "string" && t.trim()) return t.trim();
-
-    throw new Error("OpenAI returned no text");
+    throw new Error("Anthropic returned no text");
 }
 
 export async function POST(req: Request) {
     try {
         const uid = await getVerifiedUid();
         if (!uid) return unauthorized();
-
-        const limited = await checkRateLimit(uid, "voice_draft", 50);
-        if (limited) return limited;
 
         const body = (await req.json()) as Body;
 
@@ -133,7 +117,17 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: tErr.message }, { status: 500 });
         }
 
-        // 3) Recent text messages (if you have them)
+        // 3) Active deals for this contact
+        const { data: activeDeals } = await supabaseAdmin
+            .from("deals")
+            .select("address, role, status, price, close_date, notes, referral_source:referral_source_contact_id(display_name)")
+            .eq("contact_id", contactId)
+            .eq("user_id", uid)
+            .not("status", "in", '("closed_won","closed_lost")')
+            .order("created_at", { ascending: false })
+            .limit(3);
+
+        // 4) Recent text messages (if you have them)
         const { data: texts } = await supabaseAdmin
             .from("text_messages")
             .select("direction, occurred_at, body")
@@ -214,6 +208,15 @@ export async function POST(req: Request) {
             "Output ONLY the final message body. No preamble, no bullet labels, no quotes.",
         ].join(" ");
 
+        const dealContext = (activeDeals ?? []).map((d: any) => ({
+            address: d.address,
+            role: d.role,
+            stage: d.status,
+            price: d.price ? `$${Number(d.price).toLocaleString()}` : null,
+            close_date: d.close_date ?? null,
+            notes: d.notes ?? null,
+        }));
+
         const user = [
             `TASK: Draft a ${channel.toUpperCase()} message.`,
             `Intent: ${intent}`,
@@ -242,6 +245,11 @@ export async function POST(req: Request) {
             "CONTACT CONTEXT:",
             JSON.stringify(contactSummary, null, 2),
             "",
+            ...(dealContext.length > 0 ? [
+                "ACTIVE DEALS (reference naturally if relevant — don't force it):",
+                JSON.stringify(dealContext, null, 2),
+                "",
+            ] : []),
             "RECENT TOUCHES (most recent first):",
             JSON.stringify(recentTouchSummary, null, 2),
             "",
@@ -260,7 +268,7 @@ export async function POST(req: Request) {
             .filter(Boolean)
             .join("\n");
 
-        const draft = await openaiDraft({ system, user });
+        const draft = await claudeDraft({ system, user });
 
         return NextResponse.json({
             ok: true,

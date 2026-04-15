@@ -28,9 +28,32 @@ type Contact = {
   buyer_budget_min: number | null;
   buyer_budget_max: number | null;
   buyer_target_areas: string | null;
+  notes: string | null;
   ai_context: string | null;
   ai_context_updated_at: string | null;
+  birthday: string | null;
+  close_anniversary: string | null;
+  move_in_date: string | null;
 };
+
+type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
+
+const DEAL_STAGES: { value: DealStage; label: string }[] = [
+  { value: "lead",           label: "Lead" },
+  { value: "showing",        label: "Showing" },
+  { value: "offer_in",       label: "Offer In" },
+  { value: "under_contract", label: "Under Contract" },
+  { value: "closed_won",     label: "Closed ✓" },
+  { value: "closed_lost",    label: "Closed ✗" },
+];
+
+function stageColor(s: string): React.CSSProperties {
+  if (s === "closed_won")     return { background: "rgba(11,107,42,.1)",   color: "#0b6b2a",           borderColor: "rgba(11,107,42,.25)" };
+  if (s === "closed_lost")    return { background: "rgba(0,0,0,.05)",       color: "rgba(18,18,18,.4)", borderColor: "transparent" };
+  if (s === "under_contract") return { background: "rgba(11,60,140,.08)",   color: "#1a3f8a",           borderColor: "rgba(11,60,140,.2)" };
+  if (s === "offer_in")       return { background: "rgba(120,60,0,.08)",    color: "rgba(120,60,0,.9)", borderColor: "rgba(120,60,0,.2)" };
+  return {};
+}
 
 type Deal = {
   id: string;
@@ -41,6 +64,8 @@ type Deal = {
   close_date: string | null;
   notes: string | null;
   created_at: string;
+  referral_source_contact_id: string | null;
+  referral_source_name?: string | null;
 };
 
 type Touch = {
@@ -70,7 +95,11 @@ function fmtDT(v: string) {
 }
 
 function dirPill(direction: Touch["direction"]) {
-  return direction === "outbound" ? "Outbound" : "Inbound";
+  const label = direction === "outbound" ? "Outbound" : "Inbound";
+  const color = direction === "outbound" ? "#0b6b2a" : "#1a4fa0";
+  return (
+    <span style={{ color, fontWeight: 700 }}>{label}</span>
+  );
 }
 
 function channelLabel(c: Touch["channel"]) {
@@ -183,6 +212,81 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
   );
 }
 
+type TouchFilter = "all" | "outbound" | "inbound";
+
+function TouchHistory({ touches }: { touches: Touch[] }) {
+  const [filter, setFilter] = useState<TouchFilter>("all");
+
+  const filtered = filter === "all" ? touches : touches.filter((t) => t.direction === filter);
+  const outboundCount = touches.filter((t) => t.direction === "outbound").length;
+  const inboundCount = touches.filter((t) => t.direction === "inbound").length;
+
+  return (
+    <div className="card cardPad" style={{ marginTop: 18 }}>
+      <div className="rowResponsiveBetween" style={{ marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>
+            Touch history <span className="subtle" style={{ fontWeight: 400 }}>({touches.length})</span>
+          </div>
+          <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+            {outboundCount} outbound · {inboundCount} inbound
+          </div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {(["all", "outbound", "inbound"] as TouchFilter[]).map((f) => (
+            <button
+              key={f}
+              className="btn"
+              style={{
+                fontSize: 12,
+                padding: "2px 10px",
+                fontWeight: filter === f ? 900 : 400,
+                background: filter === f ? "var(--ink)" : undefined,
+                color: filter === f ? "var(--paper)" : undefined,
+              }}
+              onClick={() => setFilter(f)}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="stack">
+        {filtered.length === 0 ? (
+          <div className="subtle">No touches{filter !== "all" ? ` (${filter})` : ""} yet.</div>
+        ) : (
+          filtered.map((t) => (
+            <div key={t.id} className="card cardPad">
+              <div className="rowResponsiveBetween">
+                <div style={{ fontWeight: 700 }}>
+                  {dirPill(t.direction)}
+                  <span style={{ color: "var(--ink)", fontWeight: 400 }}> · {channelLabel(t.channel)}</span>
+                  {t.intent ? <span className="subtle"> · {t.intent}</span> : null}
+                  {t.source ? <span className="subtle"> · {t.source}</span> : null}
+                </div>
+                <div className="subtle" style={{ flexShrink: 0 }}>{fmtDT(t.occurred_at)}</div>
+              </div>
+
+              {t.summary ? (
+                <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>{t.summary}</div>
+              ) : null}
+
+              {t.source_link ? (
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  <a href={t.source_link} target="_blank" rel="noreferrer" className="subtle">
+                    open in {t.source ?? "source"} →
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ContactDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || "";
@@ -200,6 +304,12 @@ export default function ContactDetailPage() {
   const [category, setCategory] = useState("Client");
   const [tier, setTier] = useState<"A" | "B" | "C">("A");
   const [clientType, setClientType] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [birthday, setBirthday] = useState("");
+  const [closeAnniversary, setCloseAnniversary] = useState("");
+  const [moveInDate, setMoveInDate] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
@@ -213,6 +323,14 @@ export default function ContactDetailPage() {
   const [savingTouch, setSavingTouch] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
+
+  // Follow-ups
+  type FollowUpLocal = { id: string; due_date: string; note: string | null; };
+  const [followUps, setFollowUps] = useState<FollowUpLocal[]>([]);
+  const [fuFormOpen, setFuFormOpen] = useState(false);
+  const [fuDate, setFuDate] = useState("");
+  const [fuNote, setFuNote] = useState("");
+  const [fuSaving, setFuSaving] = useState(false);
 
   // linked contacts (household)
   type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
@@ -233,20 +351,16 @@ export default function ContactDetailPage() {
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [dealAddress, setDealAddress] = useState("");
   const [dealRole, setDealRole] = useState("buyer");
-  const [dealStatus, setDealStatus] = useState("active");
+  const [dealStatus, setDealStatus] = useState<DealStage>("showing");
   const [dealPrice, setDealPrice] = useState("");
   const [dealCloseDate, setDealCloseDate] = useState("");
   const [dealNotes, setDealNotes] = useState("");
+  const [dealRefSourceId, setDealRefSourceId] = useState("");
+  const [dealRefSourceName, setDealRefSourceName] = useState("");
+  const [dealRefQuery, setDealRefQuery] = useState("");
+  const [dealRefResults, setDealRefResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
   const [dealBusy, setDealBusy] = useState(false);
   const [dealErr, setDealErr] = useState<string | null>(null);
-
-  // merge
-  const [mergeQ, setMergeQ] = useState("");
-  const [mergeResults, setMergeResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
-  const [mergeTarget, setMergeTarget] = useState<{ id: string; display_name: string } | null>(null);
-  const [mergeConfirm, setMergeConfirm] = useState(false);
-  const [mergeBusy, setMergeBusy] = useState(false);
-  const [mergeMsg, setMergeMsg] = useState<string | null>(null);
 
   // AI insights
   const [aiContext, setAiContext] = useState<string | null>(null);
@@ -287,7 +401,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -306,11 +420,17 @@ export default function ContactDetailPage() {
     setCategory(c.category || "Client");
     setTier(((c.tier || "A").toUpperCase() as any) || "A");
     setClientType(c.client_type || "");
+    setEmail(c.email || "");
+    setPhone(c.phone || "");
+    setNotes(c.notes || "");
     setBuyerBudgetMin(c.buyer_budget_min != null ? String(c.buyer_budget_min) : "");
     setBuyerBudgetMax(c.buyer_budget_max != null ? String(c.buyer_budget_max) : "");
     setBuyerAreas(c.buyer_target_areas || "");
     setAiContext(c.ai_context ?? null);
     setAiContextUpdatedAt(c.ai_context_updated_at ?? null);
+    setBirthday(c.birthday ?? "");
+    setCloseAnniversary(c.close_anniversary ?? "");
+    setMoveInDate(c.move_in_date ?? "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -335,10 +455,20 @@ export default function ContactDetailPage() {
     }
 
     // Load deals
+    const fuRes = await fetch(`/api/follow-ups?contact_id=${id}`);
+    if (fuRes.ok) {
+      const fj = await fuRes.json().catch(() => ({}));
+      setFollowUps((fj.follow_ups ?? []) as FollowUpLocal[]);
+    }
+
     const dealsRes = await fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`);
     if (dealsRes.ok) {
       const dj = await dealsRes.json().catch(() => ({}));
-      setDeals(dj.deals ?? []);
+      const rawDeals = (dj.deals ?? []) as any[];
+      setDeals(rawDeals.map((d: any) => ({
+        ...d,
+        referral_source_name: (d.referral_source as any)?.display_name ?? null,
+      })));
     }
   }
 
@@ -354,16 +484,31 @@ export default function ContactDetailPage() {
         category,
         tier,
         client_type: clientType.trim() ? clientType.trim() : null,
+        email: email.trim() ? email.trim().toLowerCase() : null,
+        phone: phone.trim() ? phone.trim() : null,
+        notes: notes.trim() ? notes.trim() : null,
+        birthday: birthday || null,
+        close_anniversary: closeAnniversary || null,
+        move_in_date: moveInDate || null,
       })
       .eq("id", contact.id);
 
-    setSavingContact(false);
-
     if (error) {
+      setSavingContact(false);
       setError(`Update contact error: ${error.message}`);
       return;
     }
 
+    // Keep contact_emails table in sync with the primary email
+    const newEmail = email.trim().toLowerCase();
+    if (newEmail) {
+      // Upsert into contact_emails so Gmail sync can match this address
+      await supabase
+        .from("contact_emails")
+        .upsert({ contact_id: contact.id, email: newEmail }, { onConflict: "contact_id,email" });
+    }
+
+    setSavingContact(false);
     setEditing(false);
     await fetchAll();
   }
@@ -463,10 +608,14 @@ export default function ContactDetailPage() {
     setEditingDeal(null);
     setDealAddress("");
     setDealRole("buyer");
-    setDealStatus("active");
+    setDealStatus("showing");
     setDealPrice("");
     setDealCloseDate("");
     setDealNotes("");
+    setDealRefSourceId("");
+    setDealRefSourceName("");
+    setDealRefQuery("");
+    setDealRefResults([]);
     setDealErr(null);
     setDealFormOpen(true);
   }
@@ -475,12 +624,26 @@ export default function ContactDetailPage() {
     setEditingDeal(d);
     setDealAddress(d.address);
     setDealRole(d.role);
-    setDealStatus(d.status);
+    setDealStatus(d.status as DealStage);
     setDealPrice(d.price != null ? String(d.price) : "");
     setDealCloseDate(d.close_date ?? "");
     setDealNotes(d.notes ?? "");
+    setDealRefSourceId(d.referral_source_contact_id ?? "");
+    setDealRefSourceName(d.referral_source_name ?? "");
+    setDealRefQuery(d.referral_source_name ?? "");
+    setDealRefResults([]);
     setDealErr(null);
     setDealFormOpen(true);
+  }
+
+  async function searchRefSource(q: string) {
+    setDealRefQuery(q);
+    setDealRefSourceId("");
+    setDealRefSourceName("");
+    if (!q.trim() || q.trim().length < 2) { setDealRefResults([]); return; }
+    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setDealRefResults(res.ok ? (j.results ?? []) : []);
   }
 
   async function saveDeal() {
@@ -501,6 +664,7 @@ export default function ContactDetailPage() {
         price: dealPrice ? Number(dealPrice.replace(/[^0-9.]/g, "")) : null,
         close_date: dealCloseDate || null,
         notes: dealNotes,
+        referral_source_contact_id: dealRefSourceId || null,
       }),
     });
     const j = await res.json().catch(() => ({}));
@@ -522,6 +686,39 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
+  async function saveFollowUp() {
+    if (!fuDate || !contact) return;
+    setFuSaving(true);
+    await fetch("/api/follow-ups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: contact.id, due_date: fuDate, note: fuNote.trim() || null }),
+    });
+    setFuSaving(false);
+    setFuFormOpen(false);
+    setFuDate("");
+    setFuNote("");
+    await fetchAll();
+  }
+
+  async function completeFollowUp(fuId: string) {
+    await fetch("/api/follow-ups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: fuId }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== fuId));
+  }
+
+  async function deleteFollowUp(fuId: string) {
+    await fetch("/api/follow-ups", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: fuId }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== fuId));
+  }
+
   async function saveBuyerProfile() {
     if (!contact || !uid) return;
     setSavingBuyer(true);
@@ -535,38 +732,6 @@ export default function ContactDetailPage() {
     if (error) { setBuyerMsg(`Error: ${error.message}`); return; }
     setBuyerMsg("Saved.");
     await fetchAll();
-  }
-
-  async function searchMergeTargets(q: string) {
-    setMergeQ(q);
-    if (q.trim().length < 2) { setMergeResults([]); return; }
-    const { data } = await supabase
-      .from("contacts")
-      .select("id, display_name, category")
-      .neq("archived", true)
-      .neq("id", contact?.id ?? "")
-      .ilike("display_name", `%${q.trim()}%`)
-      .limit(8);
-    setMergeResults((data ?? []) as { id: string; display_name: string; category: string }[]);
-  }
-
-  async function doMerge() {
-    if (!mergeTarget || !contact) return;
-    setMergeBusy(true);
-    setMergeMsg(null);
-    const res = await fetch("/api/contacts/merge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_id: contact.id, target_id: mergeTarget.id }),
-    });
-    const j = await res.json();
-    setMergeBusy(false);
-    if (!res.ok) { setMergeMsg(`Error: ${j?.error || "Merge failed"}`); return; }
-    setMergeMsg(`Done — ${j.touchesMoved} touches moved to "${j.targetName}". This contact has been archived.`);
-    setMergeConfirm(false);
-    setMergeTarget(null);
-    setMergeResults([]);
-    setMergeQ("");
   }
 
   async function deleteContact() {
@@ -693,7 +858,45 @@ export default function ContactDetailPage() {
 
             <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
               Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
+              {contact.email ? <span> · {contact.email}</span> : null}
+              {contact.phone ? <span> · {contact.phone}</span> : null}
             </div>
+            {contact.notes ? (
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13, whiteSpace: "pre-wrap" }}>
+                {contact.notes}
+              </div>
+            ) : null}
+            {(() => {
+              const today = new Date();
+              const milestones: { label: string; date: string; daysAway: number }[] = [];
+              const checkMilestone = (dateStr: string | null, label: string) => {
+                if (!dateStr) return;
+                // For recurring milestones (birthday, anniversary), find next occurrence
+                const d = new Date(dateStr);
+                const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+                const nextYear = new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+                const next = thisYear >= today ? thisYear : nextYear;
+                const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
+                if (days <= 30) milestones.push({ label, date: next.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+              };
+              checkMilestone(contact.birthday, "Birthday");
+              checkMilestone(contact.close_anniversary, "Close anniversary");
+              if (contact.move_in_date) {
+                const d = new Date(contact.move_in_date);
+                const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
+                if (days >= 0 && days <= 30) milestones.push({ label: "Move-in", date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+              }
+              if (milestones.length === 0) return null;
+              return (
+                <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+                  {milestones.map((m) => (
+                    <span key={m.label} className="badge" style={{ background: "rgba(120,60,0,.08)", color: "rgba(120,60,0,.9)", borderColor: "rgba(120,60,0,.2)", fontWeight: 700, fontSize: 12 }}>
+                      {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
@@ -763,63 +966,60 @@ export default function ContactDetailPage() {
             />
           </div>
 
+          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
+            <div className="field" style={{ flex: 1, minWidth: 220 }}>
+              <div className="label">Email (optional)</div>
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 180 }}>
+              <div className="label">Phone (optional)</div>
+              <input
+                className="input"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(310) 555-0100"
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="label">Notes (optional)</div>
+            <textarea
+              className="textarea"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Context for AI drafts, relationship notes, key details…"
+              style={{ minHeight: 80 }}
+            />
+          </div>
+
+          <div style={{ fontWeight: 800, fontSize: 13, marginTop: 4 }}>Milestones</div>
+          <div className="fieldGridMobile">
+            <div className="field">
+              <div className="label">Birthday</div>
+              <input className="input" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
+            </div>
+            <div className="field">
+              <div className="label">Close anniversary</div>
+              <input className="input" type="date" value={closeAnniversary} onChange={(e) => setCloseAnniversary(e.target.value)} />
+            </div>
+            <div className="field">
+              <div className="label">Move-in date</div>
+              <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
+            </div>
+          </div>
+
           <div className="rowResponsive">
             <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
               {savingContact ? "Saving…" : "Save"}
             </button>
-          </div>
-
-          <div className="hr" />
-
-          {/* Merge duplicate */}
-          <div className="stack">
-            <div style={{ fontWeight: 900 }}>Merge duplicate</div>
-            <div className="subtle" style={{ fontSize: 12 }}>
-              All touches from <strong>{contact?.display_name}</strong> will move to the contact you pick, then this one gets archived.
-            </div>
-
-            {mergeMsg ? (
-              <div className="alert alertOk" style={{ fontSize: 13 }}>{mergeMsg}</div>
-            ) : mergeConfirm && mergeTarget ? (
-              <div className="stack" style={{ gap: 8 }}>
-                <div style={{ fontSize: 13 }}>
-                  Merge <strong>{contact?.display_name}</strong> → <strong>{mergeTarget.display_name}</strong>?
-                  All touches will be combined and this contact archived.
-                </div>
-                <div className="row">
-                  <button className="btn btnPrimary" onClick={doMerge} disabled={mergeBusy}>
-                    {mergeBusy ? "Merging…" : "Confirm merge"}
-                  </button>
-                  <button className="btn" onClick={() => { setMergeConfirm(false); setMergeTarget(null); }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="stack" style={{ gap: 6 }}>
-                <input
-                  className="input"
-                  value={mergeQ}
-                  onChange={(e) => searchMergeTargets(e.target.value)}
-                  placeholder="Search for the contact to merge into…"
-                />
-                {mergeResults.length > 0 && (
-                  <div className="card" style={{ padding: "4px 0" }}>
-                    {mergeResults.map((r) => (
-                      <button
-                        key={r.id}
-                        className="btnGhost"
-                        style={{ width: "100%", textAlign: "left", padding: "9px 14px", fontSize: 13, display: "block", borderRadius: 0 }}
-                        onClick={() => { setMergeTarget(r); setMergeConfirm(true); setMergeResults([]); }}
-                      >
-                        <strong>{r.display_name}</strong>
-                        <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{r.category}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           <div className="hr" />
@@ -941,13 +1141,10 @@ export default function ContactDetailPage() {
                   <option value="tenant">Tenant</option>
                 </select>
               </div>
-              <div className="field" style={{ minWidth: 130 }}>
-                <div className="label">Status</div>
-                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value)}>
-                  <option value="active">Active</option>
-                  <option value="pending">Pending</option>
-                  <option value="closed">Closed</option>
-                  <option value="cancelled">Cancelled</option>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Stage</div>
+                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
+                  {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
             </div>
@@ -960,6 +1157,35 @@ export default function ContactDetailPage() {
                 <div className="label">Close date (optional)</div>
                 <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
               </div>
+            </div>
+            <div className="field">
+              <div className="label">Referral source (optional)</div>
+              <input
+                className="input"
+                value={dealRefQuery}
+                onChange={e => searchRefSource(e.target.value)}
+                placeholder="Search contacts…"
+              />
+              {dealRefResults.length > 0 && (
+                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                  {dealRefResults.slice(0, 5).map(c => (
+                    <button
+                      key={c.id}
+                      className="btn"
+                      style={{ borderRadius: 0, textAlign: "left", justifyContent: "flex-start", fontSize: 13 }}
+                      onClick={() => { setDealRefSourceId(c.id); setDealRefSourceName(c.display_name); setDealRefQuery(c.display_name); setDealRefResults([]); }}
+                    >
+                      {c.display_name} <span style={{ color: "rgba(18,18,18,.4)", marginLeft: 6 }}>{c.category}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {dealRefSourceId && (
+                <div style={{ marginTop: 4, fontSize: 12, color: "rgba(18,18,18,.5)" }}>
+                  Linked: <strong>{dealRefSourceName}</strong>
+                  <button style={{ marginLeft: 8, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setDealRefSourceId(""); setDealRefSourceName(""); setDealRefQuery(""); }}>remove</button>
+                </div>
+              )}
             </div>
             <div className="field">
               <div className="label">Notes (optional)</div>
@@ -982,9 +1208,12 @@ export default function ContactDetailPage() {
                     <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
                     <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
                       <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
-                      <span className="badge" style={{ textTransform: "capitalize", ...(d.status === "closed" ? { background: "rgba(11,107,42,.1)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)" } : d.status === "cancelled" ? { color: "rgba(18,18,18,.4)" } : {}) }}>{d.status}</span>
+                      <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
+                        {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                      </span>
                       {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
                       {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                      {d.referral_source_name && <span className="badge">Ref: {d.referral_source_name}</span>}
                     </div>
                     {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>{d.notes}</div>}
                   </div>
@@ -998,6 +1227,60 @@ export default function ContactDetailPage() {
           </div>
         ) : (
           !dealFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No deals yet — add one above.</div>
+        )}
+      </div>
+
+      {/* Follow-ups */}
+      <div className="card cardPad stack">
+        <div className="rowBetween" style={{ alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Follow-up reminders</div>
+            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Timed reminders that surface on the morning page</div>
+          </div>
+          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => setFuFormOpen((v) => !v)}>
+            {fuFormOpen ? "Cancel" : "+ Add reminder"}
+          </button>
+        </div>
+
+        {fuFormOpen && (
+          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+            <div className="field">
+              <div className="label">Follow up on</div>
+              <input className="input" type="date" value={fuDate} onChange={(e) => setFuDate(e.target.value)} autoFocus />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 200 }}>
+              <div className="label">Context (optional)</div>
+              <input className="input" value={fuNote} onChange={(e) => setFuNote(e.target.value)} placeholder="e.g. Check if they decided on the listing" />
+            </div>
+            <button className="btn btnPrimary" onClick={saveFollowUp} disabled={fuSaving || !fuDate}>
+              {fuSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        )}
+
+        {followUps.length > 0 ? (
+          <div className="stack" style={{ gap: 0 }}>
+            {followUps.map((f, i) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const overdue = f.due_date < today;
+              return (
+                <div key={f.id} style={{ padding: "10px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: overdue ? "#8a0000" : undefined }}>
+                      {overdue ? `Overdue — ` : ""}{f.due_date}
+                    </span>
+                    {f.note && <span className="subtle" style={{ fontSize: 13, marginLeft: 8 }}>{f.note}</span>}
+                  </div>
+                  <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => completeFollowUp(f.id)}>Done ✓</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "rgba(18,18,18,.4)" }} onClick={() => deleteFollowUp(f.id)}>Remove</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          !fuFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No reminders set.</div>
         )}
       </div>
 
@@ -1080,54 +1363,13 @@ export default function ContactDetailPage() {
       </div>
 
       {/* Jordan Voice FIRST */}
-      <VoiceDraftPanel contactId={contact.id} contactEmail={contact.email} />
+      <VoiceDraftPanel contactId={contact.id} />
 
       {/* Text upload NEXT */}
       <TextThreadUploadPanel contactId={contact.id} />
 
-      {/* Touch history: collapsed + calm */}
-      <details className="card cardPad" open={false}>
-        <summary style={{ cursor: "pointer", fontWeight: 900, listStyle: "none" as any }}>
-          Touch history <span className="subtle">({touches.length})</span>
-        </summary>
-
-        <div className="stack" style={{ marginTop: 12 }}>
-          {touches.length === 0 ? (
-            <div className="subtle">No touches yet.</div>
-          ) : (
-            touches.map((t) => (
-              <div key={t.id} className="card cardPad">
-                <div className="rowResponsiveBetween">
-                  <div style={{ fontWeight: 900 }}>
-                    {dirPill(t.direction)} • {channelLabel(t.channel)}
-                    {t.intent ? <span className="subtle"> • {t.intent}</span> : null}
-                  </div>
-                  <div className="subtle">{fmtDT(t.occurred_at)}</div>
-                </div>
-
-                {t.summary ? (
-                  <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>{t.summary}</div>
-                ) : null}
-
-                {(t.source || t.source_link) ? (
-                  <div className="subtle" style={{ marginTop: 10, fontSize: 12 }}>
-                    {t.source ? `source: ${t.source}` : ""}
-                    {t.source_link ? (
-                      <>
-                        {" "}
-                        •{" "}
-                        <a href={t.source_link} target="_blank" rel="noreferrer">
-                          open link
-                        </a>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </details>
+      {/* Touch history */}
+      <TouchHistory touches={touches} />
 
       {/* Log touch modal (kept functional but less noisy text) */}
       {logOpen && (

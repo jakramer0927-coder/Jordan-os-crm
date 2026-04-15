@@ -6,6 +6,7 @@ const supabase = createSupabaseBrowserClient();
 
 type TouchIntent =
   | "check_in"
+  | "follow_up"
   | "referral_ask"
   | "review_ask"
   | "deal_followup"
@@ -20,7 +21,6 @@ type Contact = {
   tier: string | null;
   client_type: string | null;
   email: string | null;
-  phone: string | null;
   created_at: string;
 };
 
@@ -40,6 +40,19 @@ type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
   days_since_outbound: number | null;
+  last_inbound_at: string | null;
+  active_deals: number;
+  birthday: string | null;
+  close_anniversary: string | null;
+  move_in_date: string | null;
+};
+
+type FollowUp = {
+  id: string;
+  contact_id: string;
+  due_date: string;
+  note: string | null;
+  contacts: { id: string; display_name: string; category: string; tier: string | null } | null;
 };
 
 type VoiceProfile = {
@@ -66,6 +79,37 @@ type VoiceProfile = {
     len: number;
   }>;
 };
+
+function upcomingMilestones(c: ContactWithLastOutbound): { label: string; daysAway: number }[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const results: { label: string; daysAway: number }[] = [];
+  const checkRecurring = (dateStr: string | null, label: string) => {
+    if (!dateStr) return;
+    const d = new Date(dateStr);
+    const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+    const next = thisYear >= today ? thisYear : new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+    const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
+    if (days <= 14) results.push({ label, daysAway: days });
+  };
+  checkRecurring(c.birthday, "Birthday");
+  checkRecurring(c.close_anniversary, "Close anniversary");
+  if (c.move_in_date) {
+    const d = new Date(c.move_in_date);
+    const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
+    if (days >= 0 && days <= 14) results.push({ label: "Move-in", daysAway: days });
+  }
+  return results;
+}
+
+function syncAgo(iso: string | null): { label: string; stale: boolean } {
+  if (!iso) return { label: "never", stale: true };
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 60) return { label: `${mins}m ago`, stale: false };
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return { label: `${hrs}h ago`, stale: hrs >= 4 };
+  return { label: `${Math.floor(hrs / 24)}d ago`, stale: true };
+}
 
 function daysSince(iso: string): number {
   const then = new Date(iso).getTime();
@@ -302,7 +346,6 @@ type Recommendation = ContactWithLastOutbound & {
   score: number;
   reasons: string[];
   suggested_channel: Touch["channel"];
-  suggested_draft: string;
 };
 
 type MorningRules = {
@@ -320,6 +363,34 @@ const DEFAULT_RULES: MorningRules = {
 };
 
 const RULES_KEY = "morning_rules_v1";
+const LOCK_KEY = "morning_lock_v1";
+
+function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+function loadLockedIds(): string[] | null {
+  try {
+    const raw = localStorage.getItem(LOCK_KEY);
+    if (!raw) return null;
+    const { date, ids } = JSON.parse(raw) as { date: string; ids: string[] };
+    if (date !== todayDateString()) return null;
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+function saveLockedIds(ids: string[]) {
+  try {
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ date: todayDateString(), ids }));
+  } catch { /* ignore */ }
+}
+
+function clearLockedIds() {
+  try { localStorage.removeItem(LOCK_KEY); } catch { /* ignore */ }
+}
 
 function loadRules(): MorningRules {
   try {
@@ -358,38 +429,42 @@ export default function MorningPage() {
   const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
-  // voice draft in log panel
-  const [touchAsk, setTouchAsk] = useState("");
-  const [touchDraft, setTouchDraft] = useState("");
-  const [touchDraftBusy, setTouchDraftBusy] = useState(false);
-  const [touchDraftCopied, setTouchDraftCopied] = useState(false);
-  const [touchSuggestBusy, setTouchSuggestBusy] = useState(false);
-  const [touchSuggestMeta, setTouchSuggestMeta] = useState<{ intent: string; confidence: number; reason: string } | null>(null);
-
-  // stable list + completed tracking — persisted in sessionStorage so
-  // navigating to a contact and back doesn't reshuffle the list
-  const SESSION_LOCKED_KEY = "morning_locked_ids_v1";
-  const SESSION_COMPLETED_KEY = "morning_completed_ids_v1";
-
+  // stable list + completed tracking — persisted per calendar day
   const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
     if (typeof window === "undefined") return null;
-    try {
-      const raw = sessionStorage.getItem(SESSION_LOCKED_KEY);
-      return raw ? (JSON.parse(raw) as string[]) : null;
-    } catch { return null; }
+    return loadLockedIds();
   });
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  const [completedIds, setCompletedIds] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try {
-      const raw = sessionStorage.getItem(SESSION_COMPLETED_KEY);
-      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
-    } catch { return new Set(); }
-  });
+  // AI-generated drafts keyed by contact ID
+  const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
+  const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
+  // Per-contact intent selection
+  const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
+
+  // Follow-ups
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [completingFollowUp, setCompletingFollowUp] = useState<string | null>(null);
+  // Remind-me form (attached to touch log)
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [remindDate, setRemindDate] = useState("");
+  const [remindNote, setRemindNote] = useState("");
+
+  // Bulk touch logging
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkChannel, setBulkChannel] = useState<Touch["channel"]>("email");
+  const [bulkIntent, setBulkIntent] = useState<TouchIntent>("check_in");
+  const [bulkSummary, setBulkSummary] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
   const [wtdCount, setWtdCount] = useState(0);
+
+  // sync health
+  const [syncGmail, setSyncGmail] = useState<string | null>(null);
+  const [syncCalendar, setSyncCalendar] = useState<string | null>(null);
 
   // operating rules — load synchronously on first render to avoid re-render loop
   const [rules, setRules] = useState<MorningRules>(() => {
@@ -410,9 +485,9 @@ export default function MorningPage() {
     return user;
   }
 
-  async function loadVoiceProfile(_userId: string) {
+  async function loadVoiceProfile(userId: string) {
     try {
-      const res = await fetch(`/api/voice/profile?limit=120&minLen=140`);
+      const res = await fetch(`/api/voice/profile?uid=${userId}&limit=120&minLen=140`);
       const j = (await res.json()) as VoiceProfile | { error?: string };
       if (!res.ok) return;
       if ((j as VoiceProfile).ok) setVoice(j as VoiceProfile);
@@ -427,118 +502,44 @@ export default function MorningPage() {
     setError(null);
     setMsg(null);
     setLoading(true);
+    // Clear the lock so a fresh top-N is picked from the new data
+    setLockedIds(null);
+    clearLockedIds();
 
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
 
-    if (!voiceLoaded) await loadVoiceProfile(user.id);
-
-    const { data: cData, error: cErr } = await supabase
-      .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, created_at")
-      .neq("archived", true)
-      .order("created_at", { ascending: false })
-      .limit(2000);
-
-    if (cErr) {
-      setError(`Contacts fetch error: ${cErr.message}`);
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    const base = (cData ?? []) as Contact[];
-    if (base.length === 0) {
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    const ids = base.map((c) => c.id);
-    const { data: tData, error: tErr } = await supabase
-      .from("touches")
-      .select(
-        "id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link",
-      )
-      .in("contact_id", ids)
-      .eq("direction", "outbound")
-      .order("occurred_at", { ascending: false })
-      .limit(8000);
-
-    if (tErr) {
-      setError(`Touches fetch error: ${tErr.message}`);
-      const mergedFail: ContactWithLastOutbound[] = base.map((c) => ({
-        ...c,
-        last_outbound_at: null,
-        last_outbound_channel: null,
-        days_since_outbound: null,
-      }));
-      setContacts(mergedFail);
-      setLoading(false);
-      return;
-    }
-
-    const touches = (tData ?? []) as Touch[];
-    const latestOutbound = new Map<string, Touch>();
-    for (const t of touches) {
-      if (!latestOutbound.has(t.contact_id)) latestOutbound.set(t.contact_id, t);
-    }
-
-    // Load contact_links so linked contacts share cadence (Option B)
-    const { data: linksData } = await supabase
-      .from("contact_links")
-      .select("contact_id_a, contact_id_b")
-      .or(ids.map((id) => `contact_id_a.eq.${id},contact_id_b.eq.${id}`).join(","));
-
-    // Build a map: contact_id → [linked contact ids]
-    const linkedMap = new Map<string, string[]>();
-    for (const row of (linksData ?? []) as { contact_id_a: string; contact_id_b: string }[]) {
-      const { contact_id_a: a, contact_id_b: b } = row;
-      if (!linkedMap.has(a)) linkedMap.set(a, []);
-      if (!linkedMap.has(b)) linkedMap.set(b, []);
-      linkedMap.get(a)!.push(b);
-      linkedMap.get(b)!.push(a);
-    }
-
-    // For each contact, pick the most recent outbound across self + all linked contacts
-    function bestOutbound(contactId: string): Touch | null {
-      const candidates: Touch[] = [];
-      const self = latestOutbound.get(contactId);
-      if (self) candidates.push(self);
-      for (const linkedId of linkedMap.get(contactId) ?? []) {
-        const linked = latestOutbound.get(linkedId);
-        if (linked) candidates.push(linked);
-      }
-      if (candidates.length === 0) return null;
-      return candidates.reduce((best, t) =>
-        new Date(t.occurred_at) > new Date(best.occurred_at) ? t : best
-      );
-    }
-
-    const merged: ContactWithLastOutbound[] = base.map((c) => {
-      const last = bestOutbound(c.id);
-      return {
-        ...c,
-        last_outbound_at: last ? last.occurred_at : null,
-        last_outbound_channel: last ? last.channel : null,
-        days_since_outbound: last ? daysSince(last.occurred_at) : null,
-      };
-    });
-
-    setContacts(merged);
-
-    // Accountability strip counts
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekStart = startOfWeekMondayLocal(new Date());
-
-    const [{ count: tc }, { count: wc }] = await Promise.all([
-      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", todayStart.toISOString()),
-      supabase.from("touches").select("id", { count: "exact", head: true }).eq("direction", "outbound").gte("occurred_at", weekStart.toISOString()),
+    // Fetch contacts+touches+counts, voice profile, sync status, and follow-ups in parallel
+    const [contactsRes, syncRes, followUpsRes] = await Promise.all([
+      fetch("/api/morning/contacts"),
+      fetch("/api/sync/status"),
+      fetch("/api/follow-ups?due_today=1"),
+      voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
     ]);
+
+    if (syncRes.ok) {
+      const sj = await syncRes.json().catch(() => ({}));
+      setSyncGmail(sj.gmail ?? null);
+      setSyncCalendar(sj.calendar ?? null);
+    }
+
+    if (followUpsRes.ok) {
+      const fj = await followUpsRes.json().catch(() => ({}));
+      setFollowUps((fj.follow_ups ?? []) as FollowUp[]);
+    }
+
+    if (!contactsRes.ok) {
+      const j = await contactsRes.json().catch(() => ({}));
+      setError(`Load error: ${(j as any).error ?? contactsRes.statusText}`);
+      setLoading(false);
+      return;
+    }
+
+    const { contacts: merged, todayCount: tc, wtdCount: wc } = await contactsRes.json();
+
+    setContacts((merged ?? []) as ContactWithLastOutbound[]);
     setTodayCount(tc ?? 0);
     setWtdCount(wc ?? 0);
-
     setLoading(false);
   }
 
@@ -549,10 +550,6 @@ export default function MorningPage() {
     setTouchSummary("");
     setTouchSource("manual");
     setTouchLink("");
-    setTouchAsk("");
-    setTouchDraft("");
-    setTouchDraftCopied(false);
-    setTouchSuggestMeta(null);
   }
 
   async function saveTouch() {
@@ -587,58 +584,58 @@ export default function MorningPage() {
     setLoggingFor(null);
   }
 
-  // Debounced suggest-intent when user types a prompt in the log panel
-  useEffect(() => {
-    let t: ReturnType<typeof setTimeout>;
+  async function completeFollowUp(id: string) {
+    setCompletingFollowUp(id);
+    await fetch("/api/follow-ups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== id));
+    setCompletingFollowUp(null);
+  }
 
-    async function run() {
-      if (!uid || !loggingFor) return;
-      const text = touchAsk.trim();
-      if (text.length < 10) { setTouchSuggestMeta(null); return; }
+  async function saveReminder(contactId: string) {
+    if (!remindDate) return;
+    await fetch("/api/follow-ups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: contactId, due_date: remindDate, note: remindNote.trim() || null }),
+    });
+    setRemindOpen(false);
+    setRemindDate("");
+    setRemindNote("");
+    setMsg("Reminder saved ✓");
+  }
 
-      setTouchSuggestBusy(true);
-      try {
-        const ch = (touchChannel === "email" || touchChannel === "text") ? touchChannel : "email";
-        const res = await fetch("/api/voice/suggest-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contact_id: loggingFor, channel: ch, ask: text }),
-        });
-        const j = await res.json();
-        if (res.ok) {
-          setTouchSuggestMeta({ intent: j.intent || "other", confidence: j.confidence ?? 0.5, reason: String(j.reason || "") });
-        }
-      } catch { /* ignore */ }
-      finally { setTouchSuggestBusy(false); }
-    }
+  async function saveBulkTouch() {
+    if (displayRecs.length === 0) return;
+    setBulkSaving(true);
+    setBulkMsg(null);
 
-    t = setTimeout(run, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [touchAsk, uid, loggingFor, touchChannel]);
+    const now = new Date().toISOString();
+    const rows = displayRecs.map((c) => ({
+      contact_id: c.id,
+      channel: bulkChannel,
+      direction: "outbound" as const,
+      intent: bulkIntent,
+      occurred_at: now,
+      summary: bulkSummary.trim() || null,
+      source: "manual",
+    }));
 
-  async function generateTouchDraft() {
-    if (!uid || !loggingFor || !touchAsk.trim()) return;
-    setTouchDraftBusy(true);
-    try {
-      const ch = (touchChannel === "email" || touchChannel === "text") ? touchChannel : "email";
-      const res = await fetch("/api/voice/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contact_id: loggingFor,
-          channel: ch,
-          intent: touchSuggestMeta?.intent || "check_in",
-          length: "short",
-          ask: touchAsk.trim(),
-          include_question: true,
-          include_signature: touchChannel === "email",
-        }),
-      });
-      const j = await res.json();
-      if (res.ok) setTouchDraft(j.draft || "");
-    } catch { /* ignore */ }
-    finally { setTouchDraftBusy(false); }
+    const { error } = await supabase.from("touches").insert(rows);
+    setBulkSaving(false);
+
+    if (error) { setBulkMsg(`Error: ${error.message}`); return; }
+
+    const ids = displayRecs.map((c) => c.id);
+    setCompletedIds((prev) => new Set([...prev, ...ids]));
+    setTodayCount((n) => n + ids.length);
+    setWtdCount((n) => n + ids.length);
+    setBulkMsg(`${ids.length} touches logged ✓`);
+    setBulkOpen(false);
+    setBulkSummary("");
   }
 
   useEffect(() => {
@@ -685,35 +682,51 @@ export default function MorningPage() {
       if (isAgentA(c)) reasons.push("Agent-A priority");
       if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
 
-      let score = 0;
-      if (isAClient(c)) score += 1000;
-      if (overdue) score += 300;
-      if (d == null) score += 200; // never reached out — boost above minimally-overdue contacts
-      score += (d ?? cadence) * 2;
+      // Recency protection: contacts touched in last 3 days are deprioritized
+      const recentlyTouched = d != null && d <= 3;
+      if (recentlyTouched) reasons.push("Touched recently — deprioritized");
 
+      // Inbound recency: if they replied recently, less urgent to reach out
+      const daysSinceInbound = c.last_inbound_at
+        ? Math.max(0, Math.floor((Date.now() - new Date(c.last_inbound_at).getTime()) / 86400000))
+        : null;
+      const inboundRecent7 = daysSinceInbound != null && daysSinceInbound <= 7;
+      const inboundRecent3 = daysSinceInbound != null && daysSinceInbound <= 3;
+
+      // Cadence ratio: normalized urgency (1.0 = exactly at cadence, >1 = overdue)
+      const ratio = (d ?? cadence) / cadence;
+
+      let score = ratio * 100;
+
+      // Never contacted gets a meaningful boost
+      if (d == null) score += 30;
+
+      // A-client always floats to top
+      if (isAClient(c)) score += 100;
+
+      // Category priority weights
       const cat = (c.category || "").toLowerCase();
-      if (cat === "agent") score += 60;
-      if (cat === "developer") score += 40;
-      if (cat === "client") score += 80;
-      if (cat === "vendor") score += 30;
-      if (cat === "sphere") score += 50;
+      if (cat === "client") score += 20;
+      if (cat === "agent") score += 15;
+      if (cat === "sphere") score += 10;
+      if (cat === "developer") score += 10;
+      if (cat === "vendor") score += 5;
 
+      // Tier weights
       const t = (c.tier || "").toUpperCase();
-      if (t === "A") score += 40;
-      if (t === "B") score += 20;
+      if (t === "A") score += 20;
+      if (t === "B") score += 10;
 
-      if (!weekday) score -= 30;
+      // Inbound recency reduces urgency
+      if (inboundRecent3) { score -= 40; reasons.push("Replied within 3 days — less urgent"); }
+      else if (inboundRecent7) { score -= 20; reasons.push("Replied within 7 days"); }
+
+      // Recency protection: sink recently-touched contacts
+      if (recentlyTouched) score = -999;
 
       const suggested_channel = pickChannel(c);
 
-      const suggested_draft = buildDraftWithVoice({
-        contact: c,
-        intent: "check_in",
-        channel: suggested_channel,
-        voice,
-      });
-
-      return { ...c, cadence, overdue, score, reasons, suggested_channel, suggested_draft };
+      return { ...c, cadence, overdue, score, reasons, suggested_channel };
     });
 
     scored.sort((a, b) => b.score - a.score);
@@ -748,14 +761,25 @@ export default function MorningPage() {
 
     // Fill remaining slots — only contacts at least 50% through their cadence
     // (or never contacted). Never pad with recently-touched people.
+    // Category diversity cap: max 2 per category in fill phase.
+    const fillCategoryCounts: Record<string, number> = {};
+    for (const c of top) {
+      const cat = (c.category || "other").toLowerCase();
+      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+    }
+
     for (const c of scored) {
       if (top.length >= totalRecs) break;
       if (used.has(c.id)) continue;
+      if (c.score === -999) continue; // recency-protected
       const isNeverContacted = c.days_since_outbound == null;
       const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.5;
       if (!isNeverContacted && !isApproachingDue) continue;
+      const cat = (c.category || "other").toLowerCase();
+      if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
       top.push(c);
       used.add(c.id);
+      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
     }
 
     return top;
@@ -770,22 +794,67 @@ export default function MorningPage() {
 
   useEffect(() => {
     if (lockedIds === null && recs.length > 0) {
-      setLockedIds(recs.map((r) => r.id));
+      const ids = recs.map((r) => r.id);
+      setLockedIds(ids);
+      saveLockedIds(ids);
+      generateDrafts(recs);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds]);
 
-  // Persist locked list to sessionStorage
-  useEffect(() => {
-    if (lockedIds === null) return;
-    try { sessionStorage.setItem(SESSION_LOCKED_KEY, JSON.stringify(lockedIds)); } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedIds]);
+  async function generateDrafts(contacts: Recommendation[]) {
+    const pending = new Set(contacts.map((c) => c.id));
+    setDraftsGenerating(pending);
+    await Promise.all(
+      contacts.map(async (c) => {
+        try {
+          const res = await fetch("/api/voice/draft", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contact_id: c.id,
+              channel: c.suggested_channel,
+              intent: "check_in",
+              length: "short",
+            }),
+          });
+          const j = await res.json();
+          if (res.ok && j.draft) {
+            setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
+          }
+        } catch {
+          // silently fall back to template
+        } finally {
+          setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
+        }
+      })
+    );
+  }
 
-  // Persist completed ids to sessionStorage
-  useEffect(() => {
-    try { sessionStorage.setItem(SESSION_COMPLETED_KEY, JSON.stringify([...completedIds])); } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedIds]);
+  async function regenerateDraft(c: Recommendation, intent?: TouchIntent) {
+    const resolvedIntent = intent ?? draftIntents[c.id] ?? "check_in";
+    setDraftsGenerating((prev) => new Set(prev).add(c.id));
+    try {
+      const res = await fetch("/api/voice/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contact_id: c.id,
+          channel: c.suggested_channel,
+          intent: resolvedIntent,
+          length: "short",
+        }),
+      });
+      const j = await res.json();
+      if (res.ok && j.draft) {
+        setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
+    }
+  }
 
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
@@ -806,6 +875,12 @@ export default function MorningPage() {
   if (!ready) return <div className="page">Loading…</div>;
 
   const weekday = isWeekdayLocal();
+  const lateNudge = (() => {
+    if (!weekday) return false;
+    if (todayCount >= rules.totalRecs) return false;
+    const hour = new Date().getHours();
+    return hour >= 15; // 3pm+
+  })();
 
   return (
     <div>
@@ -832,6 +907,21 @@ export default function MorningPage() {
               <strong>Voice rules:</strong> {voice.rules.slice(0, 3).join(" • ")}
             </div>
           ) : null}
+
+          {(syncGmail !== undefined || syncCalendar !== undefined) && (() => {
+            const g = syncAgo(syncGmail);
+            const c = syncAgo(syncCalendar);
+            return (
+              <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+                <span className="badge" style={{ fontSize: 11, color: g.stale ? "#8a0000" : "rgba(18,18,18,.5)", borderColor: g.stale ? "rgba(200,0,0,.25)" : undefined }}>
+                  Gmail sync: {g.label}
+                </span>
+                <span className="badge" style={{ fontSize: 11, color: c.stale ? "#8a0000" : "rgba(18,18,18,.5)", borderColor: c.stale ? "rgba(200,0,0,.25)" : undefined }}>
+                  Calendar sync: {c.label}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="row">
@@ -841,15 +931,7 @@ export default function MorningPage() {
           <a className="btn" href="/unmatched">
             Unmatched
           </a>
-          <button className="btn" onClick={() => {
-            try {
-              sessionStorage.removeItem(SESSION_LOCKED_KEY);
-              sessionStorage.removeItem(SESSION_COMPLETED_KEY);
-            } catch { /* ignore */ }
-            setLockedIds(null);
-            setCompletedIds(new Set());
-            load();
-          }} disabled={loading}>
+          <button className="btn" onClick={load} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
@@ -868,6 +950,17 @@ export default function MorningPage() {
             }}
           >
             {error || msg}
+          </div>
+        </div>
+      )}
+
+      {lateNudge && (
+        <div className="card cardPad" style={{ borderColor: "rgba(200,100,0,.3)", background: "rgba(200,100,0,.05)" }}>
+          <div style={{ fontWeight: 900, color: "rgba(140,60,0,.9)", fontSize: 14 }}>
+            End-of-day push — {rules.totalRecs - todayCount} touch{rules.totalRecs - todayCount !== 1 ? "es" : ""} left to hit your goal
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(140,60,0,.7)", marginTop: 4 }}>
+            You've done {todayCount} of {rules.totalRecs} today. The contacts below are ready — don't let the day slip.
           </div>
         </div>
       )}
@@ -974,11 +1067,112 @@ export default function MorningPage() {
             </div>
           </div>
 
-          <a href="/insights" className="btn" style={{ textDecoration: "none", fontSize: 12 }}>
-            Full report →
-          </a>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              className="btn"
+              style={{ fontSize: 12 }}
+              onClick={() => { setBulkOpen((v) => !v); setBulkMsg(null); }}
+            >
+              {bulkOpen ? "Cancel bulk" : "Log all"}
+            </button>
+            <a href="/insights" className="btn" style={{ textDecoration: "none", fontSize: 12 }}>
+              Full report →
+            </a>
+          </div>
         </div>
       </div>
+
+      {bulkOpen && (
+        <div className="card cardPad stack" style={{ marginTop: 8 }}>
+          <div style={{ fontWeight: 900, fontSize: 14 }}>Log a touch for all {displayRecs.length} contacts</div>
+          <div className="subtle" style={{ fontSize: 12, marginTop: -4 }}>
+            Same channel + intent logged to every contact in today's list. Use for events, open houses, or mass check-ins.
+          </div>
+          {bulkMsg && <div className="alert alertOk">{bulkMsg}</div>}
+          <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+            <div className="field">
+              <div className="label">Channel</div>
+              <select className="select" value={bulkChannel} onChange={(e) => setBulkChannel(e.target.value as Touch["channel"])}>
+                <option value="email">Email</option>
+                <option value="text">Text</option>
+                <option value="call">Call</option>
+                <option value="in_person">In person</option>
+                <option value="social_dm">Social DM</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div className="field">
+              <div className="label">Intent</div>
+              <select className="select" value={bulkIntent} onChange={(e) => setBulkIntent(e.target.value as TouchIntent)}>
+                <option value="check_in">Check-in</option>
+                <option value="follow_up">Follow-up</option>
+                <option value="referral_ask">Referral ask</option>
+                <option value="review_ask">Review ask</option>
+                <option value="event_invite">Event invite</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <div className="label">Notes (optional)</div>
+            <input className="input" value={bulkSummary} onChange={(e) => setBulkSummary(e.target.value)} placeholder="e.g. Met at open house on 123 Main" />
+          </div>
+          <div className="row">
+            <button className="btn btnPrimary" onClick={saveBulkTouch} disabled={bulkSaving}>
+              {bulkSaving ? "Logging…" : `Log ${displayRecs.length} touches`}
+            </button>
+            <button className="btn" onClick={() => setBulkOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Follow-up reminders ── */}
+      {followUps.length > 0 && (
+        <div className="section" style={{ marginTop: 12 }}>
+          <div className="sectionTitleRow">
+            <div className="sectionTitle">Follow-ups due</div>
+            <div className="sectionSub">{followUps.length} reminder{followUps.length !== 1 ? "s" : ""} waiting</div>
+          </div>
+          <div className="stack">
+            {followUps.map((f) => {
+              const name = f.contacts?.display_name ?? "Unknown";
+              const contactId = f.contacts?.id ?? f.contact_id;
+              const overdue = f.due_date < new Date().toISOString().slice(0, 10);
+              return (
+                <div key={f.id} className="card cardPad" style={{ borderColor: overdue ? "rgba(200,0,0,.2)" : "rgba(11,107,42,.2)", background: overdue ? "rgba(200,0,0,.03)" : "rgba(11,107,42,.03)" }}>
+                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <span style={{ fontWeight: 900, fontSize: 15 }}>{name}</span>
+                        <span className="badge" style={{ fontSize: 11, ...(overdue ? { color: "#8a0000", borderColor: "rgba(200,0,0,.25)" } : { color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)" }) }}>
+                          {overdue ? `Overdue · due ${f.due_date}` : `Due ${f.due_date}`}
+                        </span>
+                      </div>
+                      {f.note && <div className="subtle" style={{ fontSize: 13, marginTop: 4 }}>{f.note}</div>}
+                      {f.contacts && (
+                        <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+                          {f.contacts.category}{f.contacts.tier ? ` · Tier ${f.contacts.tier}` : ""}
+                        </div>
+                      )}
+                    </div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <a className="btn" href={`/contacts/${contactId}`} style={{ fontSize: 12, textDecoration: "none" }}>Open</a>
+                      <button
+                        className="btn btnPrimary"
+                        style={{ fontSize: 12 }}
+                        onClick={() => completeFollowUp(f.id)}
+                        disabled={completingFollowUp === f.id}
+                      >
+                        {completingFollowUp === f.id ? "…" : "Done ✓"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
@@ -1005,7 +1199,10 @@ export default function MorningPage() {
                     ✓ Logged today
                   </div>
                 )}
-                <div className="recCardLayout">
+                <div
+                  className="row"
+                  style={{ justifyContent: "space-between", alignItems: "flex-start" }}
+                >
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div
                       className="row"
@@ -1034,31 +1231,62 @@ export default function MorningPage() {
                       )}
                       <span className="badge">{overdue ? "Overdue" : "On track"}</span>
                       {agent ? <span className="badge">Agent touch</span> : null}
+                      {c.active_deals > 0 && (
+                        <span className="badge" style={{ borderColor: "rgba(11,107,42,.3)", background: "rgba(11,107,42,.07)", color: "#0b6b2a", fontWeight: 700 }}>
+                          {c.active_deals} active deal{c.active_deals !== 1 ? "s" : ""}
+                        </span>
+                      )}
                     </div>
 
-                    {(c.email || c.phone) && (
-                      <div className="muted small" style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap" }}>
-                        {c.email && <a href={`mailto:${c.email}`} style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 2 }}>{c.email}</a>}
-                        {c.phone && <a href={`tel:${c.phone}`} style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 2 }}>{c.phone}</a>}
-                      </div>
-                    )}
-
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Suggested outreach (Jordan voice)
-                      </div>
-                      <div className="row">
-                        <span className="badge">Channel: {c.suggested_channel}</span>
-                        <span className="badge">Intent: check_in</span>
+                      <div className="rowBetween" style={{ marginBottom: 8 }}>
+                        <div className="small muted bold">
+                          {aiDrafts[c.id] ? "Draft (Jordan AI)" : draftsGenerating.has(c.id) ? "Generating draft…" : "Draft (template)"}
+                        </div>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "1px 8px" }}
+                          disabled={draftsGenerating.has(c.id)}
+                          onClick={() => regenerateDraft(c)}
+                        >
+                          {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
+                        </button>
                       </div>
 
-                      <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-                        {c.suggested_draft}
+                      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                        <span className="badge">Channel: {c.suggested_channel}</span>
+                        {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
+                          const active = (draftIntents[c.id] ?? "check_in") === intent;
+                          return (
+                            <button
+                              key={intent}
+                              className="btn"
+                              style={{
+                                fontSize: 11,
+                                padding: "1px 8px",
+                                fontWeight: active ? 900 : 400,
+                                background: active ? "var(--ink)" : undefined,
+                                color: active ? "var(--paper)" : undefined,
+                              }}
+                              onClick={() => {
+                                setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
+                                regenerateDraft(c, intent);
+                              }}
+                              disabled={draftsGenerating.has(c.id)}
+                            >
+                              {intent.replace("_", " ")}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, opacity: draftsGenerating.has(c.id) ? 0.4 : 1 }}>
+                        {aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice })}
                       </div>
                     </div>
                   </div>
 
-                  <div className="recCardActions">
+                  <div style={{ width: 280, display: "grid", gap: 10 }}>
                     <a className="btn" href={`/contacts/${c.id}`}>
                       Open contact
                     </a>
@@ -1152,63 +1380,27 @@ export default function MorningPage() {
                       />
                     </div>
 
-                    {/* Voice draft suggestion */}
+                    {/* Remind me */}
                     <div style={{ marginTop: 10 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Draft a message <span style={{ fontWeight: 400 }}>(optional — generates in your voice)</span>
-                      </div>
-                      <div className="row" style={{ gap: 8 }}>
-                        <input
-                          className="input"
-                          style={{ flex: 1 }}
-                          value={touchAsk}
-                          onChange={(e) => setTouchAsk(e.target.value)}
-                          placeholder='e.g. "Check in, see how the house is going"'
-                        />
-                        <button
-                          className="btn btnPrimary"
-                          type="button"
-                          onClick={generateTouchDraft}
-                          disabled={touchDraftBusy || !touchAsk.trim()}
-                        >
-                          {touchDraftBusy ? "Writing…" : "Draft"}
-                        </button>
-                      </div>
-
-                      <div className="muted small" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <span className="kicker">Suggested intent</span>
-                        {touchSuggestBusy ? (
-                          <span>Thinking…</span>
-                        ) : touchSuggestMeta ? (
-                          <>
-                            <span style={{ fontWeight: 900, color: "var(--ink)" }}>{touchSuggestMeta.intent.replace(/_/g, " ")}</span>
-                            <span>({Math.round(touchSuggestMeta.confidence * 100)}%)</span>
-                            {touchSuggestMeta.reason ? <span>• {touchSuggestMeta.reason}</span> : null}
-                          </>
-                        ) : (
-                          <span>Type a prompt above to get a suggested intent.</span>
-                        )}
-                      </div>
-
-                      {touchDraft ? (
-                        <div className="cardSoft cardPad" style={{ marginTop: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-                            <button
-                              className="btn"
-                              type="button"
-                              style={{ fontSize: 12, padding: "2px 10px" }}
-                              onClick={async () => {
-                                await navigator.clipboard.writeText(touchDraft);
-                                setTouchDraftCopied(true);
-                                setTimeout(() => setTouchDraftCopied(false), 1200);
-                              }}
-                            >
-                              {touchDraftCopied ? "Copied" : "Copy"}
-                            </button>
+                      <button
+                        className="btn"
+                        style={{ fontSize: 12 }}
+                        onClick={() => { setRemindOpen((v) => !v); setRemindDate(""); setRemindNote(""); }}
+                      >
+                        {remindOpen ? "Cancel reminder" : "+ Set follow-up reminder"}
+                      </button>
+                      {remindOpen && (
+                        <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
+                          <div className="field">
+                            <div className="label">Follow up on</div>
+                            <input className="input" type="date" value={remindDate} onChange={(e) => setRemindDate(e.target.value)} />
                           </div>
-                          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, fontSize: 14 }}>{touchDraft}</div>
+                          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                            <div className="label">Context (optional)</div>
+                            <input className="input" value={remindNote} onChange={(e) => setRemindNote(e.target.value)} placeholder="e.g. Check if they made a decision on the listing" />
+                          </div>
                         </div>
-                      ) : null}
+                      )}
                     </div>
 
                     <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
@@ -1216,14 +1408,20 @@ export default function MorningPage() {
                       <div className="row">
                         <button
                           className="btn"
-                          onClick={() => setLoggingFor(null)}
+                          onClick={() => { setLoggingFor(null); setRemindOpen(false); }}
                           disabled={savingTouch}
                         >
                           Cancel
                         </button>
                         <button
                           className="btn btnPrimary"
-                          onClick={saveTouch}
+                          onClick={async () => {
+                            const contactId = loggingFor;
+                            await saveTouch();
+                            if (remindOpen && remindDate && contactId) {
+                              await saveReminder(contactId);
+                            }
+                          }}
                           disabled={savingTouch}
                         >
                           {savingTouch ? "Saving…" : "Save"}
