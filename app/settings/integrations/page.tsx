@@ -15,6 +15,27 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // calendar sync
+  const [calSyncing, setCalSyncing] = useState(false);
+  const [calSyncedAt, setCalSyncedAt] = useState<string | null>(null);
+
+  async function runCalendarSync() {
+    if (!uid) return;
+    setCalSyncing(true);
+    setErr(null);
+    setMsg(null);
+    const res = await fetch("/api/calendar/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ days: 90 }),
+    });
+    const j = await res.json().catch(() => ({}));
+    setCalSyncing(false);
+    if (!res.ok) { setErr(j?.error || "Calendar sync failed"); return; }
+    setCalSyncedAt(new Date().toISOString());
+    setMsg(`Calendar sync done — ${j.imported} meetings imported from ${j.events_scanned} events`);
+  }
+
   // bulk extraction
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current: string; errors: number } | null>(null);
@@ -217,7 +238,15 @@ export default function IntegrationsPage() {
           <button className="btn" onClick={importSheet} disabled={busy || !connected}>
             Import master sheet
           </button>
+          <button className="btn" onClick={runCalendarSync} disabled={calSyncing || !connected}>
+            {calSyncing ? "Syncing…" : calSyncedAt ? "Re-sync calendar" : "Sync calendar meetings"}
+          </button>
         </div>
+        {calSyncedAt && (
+          <div className="muted small" style={{ marginTop: 8 }}>
+            Last synced {new Date(calSyncedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — imports meetings from the past 90 days as touches
+          </div>
+        )}
       </div>
 
       {/* Bulk extraction */}
