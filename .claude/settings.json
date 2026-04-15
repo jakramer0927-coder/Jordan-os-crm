@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vercel *)",
+      "Bash(gh api *)",
+      "Bash(ls lib/rateLimit* lib/tokenCrypto*)",
+      "Bash(curl -X POST \"https://api.vercel.com/v1/integrations/deploy/prj_Zv1VkcS2TohCRLqoliyry7Ip6HSP/2QFB8J3mfb\")"
+    ]
+  }
+}
