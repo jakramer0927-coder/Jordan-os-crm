@@ -928,6 +928,9 @@ export default function MorningPage() {
           <a className="btn" href="/contacts">
             Contacts
           </a>
+          <a className="btn" href="/pipeline">
+            Pipeline
+          </a>
           <a className="btn" href="/unmatched">
             Unmatched
           </a>
