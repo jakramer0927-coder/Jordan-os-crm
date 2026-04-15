@@ -27,6 +27,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const navLinks = [
     { href: "/morning", label: "Morning" },
     { href: "/contacts", label: "Contacts" },
+    { href: "/pipeline", label: "Pipeline" },
     { href: "/unmatched", label: "Unmatched" },
     { href: "/insights", label: "Insights" },
     { href: "/settings/integrations", label: "Integrations" },
