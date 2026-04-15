@@ -45,6 +45,7 @@ type ContactWithLastOutbound = Contact & {
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
+  closed_deal_dates: { address: string; close_date: string }[];
 };
 
 type FollowUp = {
@@ -102,6 +103,28 @@ function upcomingMilestones(c: ContactWithLastOutbound): { label: string; daysAw
   return results;
 }
 
+function dealAnniversaries(c: ContactWithLastOutbound): { address: string; years: number; daysAway: number }[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const results: { address: string; years: number; daysAway: number }[] = [];
+  for (const { address, close_date } of c.closed_deal_dates ?? []) {
+    if (!close_date) continue;
+    const d = new Date(close_date);
+    const yearsElapsed = today.getFullYear() - d.getFullYear();
+    // Check this year's anniversary and next year's if needed
+    for (const yr of [yearsElapsed, yearsElapsed + 1]) {
+      if (yr <= 0) continue;
+      const ann = new Date(d.getFullYear() + yr, d.getMonth(), d.getDate());
+      const days = Math.ceil((ann.getTime() - today.getTime()) / 86400000);
+      if (days >= 0 && days <= 30) {
+        results.push({ address, years: yr, daysAway: days });
+        break;
+      }
+    }
+  }
+  return results;
+}
+
 function syncAgo(iso: string | null): { label: string; stale: boolean } {
   if (!iso) return { label: "never", stale: true };
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -120,6 +143,12 @@ function daysSince(iso: string): number {
 }
 
 function topTrigger(c: Recommendation): { text: string; color: string } {
+  const anns = dealAnniversaries(c);
+  if (anns.length > 0) {
+    const a = anns[0];
+    const when = a.daysAway === 0 ? "today" : `in ${a.daysAway}d`;
+    return { text: `${a.years}-year anniversary of ${a.address} ${when}`, color: "#1a3f8a" };
+  }
   const ms = upcomingMilestones(c);
   if (ms.length > 0) {
     const m = ms[0];
@@ -696,6 +725,14 @@ export default function MorningPage() {
       if (isAgentA(c)) reasons.push("Agent-A priority");
       if ((c.category || "").toLowerCase() === "developer") reasons.push("Developer cadence 60d");
 
+      // Deal anniversaries within 30 days get a strong boost
+      const anns = dealAnniversaries(c);
+      if (anns.length > 0) {
+        const a = anns[0];
+        const when = a.daysAway === 0 ? "today" : `in ${a.daysAway}d`;
+        reasons.push(`${a.years}-year anniversary of ${a.address} ${when}`);
+      }
+
       // Recency protection: contacts touched in last 3 days are deprioritized
       const recentlyTouched = d != null && d <= 3;
       if (recentlyTouched) reasons.push("Touched recently — deprioritized");
@@ -730,6 +767,12 @@ export default function MorningPage() {
       const t = (c.tier || "").toUpperCase();
       if (t === "A") score += 20;
       if (t === "B") score += 10;
+
+      // Anniversary boost — strong reason to reach out even if recently touched
+      if (anns.length > 0) {
+        const daysAway = anns[0].daysAway;
+        score += daysAway <= 7 ? 80 : daysAway <= 14 ? 50 : 30;
+      }
 
       // Inbound recency reduces urgency
       if (inboundRecent3) { score -= 40; reasons.push("Replied within 3 days — less urgent"); }
@@ -1274,6 +1317,11 @@ export default function MorningPage() {
                       {upcomingMilestones(c).map((m) => (
                         <span key={m.label} className="badge" style={{ borderColor: "rgba(26,63,138,.3)", background: "rgba(26,63,138,.06)", color: "#1a3f8a", fontWeight: 700 }}>
                           {m.daysAway === 0 ? `${m.label} today` : `${m.label} in ${m.daysAway}d`}
+                        </span>
+                      ))}
+                      {dealAnniversaries(c).map((a) => (
+                        <span key={a.address} className="badge" style={{ borderColor: "rgba(26,63,138,.3)", background: "rgba(26,63,138,.06)", color: "#1a3f8a", fontWeight: 700 }}>
+                          {a.years}yr anniversary{a.daysAway === 0 ? " today" : ` in ${a.daysAway}d`}
                         </span>
                       ))}
                     </div>
