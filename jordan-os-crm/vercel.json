@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/gmail-sync",
-      "schedule": "0 * * * *"
+      "schedule": "0 9 * * *"
     },
     {
       "path": "/api/cron/daily-accountability",
