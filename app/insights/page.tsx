@@ -155,6 +155,17 @@ export default function InsightsPage() {
   const [avoidedContacts, setAvoidedContacts] = useState<AvoidedContact[]>([]);
   const [catCompliance, setCatCompliance] = useState<Record<string, CatCompliance>>({});
 
+  // Referral source analytics
+  type RefSourceRow = {
+    contact_id: string;
+    display_name: string;
+    deals_total: number;
+    deals_closed: number;
+    pipeline_value: number;
+    closed_value: number;
+  };
+  const [refSources, setRefSources] = useState<RefSourceRow[]>([]);
+
   // Referral pipeline
   type ReferralRow = {
     id: string;
@@ -393,7 +404,26 @@ export default function InsightsPage() {
     }
     setCatCompliance(comp);
 
-    // ── 4. Referral pipeline ──────────────────────────────────────────────────
+    // ── 4. Referral source analytics ─────────────────────────────────────────
+    const pipelineRes = await fetch("/api/pipeline?include_closed=1");
+    if (pipelineRes.ok) {
+      const pj = await pipelineRes.json().catch(() => ({}));
+      const allDeals: any[] = pj.deals ?? [];
+      const sourceMap = new Map<string, RefSourceRow>();
+      for (const d of allDeals) {
+        const src = d.referral_source as any;
+        if (!src?.id) continue;
+        const existing = sourceMap.get(src.id) ?? { contact_id: src.id, display_name: src.display_name, deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0 };
+        existing.deals_total++;
+        if (d.status === "closed_won") { existing.deals_closed++; existing.closed_value += d.price ?? 0; }
+        else { existing.pipeline_value += d.price ?? 0; }
+        sourceMap.set(src.id, existing);
+      }
+      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_value + b.pipeline_value) - (a.closed_value + a.pipeline_value));
+      setRefSources(sorted);
+    }
+
+    // ── 5. Referral pipeline ──────────────────────────────────────────────────
     const refRes = await fetch("/api/referrals");
     if (refRes.ok) {
       const rj = await refRes.json().catch(() => ({}));
@@ -598,6 +628,37 @@ export default function InsightsPage() {
           </div>
         );
       })()}
+
+      {/* ── Referral Source ROI ─────────────────────────────────────────────── */}
+      {refSources.length > 0 && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral source ROI</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Contacts who have sent you deal flow — sorted by total value</div>
+          <div className="stack" style={{ gap: 0 }}>
+            {refSources.map((s, i) => (
+              <div key={s.contact_id} style={{ padding: "10px 0", borderBottom: i < refSources.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <a href={`/contacts/${s.contact_id}`} style={{ fontWeight: 800, fontSize: 14 }}>{s.display_name}</a>
+                  <div className="row" style={{ marginTop: 4, gap: 6, flexWrap: "wrap" }}>
+                    <span className="badge">{s.deals_total} deal{s.deals_total !== 1 ? "s" : ""} referred</span>
+                    {s.deals_closed > 0 && (
+                      <span className="badge" style={{ background: "rgba(11,107,42,.08)", color: "#0b6b2a", borderColor: "rgba(11,107,42,.2)", fontWeight: 700 }}>
+                        {s.deals_closed} closed{s.closed_value > 0 ? ` · $${s.closed_value.toLocaleString()}` : ""}
+                      </span>
+                    )}
+                    {s.pipeline_value > 0 && (
+                      <span className="badge">${s.pipeline_value.toLocaleString()} in pipeline</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontWeight: 900, fontSize: 18, flexShrink: 0, color: s.closed_value > 0 ? "#0b6b2a" : "var(--ink)" }}>
+                  ${(s.closed_value + s.pipeline_value).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Referral Pipeline ───────────────────────────────────────────────── */}
       <div className="card cardPad">

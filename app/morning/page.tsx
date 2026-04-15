@@ -42,6 +42,17 @@ type ContactWithLastOutbound = Contact & {
   days_since_outbound: number | null;
   last_inbound_at: string | null;
   active_deals: number;
+  birthday: string | null;
+  close_anniversary: string | null;
+  move_in_date: string | null;
+};
+
+type FollowUp = {
+  id: string;
+  contact_id: string;
+  due_date: string;
+  note: string | null;
+  contacts: { id: string; display_name: string; category: string; tier: string | null } | null;
 };
 
 type VoiceProfile = {
@@ -68,6 +79,28 @@ type VoiceProfile = {
     len: number;
   }>;
 };
+
+function upcomingMilestones(c: ContactWithLastOutbound): { label: string; daysAway: number }[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const results: { label: string; daysAway: number }[] = [];
+  const checkRecurring = (dateStr: string | null, label: string) => {
+    if (!dateStr) return;
+    const d = new Date(dateStr);
+    const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+    const next = thisYear >= today ? thisYear : new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+    const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
+    if (days <= 14) results.push({ label, daysAway: days });
+  };
+  checkRecurring(c.birthday, "Birthday");
+  checkRecurring(c.close_anniversary, "Close anniversary");
+  if (c.move_in_date) {
+    const d = new Date(c.move_in_date);
+    const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
+    if (days >= 0 && days <= 14) results.push({ label: "Move-in", daysAway: days });
+  }
+  return results;
+}
 
 function syncAgo(iso: string | null): { label: string; stale: boolean } {
   if (!iso) return { label: "never", stale: true };
@@ -409,6 +442,14 @@ export default function MorningPage() {
   // Per-contact intent selection
   const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
 
+  // Follow-ups
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [completingFollowUp, setCompletingFollowUp] = useState<string | null>(null);
+  // Remind-me form (attached to touch log)
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [remindDate, setRemindDate] = useState("");
+  const [remindNote, setRemindNote] = useState("");
+
   // Bulk touch logging
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkChannel, setBulkChannel] = useState<Touch["channel"]>("email");
@@ -468,10 +509,11 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
 
-    // Fetch contacts+touches+counts, voice profile, and sync status in parallel
-    const [contactsRes, syncRes] = await Promise.all([
+    // Fetch contacts+touches+counts, voice profile, sync status, and follow-ups in parallel
+    const [contactsRes, syncRes, followUpsRes] = await Promise.all([
       fetch("/api/morning/contacts"),
       fetch("/api/sync/status"),
+      fetch("/api/follow-ups?due_today=1"),
       voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
     ]);
 
@@ -479,6 +521,11 @@ export default function MorningPage() {
       const sj = await syncRes.json().catch(() => ({}));
       setSyncGmail(sj.gmail ?? null);
       setSyncCalendar(sj.calendar ?? null);
+    }
+
+    if (followUpsRes.ok) {
+      const fj = await followUpsRes.json().catch(() => ({}));
+      setFollowUps((fj.follow_ups ?? []) as FollowUp[]);
     }
 
     if (!contactsRes.ok) {
@@ -535,6 +582,30 @@ export default function MorningPage() {
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
+  }
+
+  async function completeFollowUp(id: string) {
+    setCompletingFollowUp(id);
+    await fetch("/api/follow-ups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== id));
+    setCompletingFollowUp(null);
+  }
+
+  async function saveReminder(contactId: string) {
+    if (!remindDate) return;
+    await fetch("/api/follow-ups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: contactId, due_date: remindDate, note: remindNote.trim() || null }),
+    });
+    setRemindOpen(false);
+    setRemindDate("");
+    setRemindNote("");
+    setMsg("Reminder saved ✓");
   }
 
   async function saveBulkTouch() {
@@ -1055,6 +1126,54 @@ export default function MorningPage() {
         </div>
       )}
 
+      {/* ── Follow-up reminders ── */}
+      {followUps.length > 0 && (
+        <div className="section" style={{ marginTop: 12 }}>
+          <div className="sectionTitleRow">
+            <div className="sectionTitle">Follow-ups due</div>
+            <div className="sectionSub">{followUps.length} reminder{followUps.length !== 1 ? "s" : ""} waiting</div>
+          </div>
+          <div className="stack">
+            {followUps.map((f) => {
+              const name = f.contacts?.display_name ?? "Unknown";
+              const contactId = f.contacts?.id ?? f.contact_id;
+              const overdue = f.due_date < new Date().toISOString().slice(0, 10);
+              return (
+                <div key={f.id} className="card cardPad" style={{ borderColor: overdue ? "rgba(200,0,0,.2)" : "rgba(11,107,42,.2)", background: overdue ? "rgba(200,0,0,.03)" : "rgba(11,107,42,.03)" }}>
+                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                        <span style={{ fontWeight: 900, fontSize: 15 }}>{name}</span>
+                        <span className="badge" style={{ fontSize: 11, ...(overdue ? { color: "#8a0000", borderColor: "rgba(200,0,0,.25)" } : { color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)" }) }}>
+                          {overdue ? `Overdue · due ${f.due_date}` : `Due ${f.due_date}`}
+                        </span>
+                      </div>
+                      {f.note && <div className="subtle" style={{ fontSize: 13, marginTop: 4 }}>{f.note}</div>}
+                      {f.contacts && (
+                        <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
+                          {f.contacts.category}{f.contacts.tier ? ` · Tier ${f.contacts.tier}` : ""}
+                        </div>
+                      )}
+                    </div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <a className="btn" href={`/contacts/${contactId}`} style={{ fontSize: 12, textDecoration: "none" }}>Open</a>
+                      <button
+                        className="btn btnPrimary"
+                        style={{ fontSize: 12 }}
+                        onClick={() => completeFollowUp(f.id)}
+                        disabled={completingFollowUp === f.id}
+                      >
+                        {completingFollowUp === f.id ? "…" : "Done ✓"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="section" style={{ marginTop: 12 }}>
         <div className="sectionTitleRow">
           <div className="sectionTitle">Today's Top {rules.totalRecs}</div>
@@ -1261,19 +1380,48 @@ export default function MorningPage() {
                       />
                     </div>
 
+                    {/* Remind me */}
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        className="btn"
+                        style={{ fontSize: 12 }}
+                        onClick={() => { setRemindOpen((v) => !v); setRemindDate(""); setRemindNote(""); }}
+                      >
+                        {remindOpen ? "Cancel reminder" : "+ Set follow-up reminder"}
+                      </button>
+                      {remindOpen && (
+                        <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
+                          <div className="field">
+                            <div className="label">Follow up on</div>
+                            <input className="input" type="date" value={remindDate} onChange={(e) => setRemindDate(e.target.value)} />
+                          </div>
+                          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                            <div className="label">Context (optional)</div>
+                            <input className="input" value={remindNote} onChange={(e) => setRemindNote(e.target.value)} placeholder="e.g. Check if they made a decision on the listing" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
                       <div className="muted small">Outbound touches reset cadence.</div>
                       <div className="row">
                         <button
                           className="btn"
-                          onClick={() => setLoggingFor(null)}
+                          onClick={() => { setLoggingFor(null); setRemindOpen(false); }}
                           disabled={savingTouch}
                         >
                           Cancel
                         </button>
                         <button
                           className="btn btnPrimary"
-                          onClick={saveTouch}
+                          onClick={async () => {
+                            const contactId = loggingFor;
+                            await saveTouch();
+                            if (remindOpen && remindDate && contactId) {
+                              await saveReminder(contactId);
+                            }
+                          }}
                           disabled={savingTouch}
                         >
                           {savingTouch ? "Saving…" : "Save"}

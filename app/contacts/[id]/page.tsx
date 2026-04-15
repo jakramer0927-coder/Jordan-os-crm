@@ -31,6 +31,9 @@ type Contact = {
   notes: string | null;
   ai_context: string | null;
   ai_context_updated_at: string | null;
+  birthday: string | null;
+  close_anniversary: string | null;
+  move_in_date: string | null;
 };
 
 type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
@@ -304,6 +307,9 @@ export default function ContactDetailPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [birthday, setBirthday] = useState("");
+  const [closeAnniversary, setCloseAnniversary] = useState("");
+  const [moveInDate, setMoveInDate] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
@@ -317,6 +323,14 @@ export default function ContactDetailPage() {
   const [savingTouch, setSavingTouch] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
+
+  // Follow-ups
+  type FollowUpLocal = { id: string; due_date: string; note: string | null; };
+  const [followUps, setFollowUps] = useState<FollowUpLocal[]>([]);
+  const [fuFormOpen, setFuFormOpen] = useState(false);
+  const [fuDate, setFuDate] = useState("");
+  const [fuNote, setFuNote] = useState("");
+  const [fuSaving, setFuSaving] = useState(false);
 
   // linked contacts (household)
   type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
@@ -387,7 +401,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -414,6 +428,9 @@ export default function ContactDetailPage() {
     setBuyerAreas(c.buyer_target_areas || "");
     setAiContext(c.ai_context ?? null);
     setAiContextUpdatedAt(c.ai_context_updated_at ?? null);
+    setBirthday(c.birthday ?? "");
+    setCloseAnniversary(c.close_anniversary ?? "");
+    setMoveInDate(c.move_in_date ?? "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -438,6 +455,12 @@ export default function ContactDetailPage() {
     }
 
     // Load deals
+    const fuRes = await fetch(`/api/follow-ups?contact_id=${id}`);
+    if (fuRes.ok) {
+      const fj = await fuRes.json().catch(() => ({}));
+      setFollowUps((fj.follow_ups ?? []) as FollowUpLocal[]);
+    }
+
     const dealsRes = await fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`);
     if (dealsRes.ok) {
       const dj = await dealsRes.json().catch(() => ({}));
@@ -464,6 +487,9 @@ export default function ContactDetailPage() {
         email: email.trim() ? email.trim().toLowerCase() : null,
         phone: phone.trim() ? phone.trim() : null,
         notes: notes.trim() ? notes.trim() : null,
+        birthday: birthday || null,
+        close_anniversary: closeAnniversary || null,
+        move_in_date: moveInDate || null,
       })
       .eq("id", contact.id);
 
@@ -660,6 +686,39 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
+  async function saveFollowUp() {
+    if (!fuDate || !contact) return;
+    setFuSaving(true);
+    await fetch("/api/follow-ups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: contact.id, due_date: fuDate, note: fuNote.trim() || null }),
+    });
+    setFuSaving(false);
+    setFuFormOpen(false);
+    setFuDate("");
+    setFuNote("");
+    await fetchAll();
+  }
+
+  async function completeFollowUp(fuId: string) {
+    await fetch("/api/follow-ups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: fuId }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== fuId));
+  }
+
+  async function deleteFollowUp(fuId: string) {
+    await fetch("/api/follow-ups", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: fuId }),
+    });
+    setFollowUps((prev) => prev.filter((f) => f.id !== fuId));
+  }
+
   async function saveBuyerProfile() {
     if (!contact || !uid) return;
     setSavingBuyer(true);
@@ -807,6 +866,37 @@ export default function ContactDetailPage() {
                 {contact.notes}
               </div>
             ) : null}
+            {(() => {
+              const today = new Date();
+              const milestones: { label: string; date: string; daysAway: number }[] = [];
+              const checkMilestone = (dateStr: string | null, label: string) => {
+                if (!dateStr) return;
+                // For recurring milestones (birthday, anniversary), find next occurrence
+                const d = new Date(dateStr);
+                const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+                const nextYear = new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+                const next = thisYear >= today ? thisYear : nextYear;
+                const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
+                if (days <= 30) milestones.push({ label, date: next.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+              };
+              checkMilestone(contact.birthday, "Birthday");
+              checkMilestone(contact.close_anniversary, "Close anniversary");
+              if (contact.move_in_date) {
+                const d = new Date(contact.move_in_date);
+                const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
+                if (days >= 0 && days <= 30) milestones.push({ label: "Move-in", date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+              }
+              if (milestones.length === 0) return null;
+              return (
+                <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+                  {milestones.map((m) => (
+                    <span key={m.label} className="badge" style={{ background: "rgba(120,60,0,.08)", color: "rgba(120,60,0,.9)", borderColor: "rgba(120,60,0,.2)", fontWeight: 700, fontSize: 12 }}>
+                      {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
@@ -908,6 +998,22 @@ export default function ContactDetailPage() {
               placeholder="Context for AI drafts, relationship notes, key details…"
               style={{ minHeight: 80 }}
             />
+          </div>
+
+          <div style={{ fontWeight: 800, fontSize: 13, marginTop: 4 }}>Milestones</div>
+          <div className="fieldGridMobile">
+            <div className="field">
+              <div className="label">Birthday</div>
+              <input className="input" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
+            </div>
+            <div className="field">
+              <div className="label">Close anniversary</div>
+              <input className="input" type="date" value={closeAnniversary} onChange={(e) => setCloseAnniversary(e.target.value)} />
+            </div>
+            <div className="field">
+              <div className="label">Move-in date</div>
+              <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
+            </div>
           </div>
 
           <div className="rowResponsive">
@@ -1121,6 +1227,60 @@ export default function ContactDetailPage() {
           </div>
         ) : (
           !dealFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No deals yet — add one above.</div>
+        )}
+      </div>
+
+      {/* Follow-ups */}
+      <div className="card cardPad stack">
+        <div className="rowBetween" style={{ alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Follow-up reminders</div>
+            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Timed reminders that surface on the morning page</div>
+          </div>
+          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => setFuFormOpen((v) => !v)}>
+            {fuFormOpen ? "Cancel" : "+ Add reminder"}
+          </button>
+        </div>
+
+        {fuFormOpen && (
+          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+            <div className="field">
+              <div className="label">Follow up on</div>
+              <input className="input" type="date" value={fuDate} onChange={(e) => setFuDate(e.target.value)} autoFocus />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 200 }}>
+              <div className="label">Context (optional)</div>
+              <input className="input" value={fuNote} onChange={(e) => setFuNote(e.target.value)} placeholder="e.g. Check if they decided on the listing" />
+            </div>
+            <button className="btn btnPrimary" onClick={saveFollowUp} disabled={fuSaving || !fuDate}>
+              {fuSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        )}
+
+        {followUps.length > 0 ? (
+          <div className="stack" style={{ gap: 0 }}>
+            {followUps.map((f, i) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const overdue = f.due_date < today;
+              return (
+                <div key={f.id} style={{ padding: "10px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: overdue ? "#8a0000" : undefined }}>
+                      {overdue ? `Overdue — ` : ""}{f.due_date}
+                    </span>
+                    {f.note && <span className="subtle" style={{ fontSize: 13, marginLeft: 8 }}>{f.note}</span>}
+                  </div>
+                  <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => completeFollowUp(f.id)}>Done ✓</button>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "rgba(18,18,18,.4)" }} onClick={() => deleteFollowUp(f.id)}>Remove</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          !fuFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No reminders set.</div>
         )}
       </div>
 

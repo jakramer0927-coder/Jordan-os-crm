@@ -25,24 +25,34 @@ export async function GET() {
         : null,
     }));
 
-    // Attach active deal count per contact (single extra query)
     const contactIds = contacts.map((c: any) => c.id);
+
+    // Attach active deal count + milestones in parallel
+    const [dealRows, milestoneRows] = await Promise.all([
+      contactIds.length > 0
+        ? supabaseAdmin.from("deals").select("contact_id").eq("user_id", uid)
+            .not("status", "in", '("closed_won","closed_lost")').in("contact_id", contactIds)
+        : Promise.resolve({ data: [] }),
+      contactIds.length > 0
+        ? supabaseAdmin.from("contacts").select("id, birthday, close_anniversary, move_in_date")
+            .in("id", contactIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
     let dealMap: Record<string, number> = {};
-    if (contactIds.length > 0) {
-      const { data: dealRows } = await supabaseAdmin
-        .from("deals")
-        .select("contact_id")
-        .eq("user_id", uid)
-        .eq("status", "active")
-        .in("contact_id", contactIds);
-      for (const row of dealRows ?? []) {
-        dealMap[row.contact_id] = (dealMap[row.contact_id] ?? 0) + 1;
-      }
+    for (const row of (dealRows as any).data ?? []) {
+      dealMap[row.contact_id] = (dealMap[row.contact_id] ?? 0) + 1;
+    }
+
+    const milestoneMap: Record<string, { birthday: string | null; close_anniversary: string | null; move_in_date: string | null }> = {};
+    for (const row of (milestoneRows as any).data ?? []) {
+      milestoneMap[row.id] = { birthday: row.birthday, close_anniversary: row.close_anniversary, move_in_date: row.move_in_date };
     }
 
     const contactsWithDeals = contacts.map((c: any) => ({
       ...c,
       active_deals: dealMap[c.id] ?? 0,
+      ...(milestoneMap[c.id] ?? { birthday: null, close_anniversary: null, move_in_date: null }),
     }));
 
     return NextResponse.json({

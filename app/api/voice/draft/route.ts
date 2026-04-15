@@ -117,7 +117,17 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: tErr.message }, { status: 500 });
         }
 
-        // 3) Recent text messages (if you have them)
+        // 3) Active deals for this contact
+        const { data: activeDeals } = await supabaseAdmin
+            .from("deals")
+            .select("address, role, status, price, close_date, notes, referral_source:referral_source_contact_id(display_name)")
+            .eq("contact_id", contactId)
+            .eq("user_id", uid)
+            .not("status", "in", '("closed_won","closed_lost")')
+            .order("created_at", { ascending: false })
+            .limit(3);
+
+        // 4) Recent text messages (if you have them)
         const { data: texts } = await supabaseAdmin
             .from("text_messages")
             .select("direction, occurred_at, body")
@@ -198,6 +208,15 @@ export async function POST(req: Request) {
             "Output ONLY the final message body. No preamble, no bullet labels, no quotes.",
         ].join(" ");
 
+        const dealContext = (activeDeals ?? []).map((d: any) => ({
+            address: d.address,
+            role: d.role,
+            stage: d.status,
+            price: d.price ? `$${Number(d.price).toLocaleString()}` : null,
+            close_date: d.close_date ?? null,
+            notes: d.notes ?? null,
+        }));
+
         const user = [
             `TASK: Draft a ${channel.toUpperCase()} message.`,
             `Intent: ${intent}`,
@@ -226,6 +245,11 @@ export async function POST(req: Request) {
             "CONTACT CONTEXT:",
             JSON.stringify(contactSummary, null, 2),
             "",
+            ...(dealContext.length > 0 ? [
+                "ACTIVE DEALS (reference naturally if relevant — don't force it):",
+                JSON.stringify(dealContext, null, 2),
+                "",
+            ] : []),
             "RECENT TOUCHES (most recent first):",
             JSON.stringify(recentTouchSummary, null, 2),
             "",
