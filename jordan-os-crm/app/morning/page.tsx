@@ -541,13 +541,15 @@ export default function MorningPage() {
     }
   }
 
-  async function load() {
+  async function load(forceRefresh = false) {
     setError(null);
     setMsg(null);
     setLoading(true);
-    // Clear the lock so a fresh top-N is picked from the new data
-    setLockedIds(null);
-    clearLockedIds();
+    // Only clear the lock on a manual refresh — not on initial page load
+    if (forceRefresh) {
+      setLockedIds(null);
+      clearLockedIds();
+    }
 
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
@@ -999,7 +1001,7 @@ export default function MorningPage() {
           <a className="btn" href="/unmatched">
             Unmatched
           </a>
-          <button className="btn" onClick={load} disabled={loading}>
+          <button className="btn" onClick={() => load(true)} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
