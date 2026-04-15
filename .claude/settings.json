@@ -4,7 +4,21 @@
       "Bash(npx vercel *)",
       "Bash(gh api *)",
       "Bash(ls lib/rateLimit* lib/tokenCrypto*)",
-      "Bash(curl -X POST \"https://api.vercel.com/v1/integrations/deploy/prj_Zv1VkcS2TohCRLqoliyry7Ip6HSP/2QFB8J3mfb\")"
+      "Bash(curl -X POST \"https://api.vercel.com/v1/integrations/deploy/prj_Zv1VkcS2TohCRLqoliyry7Ip6HSP/2QFB8J3mfb\")",
+      "Bash(curl -s \"https://jordan-os-crm-a2qs.vercel.app/api/health\")",
+      "Bash(curl -sI \"https://jordan-os-crm-a2qs.vercel.app\")",
+      "Bash(curl -s \"https://jordan-os-crm-a2qs.vercel.app/api/follow-ups\" -H \"Content-Type: application/json\")",
+      "Bash(diff -q app/contacts/[id]/page.tsx \"jordan-os-crm/app/contacts/[id]/page.tsx\")",
+      "Bash(cp app/api/voice/draft/route.ts jordan-os-crm/app/api/voice/draft/route.ts)",
+      "Bash(cp \"app/contacts/[id]/page.tsx\" \"jordan-os-crm/app/contacts/[id]/page.tsx\")",
+      "Bash(cp app/insights/page.tsx jordan-os-crm/app/insights/page.tsx)",
+      "Bash(cp app/morning/page.tsx jordan-os-crm/app/morning/page.tsx)",
+      "Bash(mkdir -p jordan-os-crm/app/api/morning/contacts)",
+      "Bash(ls jordan-os-crm/.env*)",
+      "Bash(ls .env*)",
+      "Bash(ls -la jordan-os-crm/.env*)",
+      "Bash(npm run *)",
+      "Bash(ln -s /Users/jordankramer/projects/jordan-os-crm/.env.local /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/.env.local)"
     ]
   }
 }
