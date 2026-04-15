@@ -119,6 +119,18 @@ function daysSince(iso: string): number {
   return Math.max(0, days);
 }
 
+function topTrigger(c: Recommendation): { text: string; color: string } {
+  const ms = upcomingMilestones(c);
+  if (ms.length > 0) {
+    const m = ms[0];
+    return { text: m.daysAway === 0 ? `${m.label} is today` : `${m.label} in ${m.daysAway}d`, color: "#1a3f8a" };
+  }
+  if (c.active_deals > 0) return { text: `${c.active_deals} active deal${c.active_deals !== 1 ? "s" : ""} in pipeline`, color: "#0b6b2a" };
+  if (c.days_since_outbound == null) return { text: "No outbound yet — first touch opportunity", color: "#92610a" };
+  if (c.overdue) return { text: `${c.days_since_outbound}d since last touch · cadence is ${c.cadence}d`, color: "#8a0000" };
+  return { text: `${c.days_since_outbound}d since last touch`, color: "rgba(18,18,18,.5)" };
+}
+
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   try {
@@ -441,6 +453,8 @@ export default function MorningPage() {
   const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
   // Per-contact intent selection
   const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
+  // Copy-to-clipboard feedback
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Follow-ups
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
@@ -856,6 +870,14 @@ export default function MorningPage() {
     }
   }
 
+  async function copyDraft(contactId: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(contactId);
+      setTimeout(() => setCopiedId((prev) => (prev === contactId ? null : prev)), 2000);
+    } catch { /* ignore */ }
+  }
+
   // Stable display list — always shows the same 5 contacts from first load
   const displayRecs = useMemo<Recommendation[]>(() => {
     if (lockedIds === null) return recs;
@@ -1224,7 +1246,17 @@ export default function MorningPage() {
                       </div>
                     </div>
 
-                    <div className="row" style={{ marginTop: 10 }}>
+                    {/* Trigger reason */}
+                    {(() => {
+                      const trigger = topTrigger(c);
+                      return (
+                        <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: trigger.color }}>
+                          {trigger.text}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
                       <span className="badge">{categoryBadge(c)}</span>
                       <span className="badge">Cadence {c.cadence}d</span>
                       {c.days_since_outbound == null ? (
@@ -1239,6 +1271,11 @@ export default function MorningPage() {
                           {c.active_deals} active deal{c.active_deals !== 1 ? "s" : ""}
                         </span>
                       )}
+                      {upcomingMilestones(c).map((m) => (
+                        <span key={m.label} className="badge" style={{ borderColor: "rgba(26,63,138,.3)", background: "rgba(26,63,138,.06)", color: "#1a3f8a", fontWeight: 700 }}>
+                          {m.daysAway === 0 ? `${m.label} today` : `${m.label} in ${m.daysAway}d`}
+                        </span>
+                      ))}
                     </div>
 
                     <div style={{ marginTop: 10 }} className="cardSoft cardPad">
@@ -1246,14 +1283,23 @@ export default function MorningPage() {
                         <div className="small muted bold">
                           {aiDrafts[c.id] ? "Draft (Jordan AI)" : draftsGenerating.has(c.id) ? "Generating draft…" : "Draft (template)"}
                         </div>
-                        <button
-                          className="btn"
-                          style={{ fontSize: 11, padding: "1px 8px" }}
-                          disabled={draftsGenerating.has(c.id)}
-                          onClick={() => regenerateDraft(c)}
-                        >
-                          {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
-                        </button>
+                        <div className="row" style={{ gap: 4 }}>
+                          <button
+                            className="btn"
+                            style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
+                            onClick={() => copyDraft(c.id, aiDrafts[c.id] ?? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice }))}
+                          >
+                            {copiedId === c.id ? "Copied ✓" : "Copy"}
+                          </button>
+                          <button
+                            className="btn"
+                            style={{ fontSize: 11, padding: "1px 8px" }}
+                            disabled={draftsGenerating.has(c.id)}
+                            onClick={() => regenerateDraft(c)}
+                          >
+                            {draftsGenerating.has(c.id) ? "…" : "Regenerate"}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
