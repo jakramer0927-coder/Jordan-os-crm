@@ -380,6 +380,10 @@ export default function ContactDetailPage() {
     return t ? new Date(t.occurred_at) : null;
   }, [touches]);
 
+  // UI state
+  const [activeTab, setActiveTab] = useState<"draft" | "history">("draft");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
@@ -839,101 +843,148 @@ export default function ContactDetailPage() {
     );
   }
 
+  // Relationship health helpers
+  const daysSinceOutbound = lastOutbound
+    ? Math.floor((Date.now() - lastOutbound.getTime()) / 86400000)
+    : null;
+  const healthColor = daysSinceOutbound === null
+    ? "#8a0000"
+    : daysSinceOutbound <= 7 ? "#0b6b2a"
+    : daysSinceOutbound <= 21 ? "#92610a"
+    : daysSinceOutbound <= 45 ? "#c25a00"
+    : "#8a0000";
+  const healthLabel = daysSinceOutbound === null
+    ? "Never reached out"
+    : daysSinceOutbound === 0 ? "Touched today"
+    : daysSinceOutbound === 1 ? "1 day ago"
+    : `${daysSinceOutbound} days ago`;
+
+  const activeDeals = deals.filter((d) => d.status !== "closed_won" && d.status !== "closed_lost");
+  const closedDeals = deals.filter((d) => d.status === "closed_won" || d.status === "closed_lost");
+  const overdueFollowUps = followUps.filter((f) => f.due_date < new Date().toISOString().slice(0, 10));
+
+  // Milestone check helper
+  function getMilestones() {
+    const today = new Date();
+    const milestones: { label: string; date: string; daysAway: number }[] = [];
+    const checkRecurring = (dateStr: string | null, label: string) => {
+      if (!dateStr) return;
+      const d = new Date(dateStr);
+      const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
+      const next = thisYear >= today ? thisYear : new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
+      const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
+      if (days <= 30) milestones.push({ label, date: next.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+    };
+    checkRecurring(contact.birthday, "Birthday");
+    checkRecurring(contact.close_anniversary, "Close anniversary");
+    if (contact.move_in_date) {
+      const d = new Date(contact.move_in_date);
+      const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
+      if (days >= 0 && days <= 30) milestones.push({ label: "Move-in", date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
+    }
+    return milestones;
+  }
+  const milestones = getMilestones();
+
   return (
     <div className="stack">
-      {/* Header */}
+      {error ? <div className="alert alertError">{error}</div> : null}
+
+      {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <div className="card cardPad">
-        <div className="rowResponsiveBetween">
-          <div style={{ minWidth: 0 }}>
-            <div className="rowResponsive" style={{ alignItems: "baseline" }}>
-              <h1 className="h1" style={{ margin: 0 }}>
-                {contact.display_name}
-              </h1>
-              <span className="subtle">
-                {prettyCategory(contact.category)}
-                {contact.tier ? ` • Tier ${contact.tier}` : ""}
-                {contact.client_type ? ` • ${contact.client_type}` : ""}
+        {/* Back + name row */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <a href="/contacts" className="subtle" style={{ fontSize: 12, textDecoration: "none", display: "block", marginBottom: 6 }}>← Contacts</a>
+            <h1 className="h1" style={{ margin: 0, lineHeight: 1.1 }}>{contact.display_name}</h1>
+
+            {/* Badges */}
+            <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+              <span className="badge" style={{ fontWeight: 700 }}>{prettyCategory(contact.category)}</span>
+              {contact.tier && <span className="badge" style={{ fontWeight: 700 }}>Tier {contact.tier}</span>}
+              {contact.client_type && <span className="badge" style={{ textTransform: "capitalize" }}>{contact.client_type.replace(/_/g, " ")}</span>}
+              {/* Relationship health */}
+              <span className="badge" style={{ color: healthColor, borderColor: `${healthColor}44`, fontWeight: 700, fontSize: 12 }}>
+                <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: healthColor, marginRight: 5, verticalAlign: "middle" }} />
+                {healthLabel}
               </span>
             </div>
 
-            <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
-              Last outbound: <strong>{lastOutbound ? lastOutbound.toLocaleString() : "—"}</strong>
-              {contact.email ? <span> · {contact.email}</span> : null}
-              {contact.phone ? <span> · {contact.phone}</span> : null}
-            </div>
-            {contact.notes ? (
-              <div className="subtle" style={{ marginTop: 6, fontSize: 13, whiteSpace: "pre-wrap" }}>
-                {contact.notes}
+            {/* Contact info */}
+            {(contact.email || contact.phone) && (
+              <div className="subtle" style={{ marginTop: 8, fontSize: 13 }}>
+                {contact.email && <a href={`mailto:${contact.email}`} style={{ color: "inherit" }}>{contact.email}</a>}
+                {contact.email && contact.phone && <span> · </span>}
+                {contact.phone && <a href={`tel:${contact.phone}`} style={{ color: "inherit" }}>{contact.phone}</a>}
               </div>
-            ) : null}
-            {(() => {
-              const today = new Date();
-              const milestones: { label: string; date: string; daysAway: number }[] = [];
-              const checkMilestone = (dateStr: string | null, label: string) => {
-                if (!dateStr) return;
-                // For recurring milestones (birthday, anniversary), find next occurrence
-                const d = new Date(dateStr);
-                const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate());
-                const nextYear = new Date(today.getFullYear() + 1, d.getMonth(), d.getDate());
-                const next = thisYear >= today ? thisYear : nextYear;
-                const days = Math.ceil((next.getTime() - today.getTime()) / 86400000);
-                if (days <= 30) milestones.push({ label, date: next.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
-              };
-              checkMilestone(contact.birthday, "Birthday");
-              checkMilestone(contact.close_anniversary, "Close anniversary");
-              if (contact.move_in_date) {
-                const d = new Date(contact.move_in_date);
-                const days = Math.ceil((d.getTime() - today.getTime()) / 86400000);
-                if (days >= 0 && days <= 30) milestones.push({ label: "Move-in", date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), daysAway: days });
-              }
-              if (milestones.length === 0) return null;
-              return (
-                <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
-                  {milestones.map((m) => (
-                    <span key={m.label} className="badge" style={{ background: "rgba(120,60,0,.08)", color: "rgba(120,60,0,.9)", borderColor: "rgba(120,60,0,.2)", fontWeight: 700, fontSize: 12 }}>
-                      {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
-                    </span>
-                  ))}
-                </div>
-              );
-            })()}
+            )}
           </div>
 
-          <div className="rowResponsive" style={{ justifyContent: "flex-end" }}>
-            <a className="btn btnFullMobile" href="/contacts" style={{ textDecoration: "none" }}>
-              Contacts
-            </a>
-            <button className="btn btnFullMobile" onClick={() => setEditing((v) => !v)}>
-              {editing ? "Close edit" : "Edit"}
+          {/* Primary actions */}
+          <div className="row" style={{ flexShrink: 0, gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <button
+              className="btn btnPrimary"
+              onClick={() => { setActiveTab("draft"); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+            >
+              Draft message
             </button>
-            <button className="btn btnPrimary btnFullMobile" onClick={openLog}>
-              Log touch
+            <button className="btn" onClick={openLog}>Log touch</button>
+            <button className="btn" onClick={() => setAdvancedOpen((v) => !v)} style={{ fontSize: 12 }}>
+              {advancedOpen ? "Close ▲" : "Edit ▾"}
             </button>
           </div>
         </div>
 
-        {error ? <div className="alert alertError" style={{ marginTop: 12 }}>{error}</div> : null}
+        {/* Milestone banners */}
+        {milestones.length > 0 && (
+          <div className="row" style={{ marginTop: 12, flexWrap: "wrap", gap: 6 }}>
+            {milestones.map((m) => (
+              <span key={m.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(146,97,10,.09)", border: "1px solid rgba(146,97,10,.22)", fontSize: 13, fontWeight: 700, color: "#92610a" }}>
+                🎯 {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Snapshot strip */}
+        <div className="row" style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.07)", flexWrap: "wrap", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>{touches.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>touches</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: activeDeals.length > 0 ? "#1a3f8a" : undefined }}>{activeDeals.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>active deals</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: overdueFollowUps.length > 0 ? "#8a0000" : undefined }}>{followUps.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>{overdueFollowUps.length > 0 ? `${overdueFollowUps.length} overdue` : "follow-ups"}</div>
+          </div>
+          {linkedContacts.length > 0 && (
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>{linkedContacts.length}</div>
+              <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>linked</div>
+            </div>
+          )}
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>
+              {Math.floor((Date.now() - new Date(contact.created_at).getTime()) / (86400000 * 30))}mo
+            </div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>in CRM</div>
+          </div>
+        </div>
       </div>
 
-      {/* Edit (clean, with danger zone) */}
-      {editing && (
+      {/* ── EDIT PANEL (collapsed by default) ─────────────────────────────── */}
+      {advancedOpen && (
         <div className="card cardPad stack">
-          <div className="rowResponsiveBetween">
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>Edit contact</div>
-              <div className="subtle" style={{ marginTop: 4 }}>Keep it tight. No busy work.</div>
-            </div>
-            <button className="btn btnFullMobile" onClick={() => setEditing(false)}>
-              Close
-            </button>
-          </div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>Edit contact</div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
             <div className="field" style={{ flex: 1, minWidth: 240 }}>
               <div className="label">Name</div>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-
             <div className="field" style={{ width: 220, minWidth: 180 }}>
               <div className="label">Category</div>
               <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -945,7 +996,6 @@ export default function ContactDetailPage() {
                 <option>Other</option>
               </select>
             </div>
-
             <div className="field" style={{ width: 140 }}>
               <div className="label">Tier</div>
               <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
@@ -958,49 +1008,26 @@ export default function ContactDetailPage() {
 
           <div className="field">
             <div className="label">Client Type (optional)</div>
-            <input
-              className="input"
-              value={clientType}
-              onChange={(e) => setClientType(e.target.value)}
-              placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..."
-            />
+            <input className="input" value={clientType} onChange={(e) => setClientType(e.target.value)} placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..." />
           </div>
 
           <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
             <div className="field" style={{ flex: 1, minWidth: 220 }}>
               <div className="label">Email (optional)</div>
-              <input
-                className="input"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@example.com"
-              />
+              <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 180 }}>
               <div className="label">Phone (optional)</div>
-              <input
-                className="input"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="(310) 555-0100"
-              />
+              <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(310) 555-0100" />
             </div>
           </div>
 
           <div className="field">
-            <div className="label">Notes (optional)</div>
-            <textarea
-              className="textarea"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Context for AI drafts, relationship notes, key details…"
-              style={{ minHeight: 80 }}
-            />
+            <div className="label">Notes</div>
+            <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Context for AI drafts, relationship notes, key details…" style={{ minHeight: 80 }} />
           </div>
 
-          <div style={{ fontWeight: 800, fontSize: 13, marginTop: 4 }}>Milestones</div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Milestones</div>
           <div className="fieldGridMobile">
             <div className="field">
               <div className="label">Birthday</div>
@@ -1016,105 +1043,154 @@ export default function ContactDetailPage() {
             </div>
           </div>
 
-          <div className="rowResponsive">
-            <button className="btn btnPrimary btnFullMobile" onClick={saveContact} disabled={savingContact}>
-              {savingContact ? "Saving…" : "Save"}
+          <div>
+            <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
+              {savingContact ? "Saving…" : "Save changes"}
             </button>
           </div>
 
           <div className="hr" />
 
-          <div className="stack">
-            <div style={{ fontWeight: 900 }}>Danger zone</div>
-            <div className="subtle" style={{ fontSize: 12 }}>
-              Deletes touches + imported texts attached to this contact.
+          {/* Household */}
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Household / linked contacts</div>
+          {linkedContacts.map((lc) => (
+            <div key={lc.link_id} className="rowBetween" style={{ alignItems: "center", padding: "4px 0" }}>
+              <div>
+                <a href={`/contacts/${lc.contact.id}`} style={{ fontWeight: 700 }}>{lc.contact.display_name}</a>
+                <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{lc.contact.category}{lc.contact.tier ? ` · ${lc.contact.tier}` : ""}</span>
+                {lc.household_name && <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>({lc.household_name})</span>}
+              </div>
+              <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
             </div>
-            <button className="btn btnFullMobile" onClick={deleteContact} disabled={deleting}>
+          ))}
+          <button className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
+            {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "+ Add another" : "+ Link contact"}
+          </button>
+          {linkOpen && (
+            <div className="stack" style={{ marginTop: 4 }}>
+              <input className="input" value={linkQ} onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }} placeholder="Type a name…" />
+              {linkResults.length > 0 && (
+                <div className="stack" style={{ gap: 4 }}>
+                  {linkResults.map((r) => (
+                    <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
+                      <span style={{ fontSize: 13 }}>{r.display_name} <span className="subtle">· {r.category}</span></span>
+                      <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="Household name (optional)" />
+            </div>
+          )}
+          {linkMsg && <div className="subtle" style={{ fontSize: 12, color: linkMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a" }}>{linkMsg}</div>}
+          {linkedContacts.length > 0 && (
+            <div style={{ paddingTop: 8, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+              <div className="subtle" style={{ fontSize: 12, marginBottom: 6 }}>Copy all touches to each linked contact, then archive this one.</div>
+              {distributeMsg ? (
+                <div className="subtle" style={{ fontSize: 12, color: "#0b6b2a" }}>{distributeMsg}</div>
+              ) : distributeConfirm ? (
+                <div className="row">
+                  <span className="subtle" style={{ fontSize: 12 }}>This archives this contact.</span>
+                  <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>{distributing ? "Working…" : "Confirm"}</button>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
+                </div>
+              ) : (
+                <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(true)}>Distribute & archive</button>
+              )}
+            </div>
+          )}
+
+          <div className="hr" />
+
+          {/* Buyer profile */}
+          {(contact.category || "").toLowerCase() === "client" && (() => {
+            const ct = (contact.client_type || "").toLowerCase();
+            if (ct.includes("past") || ct.includes("seller") || ct.includes("landlord")) return null;
+            return (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>Buyer profile</div>
+                <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                  <div className="field" style={{ minWidth: 150 }}>
+                    <div className="label">Min budget</div>
+                    <input className="input" value={buyerBudgetMin} onChange={e => setBuyerBudgetMin(e.target.value)} placeholder="800,000" />
+                  </div>
+                  <div className="field" style={{ minWidth: 150 }}>
+                    <div className="label">Max budget</div>
+                    <input className="input" value={buyerBudgetMax} onChange={e => setBuyerBudgetMax(e.target.value)} placeholder="1,500,000" />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                    <div className="label">Target areas</div>
+                    <input className="input" value={buyerAreas} onChange={e => setBuyerAreas(e.target.value)} placeholder="Silver Lake, Los Feliz, Echo Park" />
+                  </div>
+                </div>
+                <div className="row" style={{ alignItems: "center", gap: 10 }}>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={saveBuyerProfile} disabled={savingBuyer}>
+                    {savingBuyer ? "Saving…" : "Save buyer profile"}
+                  </button>
+                  {buyerMsg && <span style={{ fontSize: 12, color: buyerMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a", fontWeight: 700 }}>{buyerMsg}</span>}
+                </div>
+                <div className="hr" />
+              </>
+            );
+          })()}
+
+          {/* Text thread upload */}
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Upload text thread</div>
+          <div className="subtle" style={{ fontSize: 12 }}>Paste iMessage thread → attach to this contact → improves AI drafts.</div>
+          <TextThreadUploadPanel contactId={contact.id} />
+
+          <div className="hr" />
+
+          {/* Danger zone */}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
+            <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
               {deleting ? "Deleting…" : "Delete contact"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Household / linked contacts */}
-      <div className="card cardPad stack">
-        <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div style={{ fontWeight: 900, fontSize: 15 }}>Household / linked contacts</div>
-          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
-            {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "Add another" : "Link contact"}
+      {/* ── AI CONTEXT ─────────────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div className="rowBetween" style={{ alignItems: "flex-start", marginBottom: aiContext || contact.notes ? 12 : 0 }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Relationship intelligence</div>
+            {aiContextUpdatedAt && (
+              <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>
+                Updated {new Date(aiContextUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+            )}
+          </div>
+          <button className="btn" style={{ fontSize: 12, padding: "2px 10px", flexShrink: 0 }} onClick={extractContext} disabled={extractingContext}>
+            {extractingContext ? "Extracting…" : aiContext ? "Refresh" : "Extract"}
           </button>
         </div>
-
-        {linkedContacts.length === 0 && !linkOpen && (
-          <div className="subtle" style={{ fontSize: 13 }}>No linked contacts yet. Use this to connect joint contacts (e.g. Mike & Brooke McMahan).</div>
-        )}
-
-        {linkedContacts.map((lc) => (
-          <div key={lc.link_id} className="rowBetween" style={{ alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-            <div>
-              <a href={`/contacts/${lc.contact.id}`} style={{ fontWeight: 700 }}>{lc.contact.display_name}</a>
-              <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{lc.contact.category}{lc.contact.tier ? ` • ${lc.contact.tier}` : ""}</span>
-              {lc.household_name && <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>({lc.household_name})</span>}
-            </div>
-            <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
-          </div>
-        ))}
-
-        {linkOpen && (
-          <div className="stack" style={{ marginTop: 8 }}>
-            <div className="field">
-              <div className="label">Search contacts to link</div>
-              <input
-                className="input"
-                value={linkQ}
-                onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }}
-                placeholder="Type a name…"
-              />
-            </div>
-            {linkResults.length > 0 && (
-              <div className="stack" style={{ gap: 6 }}>
-                {linkResults.map((r) => (
-                  <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
-                    <span>{r.display_name} <span className="subtle">• {r.category}{r.tier ? ` • ${r.tier}` : ""}</span></span>
-                    <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="field">
-              <div className="label">Household name (optional)</div>
-              <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="e.g. McMahan Household" />
-            </div>
+        {extractContextMsg && (
+          <div className={`alert ${extractContextMsg.startsWith("Error") ? "alertError" : "alertOk"}`} style={{ fontSize: 13, marginBottom: 10 }}>
+            {extractContextMsg}
           </div>
         )}
-
-        {linkMsg && <div className="subtle" style={{ fontSize: 13, color: linkMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a" }}>{linkMsg}</div>}
-
-        {linkedContacts.length > 0 && (
-          <div className="stack" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Distribute & archive</div>
-            <div className="subtle" style={{ fontSize: 12 }}>Copy all touches from this joint contact to each linked contact, then archive this one.</div>
-            {distributeMsg ? (
-              <div className="subtle" style={{ fontSize: 13, color: "#0b6b2a" }}>{distributeMsg}</div>
-            ) : distributeConfirm ? (
-              <div className="row">
-                <span className="subtle" style={{ fontSize: 13 }}>Are you sure? This archives this contact.</span>
-                <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>{distributing ? "Working…" : "Confirm"}</button>
-                <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
-              </div>
-            ) : (
-              <button className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} onClick={() => setDistributeConfirm(true)}>Distribute & archive</button>
-            )}
+        {contact.notes && (
+          <div style={{ fontSize: 13, color: "rgba(18,18,18,.6)", marginBottom: aiContext ? 12 : 0, paddingBottom: aiContext ? 12 : 0, borderBottom: aiContext ? "1px solid rgba(0,0,0,.07)" : undefined, whiteSpace: "pre-wrap" }}>
+            {contact.notes}
+          </div>
+        )}
+        {aiContext ? (
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.65 }}>{aiContext}</div>
+        ) : (
+          <div className="subtle" style={{ fontSize: 13 }}>
+            No AI context yet — import text threads or add touch summaries, then click Extract.
           </div>
         )}
       </div>
 
-      {/* Properties / Deals */}
+      {/* ── ACTIVE DEALS ───────────────────────────────────────────────────── */}
       <div className="card cardPad stack">
         <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Properties & deals</div>
-            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Transactions tied to this contact</div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>
+            Deals
+            {activeDeals.length > 0 && <span className="subtle" style={{ fontWeight: 400, fontSize: 13, marginLeft: 6 }}>{activeDeals.length} active</span>}
           </div>
           <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => dealFormOpen ? setDealFormOpen(false) : openNewDeal()}>
             {dealFormOpen && !editingDeal ? "Cancel" : "+ Add deal"}
@@ -1198,11 +1274,77 @@ export default function ContactDetailPage() {
           </div>
         )}
 
-        {/* Deal list */}
-        {deals.length > 0 ? (
+        {/* Deal form */}
+        {dealFormOpen && (
+          <div className="stack" style={{ paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)" }}>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>{editingDeal ? "Edit deal" : "New deal"}</div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+              <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                <div className="label">Address</div>
+                <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
+              </div>
+              <div className="field" style={{ minWidth: 130 }}>
+                <div className="label">Role</div>
+                <select className="select" value={dealRole} onChange={e => setDealRole(e.target.value)}>
+                  <option value="buyer">Buyer</option>
+                  <option value="seller">Seller</option>
+                  <option value="landlord">Landlord</option>
+                  <option value="tenant">Tenant</option>
+                </select>
+              </div>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Stage</div>
+                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
+                  {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Price (optional)</div>
+                <input className="input" value={dealPrice} onChange={e => setDealPrice(e.target.value)} placeholder="1,250,000" />
+              </div>
+              <div className="field" style={{ minWidth: 160 }}>
+                <div className="label">Close date (optional)</div>
+                <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="field">
+              <div className="label">Referral source (optional)</div>
+              <input className="input" value={dealRefQuery} onChange={e => searchRefSource(e.target.value)} placeholder="Search contacts…" />
+              {dealRefResults.length > 0 && (
+                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                  {dealRefResults.slice(0, 5).map(c => (
+                    <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", justifyContent: "flex-start", fontSize: 13 }}
+                      onClick={() => { setDealRefSourceId(c.id); setDealRefSourceName(c.display_name); setDealRefQuery(c.display_name); setDealRefResults([]); }}>
+                      {c.display_name} <span style={{ color: "rgba(18,18,18,.4)", marginLeft: 6 }}>{c.category}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {dealRefSourceId && (
+                <div style={{ marginTop: 4, fontSize: 12, color: "rgba(18,18,18,.5)" }}>
+                  Linked: <strong>{dealRefSourceName}</strong>
+                  <button style={{ marginLeft: 8, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setDealRefSourceId(""); setDealRefSourceName(""); setDealRefQuery(""); }}>remove</button>
+                </div>
+              )}
+            </div>
+            <div className="field">
+              <div className="label">Notes (optional)</div>
+              <textarea className="textarea" value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="Any notes about this transaction…" style={{ minHeight: 70 }} />
+            </div>
+            <div className="row">
+              <button className="btn btnPrimary" onClick={saveDeal} disabled={dealBusy}>{dealBusy ? "Saving…" : "Save"}</button>
+              <button className="btn" onClick={() => setDealFormOpen(false)} disabled={dealBusy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Active deals */}
+        {activeDeals.length > 0 && (
           <div className="stack" style={{ gap: 0 }}>
-            {deals.map((d, i) => (
-              <div key={d.id} style={{ padding: "10px 0", borderBottom: i < deals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+            {activeDeals.map((d, i) => (
+              <div key={d.id} style={{ padding: "10px 0", borderBottom: i < activeDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
                 <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
@@ -1215,9 +1357,9 @@ export default function ContactDetailPage() {
                       {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
                       {d.referral_source_name && <span className="badge">Ref: {d.referral_source_name}</span>}
                     </div>
-                    {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>{d.notes}</div>}
+                    {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>{d.notes}</div>}
                   </div>
-                  <div className="row" style={{ flexShrink: 0, gap: 6 }}>
+                  <div className="row" style={{ flexShrink: 0, gap: 4 }}>
                     <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
                     <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
                   </div>
@@ -1225,20 +1367,58 @@ export default function ContactDetailPage() {
               </div>
             ))}
           </div>
-        ) : (
-          !dealFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No deals yet — add one above.</div>
+        )}
+
+        {/* Closed deals — collapsed */}
+        {closedDeals.length > 0 && (
+          <details style={{ marginTop: activeDeals.length > 0 ? 8 : 0 }}>
+            <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+              {closedDeals.length} closed deal{closedDeals.length !== 1 ? "s" : ""}
+            </summary>
+            <div className="stack" style={{ gap: 0, marginTop: 6 }}>
+              {closedDeals.map((d, i) => (
+                <div key={d.id} style={{ padding: "8px 0", borderBottom: i < closedDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>{d.address}</div>
+                      <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                        <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
+                        <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
+                          {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                        </span>
+                        {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
+                        {d.close_date && <span className="badge">{new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                      </div>
+                    </div>
+                    <div className="row" style={{ flexShrink: 0, gap: 4 }}>
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {deals.length === 0 && !dealFormOpen && (
+          <div className="subtle" style={{ fontSize: 13 }}>No deals yet.</div>
         )}
       </div>
 
-      {/* Follow-ups */}
+      {/* ── FOLLOW-UPS ─────────────────────────────────────────────────────── */}
       <div className="card cardPad stack">
         <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Follow-up reminders</div>
-            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Timed reminders that surface on the morning page</div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>
+            Follow-ups
+            {overdueFollowUps.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: "#8a0000", background: "rgba(200,0,0,.08)", border: "1px solid rgba(200,0,0,.2)", borderRadius: 4, padding: "1px 6px" }}>
+                {overdueFollowUps.length} overdue
+              </span>
+            )}
           </div>
           <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => setFuFormOpen((v) => !v)}>
-            {fuFormOpen ? "Cancel" : "+ Add reminder"}
+            {fuFormOpen ? "Cancel" : "+ Add"}
           </button>
         </div>
 
@@ -1264,10 +1444,10 @@ export default function ContactDetailPage() {
               const today = new Date().toISOString().slice(0, 10);
               const overdue = f.due_date < today;
               return (
-                <div key={f.id} style={{ padding: "10px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
+                <div key={f.id} style={{ padding: "9px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ fontWeight: 700, fontSize: 13, color: overdue ? "#8a0000" : undefined }}>
-                      {overdue ? `Overdue — ` : ""}{f.due_date}
+                      {overdue ? "Overdue · " : ""}{f.due_date}
                     </span>
                     {f.note && <span className="subtle" style={{ fontSize: 13, marginLeft: 8 }}>{f.note}</span>}
                   </div>
@@ -1284,92 +1464,34 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* Buyer profile — active buyers only */}
-      {(contact.category || "").toLowerCase() === "client" && (() => {
-        const ct = (contact.client_type || "").toLowerCase();
-        const isPastOrSeller = ct.includes("past") || ct.includes("seller") || ct.includes("landlord");
-        if (isPastOrSeller) return (
-          <div className="card cardPad" style={{ borderColor: "var(--line2)" }}>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Buyer profile</div>
-            <div className="subtle" style={{ fontSize: 13, marginTop: 6 }}>
-              Not applicable — use <strong>Properties &amp; deals</strong> above to record the property this contact bought or sold.
-            </div>
-          </div>
-        );
-        return (
-        <div className="card cardPad stack">
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Buyer profile</div>
-            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Budget and target areas for active buyers</div>
-          </div>
-          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-            <div className="field" style={{ minWidth: 150 }}>
-              <div className="label">Min budget</div>
-              <input className="input" value={buyerBudgetMin} onChange={e => setBuyerBudgetMin(e.target.value)} placeholder="800,000" />
-            </div>
-            <div className="field" style={{ minWidth: 150 }}>
-              <div className="label">Max budget</div>
-              <input className="input" value={buyerBudgetMax} onChange={e => setBuyerBudgetMax(e.target.value)} placeholder="1,500,000" />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 220 }}>
-              <div className="label">Target areas</div>
-              <input className="input" value={buyerAreas} onChange={e => setBuyerAreas(e.target.value)} placeholder="Silver Lake, Los Feliz, Echo Park" />
-            </div>
-          </div>
-          <div className="row" style={{ alignItems: "center", gap: 12 }}>
-            <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={saveBuyerProfile} disabled={savingBuyer}>
-              {savingBuyer ? "Saving…" : "Save buyer profile"}
+      {/* ── DRAFT + HISTORY TABS ───────────────────────────────────────────── */}
+      <div className="card cardPad" id="contact-tabs">
+        {/* Tab bar */}
+        <div className="row" style={{ gap: 0, marginBottom: 16, borderBottom: "2px solid rgba(0,0,0,.08)" }}>
+          {([["draft", "Draft message"], ["history", `History (${touches.length})`]] as const).map(([tab, label]) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: activeTab === tab ? "2px solid var(--ink)" : "2px solid transparent",
+                marginBottom: -2,
+                padding: "6px 16px 10px",
+                fontWeight: activeTab === tab ? 900 : 500,
+                fontSize: 14,
+                cursor: "pointer",
+                color: activeTab === tab ? "var(--ink)" : "rgba(18,18,18,.45)",
+              }}
+            >
+              {label}
             </button>
-            {buyerMsg && <span style={{ fontSize: 12, color: buyerMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a", fontWeight: 700 }}>{buyerMsg}</span>}
-          </div>
-        </div>
-        );
-      })()}
-
-      {/* AI Insights */}
-      <div className="card cardPad stack">
-        <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>AI insights</div>
-            {aiContextUpdatedAt && (
-              <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
-                Last extracted {new Date(aiContextUpdatedAt).toLocaleDateString()}
-              </div>
-            )}
-          </div>
-          <button
-            className="btn"
-            style={{ fontSize: 12, padding: "2px 10px" }}
-            onClick={extractContext}
-            disabled={extractingContext}
-          >
-            {extractingContext ? "Extracting…" : aiContext ? "Re-extract" : "Extract"}
-          </button>
+          ))}
         </div>
 
-        {extractContextMsg && (
-          <div className={`alert ${extractContextMsg.startsWith("Error") ? "alertError" : "alertOk"}`} style={{ fontSize: 13 }}>
-            {extractContextMsg}
-          </div>
-        )}
-
-        {aiContext ? (
-          <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.6 }}>{aiContext}</div>
-        ) : (
-          <div className="subtle" style={{ fontSize: 13 }}>
-            No AI context yet. Import text threads or add touch summaries, then click Extract to generate relationship intelligence.
-          </div>
-        )}
+        {activeTab === "draft" && <VoiceDraftPanel contactId={contact.id} />}
+        {activeTab === "history" && <TouchHistory touches={touches} />}
       </div>
-
-      {/* Jordan Voice FIRST */}
-      <VoiceDraftPanel contactId={contact.id} />
-
-      {/* Text upload NEXT */}
-      <TextThreadUploadPanel contactId={contact.id} />
-
-      {/* Touch history */}
-      <TouchHistory touches={touches} />
 
       {/* Log touch modal (kept functional but less noisy text) */}
       {logOpen && (
