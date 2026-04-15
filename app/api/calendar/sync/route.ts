@@ -127,6 +127,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, imported, skipped, events_scanned: events.length });
   } catch (e) {
-    return serverError("CALENDAR_SYNC_CRASH", e);
+    const msg = (e as any)?.message ?? String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
