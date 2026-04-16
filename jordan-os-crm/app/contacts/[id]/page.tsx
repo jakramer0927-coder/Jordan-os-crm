@@ -287,6 +287,155 @@ function TouchHistory({ touches }: { touches: Touch[] }) {
   );
 }
 
+type TimelineItem =
+  | { kind: "touch"; date: Date; touch: Touch }
+  | { kind: "deal_created"; date: Date; deal: Deal }
+  | { kind: "deal_status"; date: Date; deal: Deal; label: string }
+  | { kind: "follow_up"; date: Date; fu: { id: string; due_date: string; note: string | null } }
+  | { kind: "milestone"; date: Date; label: string };
+
+function ContactTimeline({ contact, touches, deals, followUps }: {
+  contact: Contact;
+  touches: Touch[];
+  deals: Deal[];
+  followUps: { id: string; due_date: string; note: string | null }[];
+}) {
+  const today = new Date();
+
+  const items: TimelineItem[] = [];
+
+  // Touches
+  for (const t of touches) {
+    items.push({ kind: "touch", date: new Date(t.occurred_at), touch: t });
+  }
+
+  // Deal created events
+  for (const d of deals) {
+    items.push({ kind: "deal_created", date: new Date(d.created_at), deal: d, label: "" });
+    if (d.status === "closed_won" || d.status === "closed_lost") {
+      const closeDate = d.close_date ? new Date(d.close_date) : new Date(d.created_at);
+      items.push({ kind: "deal_status", date: closeDate, deal: d, label: d.status === "closed_won" ? "Closed — won" : "Closed — lost" });
+    }
+  }
+
+  // Follow-ups (upcoming)
+  for (const f of followUps) {
+    items.push({ kind: "follow_up", date: new Date(f.due_date), fu: f });
+  }
+
+  // Milestones (birthday, close anniversary)
+  if (contact.birthday) {
+    const bd = new Date(contact.birthday);
+    // Show last 3 years + next year
+    for (let yr = today.getFullYear() - 2; yr <= today.getFullYear() + 1; yr++) {
+      const d = new Date(yr, bd.getMonth(), bd.getDate());
+      if (d <= today) items.push({ kind: "milestone", date: d, label: `Birthday (${yr})` });
+    }
+  }
+  if (contact.close_anniversary) {
+    const ca = new Date(contact.close_anniversary);
+    for (let yr = ca.getFullYear(); yr <= today.getFullYear(); yr++) {
+      const d = new Date(yr, ca.getMonth(), ca.getDate());
+      if (d.getFullYear() === ca.getFullYear()) {
+        items.push({ kind: "milestone", date: d, label: "Close date" });
+      } else if (d <= today) {
+        items.push({ kind: "milestone", date: d, label: `Close anniversary (yr ${yr - ca.getFullYear()})` });
+      }
+    }
+  }
+  if (contact.move_in_date) {
+    items.push({ kind: "milestone", date: new Date(contact.move_in_date), label: "Move-in date" });
+  }
+
+  // Sort descending (newest first), future follow-ups at top
+  items.sort((a, b) => {
+    const af = a.date > today;
+    const bf = b.date > today;
+    if (af && !bf) return -1;
+    if (!af && bf) return 1;
+    return b.date.getTime() - a.date.getTime();
+  });
+
+  function fmtDate(d: Date) {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function isFuture(d: Date) { return d > today; }
+
+  function dotColor(item: TimelineItem) {
+    if (item.kind === "touch") {
+      return item.touch.direction === "outbound" ? "#0b6b2a" : "#1a4fa0";
+    }
+    if (item.kind === "deal_created") return "#1a3f8a";
+    if (item.kind === "deal_status") {
+      return (item as any).label?.includes("won") ? "#0b6b2a" : "#8a0000";
+    }
+    if (item.kind === "follow_up") return "#92610a";
+    if (item.kind === "milestone") return "#92610a";
+    return "#888";
+  }
+
+  function renderItem(item: TimelineItem, idx: number) {
+    const color = dotColor(item);
+    const future = isFuture(item.date);
+    return (
+      <div key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start", opacity: future ? 0.75 : 1 }}>
+        {/* Dot + line */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 16, flexShrink: 0, paddingTop: 3 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: color, flexShrink: 0, border: future ? `2px dashed ${color}` : "none", boxSizing: "border-box" }} />
+          {idx < items.length - 1 && <div style={{ width: 1, flex: 1, minHeight: 14, background: "rgba(0,0,0,.1)", marginTop: 3 }} />}
+        </div>
+        {/* Content */}
+        <div style={{ flex: 1, paddingBottom: 14 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "rgba(18,18,18,.4)", flexShrink: 0 }}>{fmtDate(item.date)}{future ? " (upcoming)" : ""}</span>
+            {item.kind === "touch" && (
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>
+                {item.touch.direction === "outbound" ? "Outbound" : "Inbound"} · {channelLabel(item.touch.channel)}
+                {item.touch.intent ? <span style={{ fontWeight: 400, color: "rgba(18,18,18,.5)" }}> · {item.touch.intent}</span> : null}
+              </span>
+            )}
+            {item.kind === "deal_created" && (
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>Deal opened: {item.deal.address}</span>
+            )}
+            {item.kind === "deal_status" && (
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>{(item as any).label}: {item.deal.address}</span>
+            )}
+            {item.kind === "follow_up" && (
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>Follow-up due</span>
+            )}
+            {item.kind === "milestone" && (
+              <span style={{ fontSize: 13, fontWeight: 700, color }}>{(item as any).label}</span>
+            )}
+          </div>
+          {item.kind === "touch" && item.touch.summary && (
+            <div style={{ fontSize: 13, marginTop: 3, color: "rgba(18,18,18,.7)", lineHeight: 1.5 }}>{item.touch.summary}</div>
+          )}
+          {item.kind === "follow_up" && item.fu.note && (
+            <div style={{ fontSize: 13, marginTop: 3, color: "rgba(18,18,18,.7)" }}>{item.fu.note}</div>
+          )}
+          {item.kind === "deal_created" && item.deal.notes && (
+            <div style={{ fontSize: 13, marginTop: 3, color: "rgba(18,18,18,.7)" }}>{item.deal.notes}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return <div className="subtle">No activity recorded yet.</div>;
+  }
+
+  return (
+    <div style={{ paddingTop: 4 }}>
+      <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>
+        {items.length} events · touches, deals, follow-ups, and milestones
+      </div>
+      <div>{items.map((item, i) => renderItem(item, i))}</div>
+    </div>
+  );
+}
+
 export default function ContactDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || "";
@@ -416,7 +565,7 @@ export default function ContactDetailPage() {
   }
 
   // UI state
-  const [activeTab, setActiveTab] = useState<"draft" | "history">("draft");
+  const [activeTab, setActiveTab] = useState<"draft" | "history" | "timeline">("draft");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   async function requireSession() {
@@ -1572,7 +1721,7 @@ export default function ContactDetailPage() {
       <div className="card cardPad" id="contact-tabs">
         {/* Tab bar */}
         <div className="row" style={{ gap: 0, marginBottom: 16, borderBottom: "2px solid rgba(0,0,0,.08)" }}>
-          {([["draft", "Draft message"], ["history", `History (${touches.length})`]] as const).map(([tab, label]) => (
+          {([["draft", "Draft message"], ["history", `History (${touches.length})`], ["timeline", "Timeline"]] as const).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1595,6 +1744,14 @@ export default function ContactDetailPage() {
 
         {activeTab === "draft" && <VoiceDraftPanel contactId={contact.id} />}
         {activeTab === "history" && <TouchHistory touches={touches} />}
+        {activeTab === "timeline" && (
+          <ContactTimeline
+            contact={contact}
+            touches={touches}
+            deals={deals}
+            followUps={followUps}
+          />
+        )}
       </div>
 
       {/* Log touch modal (kept functional but less noisy text) */}
