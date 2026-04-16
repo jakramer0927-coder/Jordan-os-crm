@@ -380,6 +380,41 @@ export default function ContactDetailPage() {
     return t ? new Date(t.occurred_at) : null;
   }, [touches]);
 
+  // Contact brief / prepare mode
+  type ContactBrief = {
+    headline: string;
+    quick_facts: string[];
+    recent_context: string;
+    suggested_ask: string;
+    watch_out: string | null;
+  };
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [brief, setBrief] = useState<ContactBrief | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+
+  async function loadBrief() {
+    if (!contact) return;
+    setBriefOpen(true);
+    if (brief) return; // already loaded
+    setBriefLoading(true);
+    setBriefError(null);
+    try {
+      const res = await fetch("/api/contacts/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contact.id }),
+      });
+      const j = await res.json();
+      if (!res.ok) setBriefError(j?.error || "Failed to generate brief");
+      else setBrief(j.brief ?? null);
+    } catch (e: any) {
+      setBriefError(e?.message || "Failed to generate brief");
+    } finally {
+      setBriefLoading(false);
+    }
+  }
+
   // UI state
   const [activeTab, setActiveTab] = useState<"draft" | "history">("draft");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -923,6 +958,9 @@ export default function ContactDetailPage() {
 
           {/* Primary actions */}
           <div className="row" style={{ flexShrink: 0, gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <button className="btn" onClick={loadBrief} style={{ background: "rgba(11,60,140,.08)", color: "#1a3f8a", borderColor: "rgba(11,60,140,.2)", fontWeight: 700 }}>
+              Prepare
+            </button>
             <button
               className="btn btnPrimary"
               onClick={() => { setActiveTab("draft"); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
@@ -975,6 +1013,71 @@ export default function ContactDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ── PREPARE / BRIEF PANEL ─────────────────────────────────────────── */}
+      {briefOpen && (
+        <div className="card cardPad stack">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Call prep — {contact.display_name}</div>
+            <div className="row" style={{ gap: 8 }}>
+              {!briefLoading && brief && (
+                <button className="btn" style={{ fontSize: 12 }} onClick={() => { setBrief(null); loadBrief(); }}>
+                  Refresh
+                </button>
+              )}
+              <button className="btn" style={{ fontSize: 12 }} onClick={() => setBriefOpen(false)}>Close</button>
+            </div>
+          </div>
+
+          {briefLoading && (
+            <div className="stack" style={{ gap: 10 }}>
+              {[120, 80, 100, 90, 70].map((w, i) => (
+                <div key={i} style={{ height: 14, borderRadius: 6, background: "rgba(18,18,18,.08)", width: `${w}%`, maxWidth: "100%", animation: "pulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s` }} />
+              ))}
+            </div>
+          )}
+
+          {briefError && <div className="alert alertError">{briefError}</div>}
+
+          {brief && !briefLoading && (
+            <div className="stack" style={{ gap: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4 }}>{brief.headline}</div>
+
+              {brief.quick_facts?.length > 0 && (
+                <div>
+                  <div className="label" style={{ marginBottom: 6 }}>Key facts</div>
+                  <div className="stack" style={{ gap: 5 }}>
+                    {brief.quick_facts.map((f: string, i: number) => (
+                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14 }}>
+                        <span style={{ color: "#0b6b2a", fontWeight: 900, flexShrink: 0 }}>·</span>
+                        <span>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {brief.recent_context && (
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>Recent context</div>
+                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>{brief.recent_context}</div>
+                </div>
+              )}
+
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,60,140,.06)", border: "1px solid rgba(11,60,140,.15)" }}>
+                <div className="label" style={{ marginBottom: 4, color: "#1a3f8a" }}>Suggested opener</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#1a3f8a", lineHeight: 1.5 }}>{brief.suggested_ask}</div>
+              </div>
+
+              {brief.watch_out && (
+                <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(138,0,0,.04)", border: "1px solid rgba(138,0,0,.12)", fontSize: 13, color: "#8a0000" }}>
+                  <strong>Note:</strong> {brief.watch_out}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── EDIT PANEL (collapsed by default) ─────────────────────────────── */}
       {advancedOpen && (
