@@ -1416,7 +1416,7 @@ export default function ContactDetailPage() {
             )}
           </div>
           <button className="btn" style={{ fontSize: 12, padding: "2px 10px", flexShrink: 0 }} onClick={extractContext} disabled={extractingContext}>
-            {extractingContext ? "Extracting…" : aiContext ? "Refresh" : "Extract"}
+            {extractingContext ? "Generating…" : aiContext ? "Regenerate" : "Generate"}
           </button>
         </div>
         {extractContextMsg && (
@@ -1433,7 +1433,7 @@ export default function ContactDetailPage() {
           <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.65 }}>{aiContext}</div>
         ) : (
           <div className="subtle" style={{ fontSize: 13 }}>
-            No AI context yet — import text threads or add touch summaries, then click Extract.
+            No AI summary yet — add notes, touches, or deals, then click Generate.
           </div>
         )}
       </div>
