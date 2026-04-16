@@ -48,6 +48,17 @@ type ContactWithLastOutbound = Contact & {
   closed_deal_dates: { address: string; close_date: string }[];
 };
 
+type PipelineDeal = {
+  id: string;
+  address: string;
+  status: string;
+  price: number | null;
+  close_date: string | null;
+  created_at: string;
+  contact_id: string;
+  contacts: { id: string; display_name: string } | null;
+};
+
 type FollowUp = {
   id: string;
   contact_id: string;
@@ -485,6 +496,9 @@ export default function MorningPage() {
   // Copy-to-clipboard feedback
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Pipeline momentum alerts
+  const [staleDealAlerts, setStaleDealAlerts] = useState<PipelineDeal[]>([]);
+
   // Follow-ups
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [completingFollowUp, setCompletingFollowUp] = useState<string | null>(null);
@@ -554,11 +568,12 @@ export default function MorningPage() {
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
 
-    // Fetch contacts+touches+counts, voice profile, sync status, and follow-ups in parallel
-    const [contactsRes, syncRes, followUpsRes] = await Promise.all([
+    // Fetch contacts+touches+counts, voice profile, sync status, follow-ups, and pipeline in parallel
+    const [contactsRes, syncRes, followUpsRes, pipelineRes] = await Promise.all([
       fetch("/api/morning/contacts"),
       fetch("/api/sync/status"),
       fetch("/api/follow-ups?due_today=1"),
+      fetch("/api/pipeline"),
       voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
     ]);
 
@@ -571,6 +586,27 @@ export default function MorningPage() {
     if (followUpsRes.ok) {
       const fj = await followUpsRes.json().catch(() => ({}));
       setFollowUps((fj.follow_ups ?? []) as FollowUp[]);
+    }
+
+    if (pipelineRes.ok) {
+      const pj = await pipelineRes.json().catch(() => ({}));
+      const allDeals: PipelineDeal[] = pj.deals ?? [];
+      const today = Date.now();
+      const stale = allDeals.filter(d => {
+        const days = Math.floor((today - new Date(d.created_at).getTime()) / 86400000);
+        const thresholds: Record<string, number> = { lead: 60, showing: 30, offer_in: 14, under_contract: 60 };
+        const threshold = thresholds[d.status] ?? 999;
+        const closeOverdue = d.close_date && new Date(d.close_date) < new Date() && d.status === "under_contract";
+        return closeOverdue || days >= threshold;
+      });
+      // Sort: overdue close dates first, then by days in pipeline desc
+      stale.sort((a, b) => {
+        const aOverdue = a.close_date && new Date(a.close_date) < new Date() ? 1 : 0;
+        const bOverdue = b.close_date && new Date(b.close_date) < new Date() ? 1 : 0;
+        if (bOverdue !== aOverdue) return bOverdue - aOverdue;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+      setStaleDealAlerts(stale);
     }
 
     if (!contactsRes.ok) {
@@ -1236,6 +1272,44 @@ export default function MorningPage() {
                         {completingFollowUp === f.id ? "…" : "Done ✓"}
                       </button>
                     </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pipeline momentum alerts ── */}
+      {staleDealAlerts.length > 0 && (
+        <div className="section" style={{ marginTop: 12 }}>
+          <div className="sectionTitleRow">
+            <div className="sectionTitle">Pipeline needs attention</div>
+            <div className="sectionSub">{staleDealAlerts.length} deal{staleDealAlerts.length !== 1 ? "s" : ""} stalled or overdue</div>
+          </div>
+          <div className="stack">
+            {staleDealAlerts.map(deal => {
+              const days = Math.floor((Date.now() - new Date(deal.created_at).getTime()) / 86400000);
+              const closeOverdue = deal.close_date && new Date(deal.close_date) < new Date();
+              const stageLabels: Record<string, string> = { lead: "Lead", showing: "Showing", offer_in: "Offer In", under_contract: "Under Contract" };
+              return (
+                <div key={deal.id} className="card cardPad" style={{ borderColor: closeOverdue ? "rgba(200,0,0,.2)" : "rgba(200,100,0,.2)", background: closeOverdue ? "rgba(200,0,0,.03)" : "rgba(200,100,0,.03)", padding: "10px 14px" }}>
+                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>{deal.address}</div>
+                      <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                        {deal.contacts && (
+                          <span style={{ fontSize: 12, color: "rgba(18,18,18,.6)", fontWeight: 700 }}>{deal.contacts.display_name}</span>
+                        )}
+                        <span className="badge" style={{ fontSize: 11 }}>{stageLabels[deal.status] ?? deal.status}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: closeOverdue ? "#8a0000" : "#92610a" }}>
+                          {closeOverdue
+                            ? `⚠ Close date overdue · ${days}d in pipeline`
+                            : `${days}d in stage — check status`}
+                        </span>
+                      </div>
+                    </div>
+                    <a className="btn" href="/pipeline" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>View →</a>
                   </div>
                 </div>
               );
