@@ -57,9 +57,28 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showClosed, setShowClosed] = useState(false);
+  const [listView, setListView] = useState(false);
   const [movingDeal, setMovingDeal] = useState<Deal | null>(null);
   const [movingTo, setMovingTo] = useState<DealStage | "">("");
   const [saving, setSaving] = useState(false);
+  // Edit fields inside the deal modal
+  const [editAddress, setEditAddress] = useState("");
+  const [editRole, setEditRole] = useState("buyer");
+  const [editPrice, setEditPrice] = useState("");
+  const [editCloseDate, setEditCloseDate] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editRefQuery, setEditRefQuery] = useState("");
+  const [editRefResults, setEditRefResults] = useState<{ id: string; display_name: string; category: string }[]>([]);
+  const [editRefId, setEditRefId] = useState("");
+  const [editRefName, setEditRefName] = useState("");
+  const [editTab, setEditTab] = useState<"stage" | "details" | "activity">("stage");
+  // Activity log
+  type DealActivity = { id: string; note: string; activity_type: string; occurred_at: string };
+  const [activities, setActivities] = useState<DealActivity[]>([]);
+  const [activityNote, setActivityNote] = useState("");
+  const [activityType, setActivityType] = useState("note");
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activitySaving, setActivitySaving] = useState(false);
 
   // New deal modal
   const [newDealOpen, setNewDealOpen] = useState(false);
@@ -92,19 +111,92 @@ export default function PipelinePage() {
     setDeals(j.deals ?? []);
   }
 
-  async function moveStage() {
-    if (!movingDeal || !movingTo) return;
+  function openDealModal(deal: Deal) {
+    setMovingDeal(deal);
+    setMovingTo(deal.status);
+    setEditAddress(deal.address);
+    setEditRole(deal.role);
+    setEditPrice(deal.price != null ? String(deal.price) : "");
+    setEditCloseDate(deal.close_date ?? "");
+    setEditNotes(deal.notes ?? "");
+    setEditRefId(deal.referral_source?.id ?? "");
+    setEditRefName(deal.referral_source?.display_name ?? "");
+    setEditRefQuery(deal.referral_source?.display_name ?? "");
+    setEditRefResults([]);
+    setEditTab("stage");
+    setActivities([]);
+    setActivityNote("");
+    setActivityType("note");
+    loadActivities(deal.id);
+  }
+
+  async function loadActivities(dealId: string) {
+    setActivityLoading(true);
+    const res = await fetch(`/api/deals/activity?deal_id=${dealId}`);
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setActivities(j.activities ?? []);
+    }
+    setActivityLoading(false);
+  }
+
+  async function addActivity() {
+    if (!movingDeal || !activityNote.trim()) return;
+    setActivitySaving(true);
+    const res = await fetch("/api/deals/activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deal_id: movingDeal.id, note: activityNote.trim(), activity_type: activityType }),
+    });
+    setActivitySaving(false);
+    if (!res.ok) return;
+    const j = await res.json().catch(() => ({}));
+    setActivities(prev => [j.activity, ...prev]);
+    setActivityNote("");
+  }
+
+  async function deleteActivity(id: string) {
+    await fetch("/api/deals/activity", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    setActivities(prev => prev.filter(a => a.id !== id));
+  }
+
+  async function saveDeal() {
+    if (!movingDeal) return;
     setSaving(true);
     const res = await fetch("/api/pipeline", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: movingDeal.id, status: movingTo }),
+      body: JSON.stringify({
+        id: movingDeal.id,
+        status: movingTo || movingDeal.status,
+        address: editAddress.trim(),
+        role: editRole,
+        price: editPrice ? Number(editPrice.replace(/[^0-9.]/g, "")) : null,
+        close_date: editCloseDate || null,
+        notes: editNotes.trim() || null,
+        referral_source_contact_id: editRefId || null,
+      }),
     });
     setSaving(false);
     if (!res.ok) return;
-    setDeals(prev => prev.map(d => d.id === movingDeal.id ? { ...d, status: movingTo as DealStage } : d));
+    // Reload to get fresh joined data
+    load();
     setMovingDeal(null);
     setMovingTo("");
+  }
+
+  async function searchEditRef(q: string) {
+    setEditRefQuery(q);
+    setEditRefId("");
+    setEditRefName("");
+    if (!q.trim() || q.trim().length < 2) { setEditRefResults([]); return; }
+    const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q.trim())}`);
+    const j = await res.json().catch(() => ({}));
+    setEditRefResults(res.ok ? (j.results ?? []) : []);
   }
 
   async function searchContacts(q: string) {
@@ -191,6 +283,9 @@ export default function PipelinePage() {
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={openNewDeal}>+ New deal</button>
+            <button className="btn" style={{ fontSize: 12 }} onClick={() => setListView(v => !v)}>
+              {listView ? "Board" : "List"}
+            </button>
             <button className="btn" style={{ fontSize: 12 }} onClick={() => setShowClosed(v => !v)}>
               {showClosed ? "Hide closed" : "Show closed"}
             </button>
@@ -201,12 +296,53 @@ export default function PipelinePage() {
         {error && <div className="alert alertError" style={{ marginTop: 10 }}>{error}</div>}
       </div>
 
-      {/* Kanban */}
+      {/* Kanban / List */}
       {activeDeals.length === 0 && !showClosed ? (
         <div className="card cardPad">
-          <div className="subtle" style={{ fontSize: 14 }}>No active deals. Add deals from a contact page.</div>
+          <div className="subtle" style={{ fontSize: 14 }}>No active deals. Click "+ New deal" to get started.</div>
+        </div>
+      ) : listView ? (
+        /* ── List view ── */
+        <div className="stack" style={{ gap: 0 }}>
+          {visibleStages.map(stage => {
+            const stageDeals = dealsByStage(stage.value);
+            if (stageDeals.length === 0) return null;
+            return (
+              <div key={stage.value}>
+                <div style={{ padding: "8px 12px", background: stage.bg, borderRadius: 8, marginBottom: 6, fontWeight: 900, fontSize: 13, color: stage.color }}>
+                  {stage.label} · {stageDeals.length} deal{stageDeals.length !== 1 ? "s" : ""}
+                  {stageValue(stage.value) > 0 && <span style={{ fontWeight: 400, marginLeft: 6 }}>{fmt(stageValue(stage.value))}</span>}
+                </div>
+                <div className="stack" style={{ gap: 6, marginBottom: 14 }}>
+                  {stageDeals.map(deal => {
+                    const close = closeDateLabel(deal.close_date);
+                    return (
+                      <div key={deal.id} className="card cardPad" style={{ cursor: "pointer", padding: "10px 14px" }} onClick={() => openDealModal(deal)}>
+                        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 800, fontSize: 13 }}>{deal.address}</div>
+                            {deal.contacts && (
+                              <a href={`/contacts/${deal.contacts.id}`} style={{ fontSize: 12, color: "rgba(18,18,18,.6)", textDecoration: "none", fontWeight: 700 }} onClick={e => e.stopPropagation()}>
+                                {deal.contacts.display_name}
+                              </a>
+                            )}
+                          </div>
+                          <div className="row" style={{ gap: 4, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(0,0,0,.05)", textTransform: "capitalize" }}>{deal.role}</span>
+                            {deal.price && <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(0,0,0,.05)", fontWeight: 700 }}>{fmt(deal.price)}</span>}
+                            {close && <span style={{ fontSize: 11, fontWeight: 700, color: close.overdue ? "#8a0000" : "#92610a" }}>{close.label}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
+        /* ── Board view ── */
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${visibleStages.length}, minmax(220px, 1fr))`, gap: 12, overflowX: "auto" }}>
           {visibleStages.map(stage => {
             const stageDeals = dealsByStage(stage.value);
@@ -235,7 +371,7 @@ export default function PipelinePage() {
                       key={deal.id}
                       className="card cardPad"
                       style={{ cursor: "pointer", padding: "12px 14px", transition: "box-shadow .15s" }}
-                      onClick={() => { setMovingDeal(deal); setMovingTo(deal.status); }}
+                      onClick={() => openDealModal(deal)}
                     >
                       {/* Address */}
                       <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 6 }}>{deal.address}</div>
@@ -415,48 +551,159 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* Move stage modal */}
+      {/* Deal edit modal */}
       {movingDeal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 999 }}>
-          <div className="card cardPad" style={{ width: "min(480px, 100%)" }}>
-            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 4 }}>{movingDeal.address}</div>
-            {movingDeal.contacts && (
-              <div className="subtle" style={{ fontSize: 13, marginBottom: 16 }}>{movingDeal.contacts.display_name}</div>
-            )}
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 999, overflowY: "auto" }}>
+          <div className="card cardPad" style={{ width: "min(520px, 100%)", maxHeight: "90vh", overflowY: "auto" }}>
+            {/* Header */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>{movingDeal.address}</div>
+              {movingDeal.contacts && (
+                <div className="subtle" style={{ fontSize: 13, marginTop: 2 }}>{movingDeal.contacts.display_name}</div>
+              )}
+            </div>
 
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>Move to stage</div>
-            <div className="stack" style={{ gap: 6, marginBottom: 16 }}>
-              {STAGES.map(s => (
-                <button
-                  key={s.value}
-                  onClick={() => setMovingTo(s.value)}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    border: movingTo === s.value ? `2px solid ${s.color}` : "1px solid rgba(0,0,0,.1)",
-                    background: movingTo === s.value ? s.bg : "transparent",
-                    color: s.color,
-                    fontWeight: movingTo === s.value ? 900 : 500,
-                    fontSize: 14,
-                    cursor: "pointer",
-                    textAlign: "left",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  {movingTo === s.value && <span style={{ fontWeight: 900 }}>✓</span>}
-                  {s.label}
-                  {s.value === movingDeal.status && <span style={{ fontSize: 11, opacity: 0.6, marginLeft: "auto" }}>current</span>}
+            {/* Tabs */}
+            <div className="row" style={{ gap: 0, marginBottom: 16, borderBottom: "2px solid rgba(0,0,0,.08)" }}>
+              {(["stage", "details", "activity"] as const).map(tab => (
+                <button key={tab} onClick={() => setEditTab(tab)} style={{ padding: "6px 16px", fontWeight: editTab === tab ? 900 : 500, fontSize: 13, background: "none", border: "none", cursor: "pointer", borderBottom: editTab === tab ? "2px solid var(--ink)" : "2px solid transparent", marginBottom: -2, color: editTab === tab ? "var(--ink)" : "rgba(18,18,18,.45)", textTransform: "capitalize" }}>
+                  {tab}{tab === "activity" && activities.length > 0 ? ` (${activities.length})` : ""}
                 </button>
               ))}
             </div>
 
+            {editTab === "stage" && (
+              <div className="stack" style={{ gap: 6, marginBottom: 16 }}>
+                {STAGES.map(s => (
+                  <button key={s.value} onClick={() => setMovingTo(s.value)} style={{ padding: "10px 14px", borderRadius: 8, border: movingTo === s.value ? `2px solid ${s.color}` : "1px solid rgba(0,0,0,.1)", background: movingTo === s.value ? s.bg : "transparent", color: s.color, fontWeight: movingTo === s.value ? 900 : 500, fontSize: 14, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}>
+                    {movingTo === s.value && <span style={{ fontWeight: 900 }}>✓</span>}
+                    {s.label}
+                    {s.value === movingDeal.status && <span style={{ fontSize: 11, opacity: 0.6, marginLeft: "auto" }}>current</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {editTab === "details" && (
+              <div className="stack" style={{ gap: 14, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Address</div>
+                  <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} />
+                </div>
+                <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Role</div>
+                    <select className="select" value={editRole} onChange={e => setEditRole(e.target.value)}>
+                      <option value="buyer">Buyer</option>
+                      <option value="seller">Seller</option>
+                      <option value="landlord">Landlord</option>
+                      <option value="tenant">Tenant</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Price</div>
+                    <input className="input" placeholder="e.g. 2500000" value={editPrice} onChange={e => setEditPrice(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Expected close date</div>
+                  <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Referral source</div>
+                  {editRefId ? (
+                    <div className="row" style={{ gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>{editRefName}</span>
+                      <button className="btn" style={{ fontSize: 11 }} onClick={() => { setEditRefId(""); setEditRefName(""); setEditRefQuery(""); }}>Clear</button>
+                    </div>
+                  ) : (
+                    <>
+                      <input className="input" placeholder="Search contact…" value={editRefQuery} onChange={e => searchEditRef(e.target.value)} />
+                      {editRefResults.length > 0 && (
+                        <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                          {editRefResults.slice(0, 4).map(r => (
+                            <div key={r.id} style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid rgba(0,0,0,.06)" }} onClick={() => { setEditRefId(r.id); setEditRefName(r.display_name); setEditRefResults([]); setEditRefQuery(r.display_name); }}>
+                              <strong>{r.display_name}</strong>
+                              <span style={{ marginLeft: 8, color: "rgba(18,18,18,.45)", fontSize: 12 }}>{r.category}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Notes</div>
+                  <textarea className="textarea" rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
+                </div>
+              </div>
+            )}
+
+            {editTab === "activity" && (
+              <div style={{ marginBottom: 16 }}>
+                {/* Add entry */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  <select className="select" value={activityType} onChange={e => setActivityType(e.target.value)} style={{ width: 150, flexShrink: 0 }}>
+                    <option value="note">Note</option>
+                    <option value="showing_feedback">Showing feedback</option>
+                    <option value="offer">Offer</option>
+                    <option value="price_change">Price change</option>
+                    <option value="status_change">Status change</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <input
+                    className="input"
+                    style={{ flex: 1, minWidth: 160 }}
+                    placeholder="Add a note…"
+                    value={activityNote}
+                    onChange={e => setActivityNote(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addActivity()}
+                  />
+                  <button className="btn btnPrimary" onClick={addActivity} disabled={activitySaving || !activityNote.trim()} style={{ flexShrink: 0 }}>
+                    {activitySaving ? "…" : "Add"}
+                  </button>
+                </div>
+
+                {/* Log */}
+                {activityLoading ? (
+                  <div className="subtle" style={{ fontSize: 13 }}>Loading…</div>
+                ) : activities.length === 0 ? (
+                  <div className="subtle" style={{ fontSize: 13 }}>No activity yet. Add notes, showing feedback, offers, and price changes here.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {activities.map((a, i) => {
+                      const typeLabel: Record<string, string> = { note: "Note", showing_feedback: "Showing", offer: "Offer", price_change: "Price", status_change: "Status", other: "Other" };
+                      const typeColor: Record<string, string> = { offer: "#1a3f8a", price_change: "#92610a", showing_feedback: "#0b6b2a", status_change: "#5a2d8a", note: "rgba(18,18,18,.5)", other: "rgba(18,18,18,.5)" };
+                      return (
+                        <div key={a.id} style={{ padding: "10px 0", borderBottom: i < activities.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 3 }}>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: typeColor[a.activity_type] ?? "rgba(18,18,18,.5)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                {typeLabel[a.activity_type] ?? a.activity_type}
+                              </span>
+                              <span style={{ fontSize: 11, color: "rgba(18,18,18,.35)" }}>
+                                {new Date(a.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 13, lineHeight: 1.45 }}>{a.note}</div>
+                          </div>
+                          <button onClick={() => deleteActivity(a.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "rgba(18,18,18,.3)", padding: "0 4px", flexShrink: 0 }}>✕</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="row" style={{ gap: 8 }}>
-              <button className="btn btnPrimary" onClick={moveStage} disabled={saving || movingTo === movingDeal.status}>
-                {saving ? "Saving…" : "Move"}
-              </button>
-              <button className="btn" onClick={() => { setMovingDeal(null); setMovingTo(""); }}>Cancel</button>
+              {editTab !== "activity" && (
+                <button className="btn btnPrimary" onClick={saveDeal} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              )}
+              <button className="btn" onClick={() => setMovingDeal(null)}>Close</button>
               <a className="btn" href={`/contacts/${movingDeal.contact_id}`} style={{ textDecoration: "none", marginLeft: "auto" }}>
                 Open contact →
               </a>

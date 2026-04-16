@@ -38,23 +38,37 @@ export async function GET(req: Request) {
   }
 }
 
-// PATCH /api/pipeline — update deal stage
+// PATCH /api/pipeline — update deal (stage and/or other fields)
 export async function PATCH(req: Request) {
   try {
     const uid = await getVerifiedUid();
     if (!uid) return unauthorized();
 
     const body = await req.json().catch(() => ({}));
-    const { id, status } = body;
+    const { id, status, address, role, price, close_date, notes, referral_source_contact_id } = body;
 
     const validStatuses = ["lead", "showing", "offer_in", "under_contract", "closed_won", "closed_lost"];
-    if (!id || !validStatuses.includes(status)) {
-      return NextResponse.json({ error: "Invalid id or status" }, { status: 400 });
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+    if (status && !validStatuses.includes(status)) {
+      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (status !== undefined) updates.status = status;
+    if (address !== undefined) updates.address = address;
+    if (role !== undefined) updates.role = role;
+    if (price !== undefined) updates.price = price;
+    if (close_date !== undefined) updates.close_date = close_date;
+    if (notes !== undefined) updates.notes = notes;
+    if (referral_source_contact_id !== undefined) updates.referral_source_contact_id = referral_source_contact_id;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
     }
 
     const { error } = await supabaseAdmin
       .from("deals")
-      .update({ status })
+      .update(updates)
       .eq("id", id)
       .eq("user_id", uid);
 

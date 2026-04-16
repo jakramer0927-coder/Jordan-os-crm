@@ -125,19 +125,8 @@ export async function POST(req: Request) {
       .from("user_settings")
       .upsert({ user_id: uid, last_calendar_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
 
-    // Debug: sample of attendee emails seen vs contact emails
-    const sampleAttendees: string[] = [];
-    for (const event of events.slice(0, 20)) {
-      if (!event.start?.dateTime) continue;
-      for (const a of event.attendees ?? []) {
-        if (!a.self && a.email) sampleAttendees.push(a.email.toLowerCase());
-      }
-    }
-    const contactEmails = [...emailToContactId.keys()].slice(0, 20);
-
-    return NextResponse.json({ ok: true, imported, skipped, events_scanned: events.length, debug: { sample_attendee_emails: [...new Set(sampleAttendees)].slice(0, 20), sample_contact_emails: contactEmails, contacts_with_email: emailToContactId.size } });
+    return NextResponse.json({ ok: true, imported, skipped, events_scanned: events.length });
   } catch (e) {
-    const msg = (e as any)?.message ?? String(e);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return serverError("CALENDAR_SYNC_CRASH", e);
   }
 }
