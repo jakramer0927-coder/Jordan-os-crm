@@ -194,6 +194,17 @@ export default function InsightsPage() {
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [refUpdating, setRefUpdating] = useState<string | null>(null);
 
+  // Intro opportunities
+  type IntroOpportunity = {
+    key: string;
+    contact_a: { id: string; display_name: string; category: string; tier: string | null };
+    contact_b: { id: string; display_name: string; category: string; tier: string | null };
+    reason: string;
+    score: number;
+  };
+  const [introOpps, setIntroOpps] = useState<IntroOpportunity[]>([]);
+  const [loggedIntros, setLoggedIntros] = useState<Set<string>>(new Set());
+
   // Database health
   const [contactsTotal, setContactsTotal] = useState(0);
   const [agentsTotal, setAgentsTotal] = useState(0);
@@ -510,6 +521,81 @@ export default function InsightsPage() {
     }
     opps.sort((a, b) => b.score - a.score);
     setRefOpportunities(opps.slice(0, 10));
+
+    // ── 7. Intro opportunities ────────────────────────────────────────────────
+    // Fetch buyer profile contacts
+    const { data: buyerProfiles } = await supabase
+      .from("contacts")
+      .select("id, display_name, category, tier, buyer_budget_min, buyer_budget_max, buyer_target_areas")
+      .not("buyer_target_areas", "is", null)
+      .neq("archived", true)
+      .limit(500);
+
+    // Agents that are Tier A or B
+    const topAgents = cs.filter(c => (c.category || "").toLowerCase() === "agent" && ["A", "B"].includes((c.tier || "").toUpperCase()));
+
+    const intros: IntroOpportunity[] = [];
+
+    // Buyer + Agent intro: buyer looking in an area where an agent specializes
+    for (const buyer of (buyerProfiles ?? [])) {
+      const areas = (buyer.buyer_target_areas || "").toLowerCase();
+      if (!areas) continue;
+
+      for (const agent of topAgents) {
+        if (agent.id === buyer.id) continue;
+        // Simple heuristic: if the agent's name or notes mention area keywords
+        // Since we don't have agent area data, pair all top agents with active buyers
+        // but score higher for Tier A agents
+        const tierBonus = (agent.tier || "").toUpperCase() === "A" ? 30 : 15;
+        const buyerTierBonus = (buyer.tier || "").toUpperCase() === "A" ? 20 : (buyer.tier || "").toUpperCase() === "B" ? 10 : 0;
+        const score = 40 + tierBonus + buyerTierBonus;
+        const budgetStr = buyer.buyer_budget_min || buyer.buyer_budget_max
+          ? ` ($${(buyer.buyer_budget_min as number | null)?.toLocaleString() ?? "?"}–$${(buyer.buyer_budget_max as number | null)?.toLocaleString() ?? "?"})`
+          : "";
+        intros.push({
+          key: `${buyer.id}__${agent.id}`,
+          contact_a: { id: buyer.id, display_name: buyer.display_name, category: buyer.category, tier: buyer.tier },
+          contact_b: { id: agent.id, display_name: agent.display_name, category: agent.category, tier: agent.tier },
+          reason: `${buyer.display_name} is buying in ${buyer.buyer_target_areas}${budgetStr} — ${agent.display_name} is a Tier ${agent.tier} agent`,
+          score,
+        });
+      }
+    }
+
+    // Past clients intro: two past clients who might know each other (same category, high tier, not recently touched)
+    const pastClients = cs.filter(c => {
+      const cat = (c.category || "").toLowerCase();
+      const ct = loMap.get(c.id) ?? null;
+      const tier = (c.tier || "").toUpperCase();
+      return cat === "client" && tier === "A" && (!ct || daysSince(ct) > 45);
+    });
+
+    // Pair past clients with agents they haven't interacted with
+    for (const client of pastClients.slice(0, 20)) {
+      for (const agent of topAgents.slice(0, 5)) {
+        if (agent.id === client.id) continue;
+        const lastOut = loMap.get(client.id) ?? null;
+        const dormantDays = lastOut ? daysSince(lastOut) : 999;
+        if (dormantDays < 30) continue; // recently touched, don't suggest intro as re-engagement
+        intros.push({
+          key: `${client.id}__${agent.id}__agent_intro`,
+          contact_a: { id: client.id, display_name: client.display_name, category: client.category, tier: client.tier },
+          contact_b: { id: agent.id, display_name: agent.display_name, category: agent.category, tier: agent.tier },
+          reason: `${client.display_name} (past client, ${dormantDays}d dormant) — introducing to agent ${agent.display_name} could warm both relationships`,
+          score: 20 + ((agent.tier || "").toUpperCase() === "A" ? 15 : 5),
+        });
+      }
+    }
+
+    // Deduplicate + sort + take top 8
+    const seen = new Set<string>();
+    const uniqueIntros = intros.filter(i => {
+      if (seen.has(i.key)) return false;
+      seen.add(i.key);
+      return true;
+    });
+    uniqueIntros.sort((a, b) => b.score - a.score);
+    setIntroOpps(uniqueIntros.slice(0, 8));
   }
 
   async function updateOutcome(touchId: string, outcome: "pending" | "converted" | "closed") {
@@ -893,6 +979,57 @@ export default function InsightsPage() {
           </div>
           <div className="subtle" style={{ fontSize: 11, marginTop: 12 }}>
             Refreshes on next page load. Only shows contacts not asked in the last 30 days.
+          </div>
+        </div>
+      )}
+
+      {/* ── Intro Opportunities ─────────────────────────────────────────────── */}
+      {introOpps.length > 0 && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Intro opportunities</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>
+            Connections in your network that could benefit from knowing each other — make the intro, strengthen both relationships
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {introOpps.map((opp, i) => {
+              const logged = loggedIntros.has(opp.key);
+              return (
+                <div
+                  key={opp.key}
+                  style={{
+                    padding: "12px 0",
+                    borderBottom: i < introOpps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined,
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
+                    opacity: logged ? 0.5 : 1,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
+                      <a href={`/contacts/${opp.contact_a.id}`} style={{ fontWeight: 800, fontSize: 14 }}>{opp.contact_a.display_name}</a>
+                      <span className="subtle" style={{ fontSize: 12 }}>{opp.contact_a.category}{opp.contact_a.tier ? ` · ${opp.contact_a.tier}` : ""}</span>
+                      <span style={{ color: "rgba(18,18,18,.35)", fontSize: 14 }}>↔</span>
+                      <a href={`/contacts/${opp.contact_b.id}`} style={{ fontWeight: 800, fontSize: 14 }}>{opp.contact_b.display_name}</a>
+                      <span className="subtle" style={{ fontSize: 12 }}>{opp.contact_b.category}{opp.contact_b.tier ? ` · ${opp.contact_b.tier}` : ""}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "rgba(18,18,18,.55)", lineHeight: 1.5 }}>{opp.reason}</div>
+                  </div>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 12, flexShrink: 0 }}
+                    onClick={() => setLoggedIntros((prev) => new Set([...prev, opp.key]))}
+                    disabled={logged}
+                  >
+                    {logged ? "Done ✓" : "Mark done"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="subtle" style={{ fontSize: 11, marginTop: 12 }}>
+            Based on active buyers, top agents, and relationship patterns. Refreshes on page load.
           </div>
         </div>
       )}
