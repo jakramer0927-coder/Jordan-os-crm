@@ -311,7 +311,7 @@ function ContactTimeline({ contact, touches, deals, followUps }: {
 
   // Deal created events
   for (const d of deals) {
-    items.push({ kind: "deal_created", date: new Date(d.created_at), deal: d, label: "" });
+    items.push({ kind: "deal_created", date: new Date(d.created_at), deal: d });
     if (d.status === "closed_won" || d.status === "closed_lost") {
       const closeDate = d.close_date ? new Date(d.close_date) : new Date(d.created_at);
       items.push({ kind: "deal_status", date: closeDate, deal: d, label: d.status === "closed_won" ? "Closed — won" : "Closed — lost" });
