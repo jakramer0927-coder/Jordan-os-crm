@@ -169,44 +169,34 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
   }
 
   return (
-    <div className="section" style={{ marginTop: 18 }}>
-      <div className="sectionTitleRow">
-        <div className="sectionTitle">Upload text thread</div>
-        <div className="sectionSub">
-          Paste iMessage thread text → attach to this contact → improves Jordan Voice + keeps history.
-        </div>
-      </div>
-
+    <div className="stack">
       {(err || msg) ? (
         <div className={`alert ${err ? "alertError" : "alertOk"}`}>{err || msg}</div>
       ) : null}
 
-      <div className="card cardPad stack">
-        <div className="rowResponsiveBetween">
-          <input
-            className="input"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder='Optional title (e.g., "Feb 2026 — renovation planning")'
-            style={{ flex: 1, minWidth: 240 }}
-          />
-          <button className="btn btnPrimary btnFullMobile" onClick={upload} disabled={busy}>
-            {busy ? "Importing…" : "Import"}
-          </button>
-        </div>
-
-        <textarea
-          className="textarea"
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: Yeah, Bosch has a good one...`}
-          style={{ minHeight: 220 }}
+      <div className="rowResponsiveBetween">
+        <input
+          className="input"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder=’Optional title (e.g., "Feb 2026 — renovation planning")’
+          style={{ flex: 1, minWidth: 240 }}
         />
+        <button className="btn btnPrimary btnFullMobile" onClick={upload} disabled={busy}>
+          {busy ? "Importing…" : "Import"}
+        </button>
+      </div>
 
-        <div className="muted small">
-          Tip: iPhone → Messages → open thread → select text → copy → paste here. Even if parsing isn’t perfect, the raw
-          thread is saved.
-        </div>
+      <textarea
+        className="textarea"
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        placeholder={`Paste an iMessage thread here.\n\nExample:\nJordan: Hey — quick check-in...\nAli: Yeah, Bosch has a good one...`}
+        style={{ minHeight: 220 }}
+      />
+
+      <div className="subtle" style={{ fontSize: 12 }}>
+        Tip: iPhone → Messages → open thread → select text → copy → paste here.
       </div>
     </div>
   );
@@ -1387,13 +1377,6 @@ export default function ContactDetailPage() {
             );
           })()}
 
-          {/* Text thread upload */}
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Upload text thread</div>
-          <div className="subtle" style={{ fontSize: 12 }}>Paste iMessage thread → attach to this contact → improves AI drafts.</div>
-          <TextThreadUploadPanel contactId={contact.id} />
-
-          <div className="hr" />
-
           {/* Danger zone */}
           <div>
             <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
@@ -1436,6 +1419,15 @@ export default function ContactDetailPage() {
             No AI summary yet — add notes, touches, or deals, then click Generate.
           </div>
         )}
+      </div>
+
+      {/* ── TEXT THREAD UPLOAD ─────────────────────────────────────────────── */}
+      <div className="card cardPad stack">
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>Upload text thread</div>
+          <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Paste an iMessage thread → improves AI drafts and relationship intelligence</div>
+        </div>
+        <TextThreadUploadPanel contactId={contact.id} />
       </div>
 
       {/* ── ACTIVE DEALS ───────────────────────────────────────────────────── */}
