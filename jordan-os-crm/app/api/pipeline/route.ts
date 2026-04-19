@@ -114,8 +114,8 @@ export async function POST(req: Request) {
     if (motivation) insert.motivation = motivation;
     if (timeline_notes) insert.timeline_notes = timeline_notes;
 
-    // Seller fields
-    if (address) insert.address = address;
+    // Seller fields — always set address (empty string satisfies legacy NOT NULL constraint)
+    insert.address = address?.trim() || "";
     if (list_price != null) insert.list_price = list_price;
     if (estimated_value != null) insert.estimated_value = estimated_value;
     if (market_notes) insert.market_notes = market_notes;
