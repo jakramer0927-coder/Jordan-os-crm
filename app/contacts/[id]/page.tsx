@@ -179,7 +179,7 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
           className="input"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder=’Optional title (e.g., "Feb 2026 — renovation planning")’
+          placeholder={"Optional title (e.g., 'Feb 2026 — renovation planning')"}
           style={{ flex: 1, minWidth: 240 }}
         />
         <button className="btn btnPrimary btnFullMobile" onClick={upload} disabled={busy}>
