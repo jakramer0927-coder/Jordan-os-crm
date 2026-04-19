@@ -764,7 +764,7 @@ export default function PipelinePage() {
                   {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
                 </div>
               </div>
-              {stageDeal.map(d => <DealCard key={d.id} deal={d} />)}
+              {stageDeal.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
               {stageDeal.length === 0 && <div className="subtle" style={{ fontSize: 12, padding: "8px 0" }}>—</div>}
             </div>
           );
@@ -788,7 +788,7 @@ export default function PipelinePage() {
                   {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
                 </div>
               </div>
-              {stageDeal.map(d => <DealCard key={d.id} deal={d} />)}
+              {stageDeal.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
               {stageDeal.length === 0 && <div className="subtle" style={{ fontSize: 12, padding: "8px 0" }}>—</div>}
             </div>
           );
@@ -801,7 +801,7 @@ export default function PipelinePage() {
     if (investors.length === 0) return <div className="subtle">No active investors — add one with + New.</div>;
     return (
       <div className="stack">
-        {investors.map(d => <DealCard key={d.id} deal={d} />)}
+        {investors.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
       </div>
     );
   }
@@ -1596,14 +1596,14 @@ export default function PipelinePage() {
 
       {/* ── Tab content ── */}
       <div className="card cardPad">
-        {mainTab === "buyers"      && <BuyerKanban />}
-        {mainTab === "sellers"     && <SellerKanban />}
-        {mainTab === "investors"   && <InvestorView />}
-        {mainTab === "past_clients" && <PastClientView />}
+        {mainTab === "buyers"      && BuyerKanban()}
+        {mainTab === "sellers"     && SellerKanban()}
+        {mainTab === "investors"   && InvestorView()}
+        {mainTab === "past_clients" && PastClientView()}
       </div>
 
-      {selectedDeal && <DealModal />}
-      <NewDealModal />
+      {selectedDeal && DealModal()}
+      {NewDealModal()}
     </div>
   );
 }
