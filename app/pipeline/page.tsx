@@ -274,6 +274,13 @@ export default function PipelinePage() {
   const [contactRole, setContactRole] = useState("co-buyer");
   const [contactAdding, setContactAdding] = useState(false);
 
+  // Drag & drop
+  const [draggedDealId, setDraggedDealId] = useState<string | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
+  // Progressive disclosure in details tab
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+
   // New deal modal
   const [newOpen, setNewOpen] = useState(false);
   const [newType, setNewType] = useState<OppType>("buyer");
@@ -353,6 +360,52 @@ export default function PipelinePage() {
     setEditCoAgentId(deal.co_agent?.id ?? "");
     setEditCoAgentName(deal.co_agent?.display_name ?? "");
     setEditCoAgentQuery(deal.co_agent?.display_name ?? "");
+    // Auto-expand advanced section if any advanced fields have data
+    setDetailsExpanded(!!(
+      deal.pipeline_status !== "active" ||
+      deal.motivation || deal.timeline_notes ||
+      deal.pre_approval_amount || deal.pre_approval_lender ||
+      deal.estimated_value || deal.target_list_date || deal.market_notes || deal.cma_link ||
+      deal.price || deal.close_date || deal.commission_pct || deal.referral_fee_pct ||
+      deal.referral_fee_contact || deal.co_agent
+    ));
+  }
+
+  // ── Quick stage advance (card button) ────────────────────────────────────
+  async function advanceStage(deal: Deal, e: React.MouseEvent) {
+    e.stopPropagation();
+    const isSeller = deal.opp_type === "seller";
+    const stages = isSeller ? SELLER_STAGES : BUYER_STAGES;
+    const currentVal = isSeller ? deal.seller_stage : deal.buyer_stage;
+    const idx = stages.findIndex(s => s.value === currentVal);
+    const next = stages[idx + 1];
+    if (!next) return;
+    const field = isSeller ? "seller_stage" : "buyer_stage";
+    setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, [field]: next.value } : d));
+    await fetch("/api/pipeline", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: deal.id, [field]: next.value }),
+    });
+  }
+
+  // ── Drag & drop stage change ──────────────────────────────────────────────
+  async function dropOnStage(stageValue: string, oppType: "buyer" | "seller") {
+    const id = draggedDealId;
+    setDraggedDealId(null);
+    setDragOverStage(null);
+    if (!id) return;
+    const deal = deals.find(d => d.id === id);
+    if (!deal) return;
+    const field = oppType === "seller" ? "seller_stage" : "buyer_stage";
+    const current = oppType === "seller" ? deal.seller_stage : deal.buyer_stage;
+    if (current === stageValue) return;
+    setDeals(prev => prev.map(d => d.id === id ? { ...d, [field]: stageValue } : d));
+    await fetch("/api/pipeline", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, [field]: stageValue }),
+    });
   }
 
   // ── Modal tab switch + lazy load ──────────────────────────────────────────
@@ -726,90 +779,113 @@ export default function PipelinePage() {
 
   function DealCard({ deal }: { deal: Deal }) {
     const isBuyer = deal.opp_type !== "seller";
-    const stage = isBuyer
-      ? buyerStageConfig(deal.buyer_stage ?? "initial_meeting")
-      : sellerStageConfig(deal.seller_stage ?? "initial_meeting");
+    const stages = isBuyer ? BUYER_STAGES : SELLER_STAGES;
+    const currentVal = isBuyer ? deal.buyer_stage : deal.seller_stage;
+    const stageIdx = stages.findIndex(s => s.value === currentVal);
+    const nextStage = stages[stageIdx + 1] ?? null;
     const gci = estGci(deal);
-    const days = daysSince(deal.created_at);
     const name = deal.contacts?.display_name ?? "Unknown";
+    const isDragging = draggedDealId === deal.id;
 
     return (
       <div
         className="card cardPad"
-        style={{ cursor: "pointer", marginBottom: 8 }}
-        onClick={() => { openDeal(deal); setOffers([]); setPrepItems([]); setActivities([]); setOppContacts([]); }}
+        draggable
+        onDragStart={e => { e.stopPropagation(); setDraggedDealId(deal.id); }}
+        onDragEnd={() => { setDraggedDealId(null); setDragOverStage(null); }}
+        style={{ cursor: "grab", marginBottom: 8, opacity: isDragging ? 0.4 : 1, transition: "opacity .15s" }}
+        onClick={() => { if (!isDragging) { openDeal(deal); setOffers([]); setPrepItems([]); setActivities([]); setOppContacts([]); } }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-          <div style={{ fontWeight: 800, fontSize: 14 }}>{name}</div>
-          <StageChip label={stage.label} color={stage.color} bg={stage.bg} />
-        </div>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{name}</div>
 
-        {isBuyer && (deal.budget_max || deal.target_areas) && (
-          <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>
+        {(deal.address) && (
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>{deal.address}</div>
+        )}
+        {isBuyer && !deal.address && (deal.budget_max || deal.target_areas) && (
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>
             {deal.budget_max ? fmt(deal.budget_max) : ""}
             {deal.budget_max && deal.target_areas ? " · " : ""}
             {deal.target_areas ?? ""}
           </div>
         )}
-        {!isBuyer && deal.address && (
-          <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>{deal.address}</div>
-        )}
-        {!isBuyer && (deal.list_price || deal.estimated_value) && (
-          <div className="subtle" style={{ fontSize: 12 }}>{fmt(deal.list_price ?? deal.estimated_value)}</div>
+        {!isBuyer && !deal.address && (deal.list_price || deal.estimated_value) && (
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>{fmt(deal.list_price ?? deal.estimated_value)}</div>
         )}
 
-        <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: "wrap" }}>
-          {gci && <GciChip value={gci} />}
-          <span className="subtle" style={{ fontSize: 11 }}>{daysLabel(days)} in pipeline</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 6 }}>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {gci && <GciChip value={gci} />}
+          </div>
+          {nextStage && (
+            <button
+              className="btn"
+              style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, color: nextStage.color, borderColor: nextStage.color + "55" }}
+              onClick={e => advanceStage(deal, e)}
+              title={`Move to ${nextStage.label}`}
+            >
+              → {nextStage.label}
+            </button>
+          )}
         </div>
+      </div>
+    );
+  }
+
+  function KanbanColumn({ stage, deals: colDeals, oppType, singular }: {
+    stage: { value: string; label: string; color: string; bg: string };
+    deals: Deal[];
+    oppType: "buyer" | "seller";
+    singular: string;
+  }) {
+    const isOver = dragOverStage === stage.value;
+    const stageGci = colDeals.reduce((s, d) => s + (estGci(d) ?? 0), 0);
+    return (
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOverStage(stage.value); }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverStage(null); }}
+        onDrop={() => dropOnStage(stage.value, oppType)}
+        style={{
+          minHeight: 80,
+          borderRadius: 8,
+          border: isOver ? `2px solid ${stage.color}` : "2px solid transparent",
+          background: isOver ? stage.bg : "transparent",
+          transition: "border-color .15s, background .15s",
+          padding: isOver ? "6px" : "0",
+        }}
+      >
+        <div style={{ marginBottom: 8, padding: isOver ? "0" : undefined }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: stage.color }}>{stage.label}</div>
+          <div className="subtle" style={{ fontSize: 11 }}>
+            {colDeals.length} {colDeals.length === 1 ? singular : singular + "s"}
+            {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
+          </div>
+        </div>
+        {colDeals.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
+        {colDeals.length === 0 && (
+          <div style={{ fontSize: 12, color: "rgba(18,18,18,.25)", padding: "12px 0", textAlign: "center", borderRadius: 6, border: "1px dashed rgba(18,18,18,.12)" }}>
+            Drop here
+          </div>
+        )}
       </div>
     );
   }
 
   function BuyerKanban() {
     return (
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(200px, 1fr))`, gap: 12, overflowX: "auto" }}>
-        {BUYER_STAGES.map(stage => {
-          const stageDeal = buyers.filter(d => d.buyer_stage === stage.value);
-          const stageGci = stageDeal.reduce((s, d) => s + (estGci(d) ?? 0), 0);
-          return (
-            <div key={stage.value}>
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, color: stage.color }}>{stage.label}</div>
-                <div className="subtle" style={{ fontSize: 11 }}>
-                  {stageDeal.length} {stageDeal.length === 1 ? "buyer" : "buyers"}
-                  {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
-                </div>
-              </div>
-              {stageDeal.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
-              {stageDeal.length === 0 && <div className="subtle" style={{ fontSize: 12, padding: "8px 0" }}>—</div>}
-            </div>
-          );
-        })}
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(190px, 1fr))`, gap: 12, overflowX: "auto" }}>
+        {BUYER_STAGES.map(stage => (
+          <div key={stage.value}>{KanbanColumn({ stage, deals: buyers.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "buyer" })}</div>
+        ))}
       </div>
     );
   }
 
   function SellerKanban() {
     return (
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(200px, 1fr))`, gap: 12, overflowX: "auto" }}>
-        {SELLER_STAGES.map(stage => {
-          const stageDeal = sellers.filter(d => d.seller_stage === stage.value);
-          const stageGci = stageDeal.reduce((s, d) => s + (estGci(d) ?? 0), 0);
-          return (
-            <div key={stage.value}>
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, color: stage.color }}>{stage.label}</div>
-                <div className="subtle" style={{ fontSize: 11 }}>
-                  {stageDeal.length} {stageDeal.length === 1 ? "seller" : "sellers"}
-                  {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
-                </div>
-              </div>
-              {stageDeal.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
-              {stageDeal.length === 0 && <div className="subtle" style={{ fontSize: 12, padding: "8px 0" }}>—</div>}
-            </div>
-          );
-        })}
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(190px, 1fr))`, gap: 12, overflowX: "auto" }}>
+        {SELLER_STAGES.map(stage => (
+          <div key={stage.value}>{KanbanColumn({ stage, deals: sellers.filter(d => d.seller_stage === stage.value), oppType: "seller", singular: "seller" })}</div>
+        ))}
       </div>
     );
   }
@@ -924,11 +1000,12 @@ export default function PipelinePage() {
             {/* ── Details tab ── */}
             {modalTab === "details" && (
               <div className="stack">
-                {/* Stage */}
+
+                {/* Stage selector — primary action */}
                 <div>
-                  <div className="label">Stage</div>
+                  <div className="label" style={{ marginBottom: 6 }}>Stage</div>
                   {isBuyer && (
-                    <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
                       {BUYER_STAGES.map(s => (
                         <button key={s.value} className="btn"
                           style={{ fontSize: 12, fontWeight: editBuyerStage === s.value ? 900 : 400,
@@ -942,7 +1019,7 @@ export default function PipelinePage() {
                     </div>
                   )}
                   {isSeller && (
-                    <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
                       {SELLER_STAGES.map(s => (
                         <button key={s.value} className="btn"
                           style={{ fontSize: 12, fontWeight: editSellerStage === s.value ? 900 : 400,
@@ -957,175 +1034,191 @@ export default function PipelinePage() {
                   )}
                 </div>
 
-                {/* Pipeline status */}
-                <div className="field">
-                  <div className="label">Pipeline status</div>
-                  <select className="select" value={editPipelineStatus} onChange={e => setEditPipelineStatus(e.target.value as PipelineStatus)} style={{ maxWidth: 200 }}>
-                    <option value="active">Active</option>
-                    <option value="past_client">Past client</option>
-                    <option value="lost">Lost</option>
-                  </select>
-                </div>
-
-                {/* Buyer-specific fields */}
-                {(isBuyer || isInvestor) && (
-                  <>
-                    <div className="field">
-                      <div className="label">Property address</div>
-                      <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
-                    </div>
-                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                      <div className="field" style={{ minWidth: 140 }}>
-                        <div className="label">Budget min</div>
-                        <input className="input" value={editBudgetMin} onChange={e => setEditBudgetMin(e.target.value)} placeholder="800,000" />
-                      </div>
-                      <div className="field" style={{ minWidth: 140 }}>
-                        <div className="label">Budget max</div>
-                        <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="1,500,000" />
-                      </div>
-                      <div className="field" style={{ flex: 1, minWidth: 200 }}>
-                        <div className="label">Target areas</div>
-                        <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
-                      </div>
-                    </div>
-                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                      <div className="field" style={{ minWidth: 160 }}>
-                        <div className="label">Pre-approval amount</div>
-                        <input className="input" value={editPreApproval} onChange={e => setEditPreApproval(e.target.value)} placeholder="1,200,000" />
-                      </div>
-                      <div className="field" style={{ flex: 1, minWidth: 160 }}>
-                        <div className="label">Lender</div>
-                        <input className="input" value={editPreApprovalLender} onChange={e => setEditPreApprovalLender(e.target.value)} placeholder="Bank / broker name" />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Seller-specific fields */}
-                {isSeller && (
-                  <>
-                    <div className="field">
-                      <div className="label">Property address</div>
-                      <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
-                    </div>
-                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                      <div className="field" style={{ minWidth: 160 }}>
-                        <div className="label">Estimated value</div>
-                        <input className="input" value={editEstValue} onChange={e => setEditEstValue(e.target.value)} placeholder="2,000,000" />
-                      </div>
-                      <div className="field" style={{ minWidth: 160 }}>
-                        <div className="label">List price</div>
-                        <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
-                      </div>
-                      <div className="field" style={{ minWidth: 140 }}>
-                        <div className="label">Target list date</div>
-                        <input className="input" type="date" value={editTargetListDate} onChange={e => setEditTargetListDate(e.target.value)} />
-                      </div>
-                    </div>
-                    <div className="field">
-                      <div className="label">Market notes / comps</div>
-                      <textarea className="textarea" value={editMarketNotes} onChange={e => setEditMarketNotes(e.target.value)} placeholder="3 recent comps in $1.8–2.1M range…" style={{ minHeight: 60 }} />
-                    </div>
-                    <div className="field">
-                      <div className="label">CMA link (Compass)</div>
-                      <input className="input" value={editCmaLink} onChange={e => setEditCmaLink(e.target.value)} placeholder="https://…" />
-                    </div>
-                  </>
-                )}
-
-                {/* Shared */}
-                <div className="field">
-                  <div className="label">Motivation</div>
-                  <input className="input" value={editMotivation} onChange={e => setEditMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
-                </div>
-                <div className="field">
-                  <div className="label">Timeline notes</div>
-                  <input className="input" value={editTimelineNotes} onChange={e => setEditTimelineNotes(e.target.value)} placeholder="Want to be in by summer…" />
-                </div>
-
-                {/* Financial */}
-                <div style={{ fontWeight: 700, fontSize: 13, paddingTop: 4 }}>Financials</div>
-                <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                  <div className="field" style={{ minWidth: 160 }}>
-                    <div className="label">Sale / close price</div>
-                    <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
-                  </div>
-                  <div className="field" style={{ minWidth: 140 }}>
-                    <div className="label">Close date</div>
-                    <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
-                  </div>
-                  <div className="field" style={{ minWidth: 120 }}>
-                    <div className="label">Commission %</div>
-                    <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
-                  </div>
-                  <div className="field" style={{ minWidth: 120 }}>
-                    <div className="label">Referral fee %</div>
-                    <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />
-                  </div>
-                </div>
-
-                {/* Net GCI preview */}
-                {editCommissionPct && (editPrice || editListPrice || editEstValue || editBudgetMax) && (() => {
-                  const base = editPrice || editListPrice || editEstValue || editBudgetMax;
-                  const gross = Number(base) * (Number(editCommissionPct) / 100);
-                  const refFee = editRefFeePct ? gross * (Number(editRefFeePct) / 100) : 0;
-                  const net = gross - refFee;
-                  return (
-                    <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)", fontSize: 13 }}>
-                      <span className="subtle">Est. net GCI: </span>
-                      <strong style={{ color: "#0b6b2a" }}>{fmt(net)}</strong>
-                      {refFee > 0 && <span className="subtle"> (after {fmt(refFee)} referral fee)</span>}
-                    </div>
-                  );
-                })()}
-
-                {/* Referral fee contact */}
-                <div className="field">
-                  <div className="label">Referral fee — paying to</div>
-                  <input className="input" value={editRefFeeQuery}
-                    onChange={e => { setEditRefFeeQuery(e.target.value); searchContacts(e.target.value, setEditRefFeeResults); }}
-                    placeholder="Search contacts…" />
-                  {editRefFeeResults.length > 0 && (
-                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {editRefFeeResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                          onClick={() => { setEditRefFeeId(c.id); setEditRefFeeName(c.display_name); setEditRefFeeQuery(c.display_name); setEditRefFeeResults([]); }}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {editRefFeeId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editRefFeeName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditRefFeeId(""); setEditRefFeeName(""); setEditRefFeeQuery(""); }}>remove</button></div>}
-                </div>
-
-                {/* Co-agent */}
-                <div className="field">
-                  <div className="label">Co-agent (co-listing / referral)</div>
-                  <input className="input" value={editCoAgentQuery}
-                    onChange={e => { setEditCoAgentQuery(e.target.value); searchContacts(e.target.value, setEditCoAgentResults); }}
-                    placeholder="Search contacts…" />
-                  {editCoAgentResults.length > 0 && (
-                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {editCoAgentResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                          onClick={() => { setEditCoAgentId(c.id); setEditCoAgentName(c.display_name); setEditCoAgentQuery(c.display_name); setEditCoAgentResults([]); }}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {editCoAgentId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editCoAgentName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditCoAgentId(""); setEditCoAgentName(""); setEditCoAgentQuery(""); }}>remove</button></div>}
-                </div>
-
-                {/* Notes */}
+                {/* Notes — quick capture right up top */}
                 <div className="field">
                   <div className="label">Notes</div>
-                  <textarea className="textarea" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context…" style={{ minHeight: 70 }} />
+                  <textarea className="textarea" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context, updates, or key details…" style={{ minHeight: 64 }} />
                 </div>
 
-                <div className="row" style={{ gap: 8 }}>
-                  <button className="btn btnPrimary" onClick={saveDeal} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
-                  <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.2)", marginLeft: "auto" }} onClick={deleteDeal}>Delete</button>
+                {/* Core fields — always visible */}
+                <div className="field">
+                  <div className="label">Property address</div>
+                  <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
+                </div>
+
+                {(isBuyer || isInvestor) && (
+                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div className="field" style={{ minWidth: 140 }}>
+                      <div className="label">Budget max</div>
+                      <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="1,500,000" />
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                      <div className="label">Target areas</div>
+                      <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
+                    </div>
+                  </div>
+                )}
+
+                {isSeller && (
+                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div className="field" style={{ minWidth: 140 }}>
+                      <div className="label">List price</div>
+                      <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
+                    </div>
+                    <div className="field" style={{ minWidth: 140 }}>
+                      <div className="label">Target list date</div>
+                      <input className="input" type="date" value={editTargetListDate} onChange={e => setEditTargetListDate(e.target.value)} />
+                    </div>
+                  </div>
+                )}
+
+                {/* More details expander */}
+                <button
+                  style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.45)", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }}
+                  onClick={() => setDetailsExpanded(v => !v)}
+                >
+                  <span style={{ fontSize: 10 }}>{detailsExpanded ? "▲" : "▼"}</span>
+                  {detailsExpanded ? "Hide details" : "More details — financials, pre-approval, comps, co-agent…"}
+                </button>
+
+                {detailsExpanded && (
+                  <>
+                    {/* Pipeline status */}
+                    <div className="field">
+                      <div className="label">Pipeline status</div>
+                      <select className="select" value={editPipelineStatus} onChange={e => setEditPipelineStatus(e.target.value as PipelineStatus)} style={{ maxWidth: 200 }}>
+                        <option value="active">Active</option>
+                        <option value="past_client">Past client</option>
+                        <option value="lost">Lost</option>
+                      </select>
+                    </div>
+
+                    {(isBuyer || isInvestor) && (
+                      <>
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ minWidth: 140 }}>
+                            <div className="label">Budget min</div>
+                            <input className="input" value={editBudgetMin} onChange={e => setEditBudgetMin(e.target.value)} placeholder="800,000" />
+                          </div>
+                          <div className="field" style={{ minWidth: 160 }}>
+                            <div className="label">Pre-approval amount</div>
+                            <input className="input" value={editPreApproval} onChange={e => setEditPreApproval(e.target.value)} placeholder="1,200,000" />
+                          </div>
+                          <div className="field" style={{ flex: 1, minWidth: 140 }}>
+                            <div className="label">Lender</div>
+                            <input className="input" value={editPreApprovalLender} onChange={e => setEditPreApprovalLender(e.target.value)} placeholder="Bank / broker name" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {isSeller && (
+                      <>
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ minWidth: 140 }}>
+                            <div className="label">Estimated value</div>
+                            <input className="input" value={editEstValue} onChange={e => setEditEstValue(e.target.value)} placeholder="2,000,000" />
+                          </div>
+                        </div>
+                        <div className="field">
+                          <div className="label">Market notes / comps</div>
+                          <textarea className="textarea" value={editMarketNotes} onChange={e => setEditMarketNotes(e.target.value)} placeholder="3 recent comps in $1.8–2.1M range…" style={{ minHeight: 60 }} />
+                        </div>
+                        <div className="field">
+                          <div className="label">CMA link (Compass)</div>
+                          <input className="input" value={editCmaLink} onChange={e => setEditCmaLink(e.target.value)} placeholder="https://…" />
+                        </div>
+                      </>
+                    )}
+
+                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                        <div className="label">Motivation</div>
+                        <input className="input" value={editMotivation} onChange={e => setEditMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
+                      </div>
+                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                        <div className="label">Timeline notes</div>
+                        <input className="input" value={editTimelineNotes} onChange={e => setEditTimelineNotes(e.target.value)} placeholder="Want to be in by summer…" />
+                      </div>
+                    </div>
+
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "rgba(18,18,18,.45)", paddingTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Financials</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                      <div className="field" style={{ minWidth: 150 }}>
+                        <div className="label">Sale / close price</div>
+                        <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
+                      </div>
+                      <div className="field" style={{ minWidth: 140 }}>
+                        <div className="label">Close date</div>
+                        <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
+                      </div>
+                      <div className="field" style={{ minWidth: 110 }}>
+                        <div className="label">Commission %</div>
+                        <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                      </div>
+                      <div className="field" style={{ minWidth: 110 }}>
+                        <div className="label">Referral fee %</div>
+                        <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />
+                      </div>
+                    </div>
+
+                    {editCommissionPct && (editPrice || editListPrice || editEstValue || editBudgetMax) && (() => {
+                      const base = editPrice || editListPrice || editEstValue || editBudgetMax;
+                      const gross = Number(base) * (Number(editCommissionPct) / 100);
+                      const refFee = editRefFeePct ? gross * (Number(editRefFeePct) / 100) : 0;
+                      return (
+                        <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)", fontSize: 13 }}>
+                          <span className="subtle">Est. net GCI: </span>
+                          <strong style={{ color: "#0b6b2a" }}>{fmt(gross - refFee)}</strong>
+                          {refFee > 0 && <span className="subtle"> (after {fmt(refFee)} referral fee)</span>}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="field">
+                      <div className="label">Referral fee — paying to</div>
+                      <input className="input" value={editRefFeeQuery}
+                        onChange={e => { setEditRefFeeQuery(e.target.value); searchContacts(e.target.value, setEditRefFeeResults); }}
+                        placeholder="Search contacts…" />
+                      {editRefFeeResults.length > 0 && (
+                        <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                          {editRefFeeResults.map(c => (
+                            <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
+                              onClick={() => { setEditRefFeeId(c.id); setEditRefFeeName(c.display_name); setEditRefFeeQuery(c.display_name); setEditRefFeeResults([]); }}>
+                              {c.display_name} <span className="subtle">{c.category}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {editRefFeeId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editRefFeeName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditRefFeeId(""); setEditRefFeeName(""); setEditRefFeeQuery(""); }}>remove</button></div>}
+                    </div>
+
+                    <div className="field">
+                      <div className="label">Co-agent</div>
+                      <input className="input" value={editCoAgentQuery}
+                        onChange={e => { setEditCoAgentQuery(e.target.value); searchContacts(e.target.value, setEditCoAgentResults); }}
+                        placeholder="Search contacts…" />
+                      {editCoAgentResults.length > 0 && (
+                        <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                          {editCoAgentResults.map(c => (
+                            <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
+                              onClick={() => { setEditCoAgentId(c.id); setEditCoAgentName(c.display_name); setEditCoAgentQuery(c.display_name); setEditCoAgentResults([]); }}>
+                              {c.display_name} <span className="subtle">{c.category}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {editCoAgentId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editCoAgentName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditCoAgentId(""); setEditCoAgentName(""); setEditCoAgentQuery(""); }}>remove</button></div>}
+                    </div>
+                  </>
+                )}
+
+                {/* Sticky save footer */}
+                <div style={{ position: "sticky", bottom: 0, background: "var(--paper)", paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)", marginTop: 4 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="btn btnPrimary" onClick={saveDeal} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+                    <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.2)", marginLeft: "auto" }} onClick={deleteDeal}>Delete</button>
+                  </div>
                 </div>
               </div>
             )}
