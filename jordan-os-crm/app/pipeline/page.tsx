@@ -830,7 +830,7 @@ export default function PipelinePage() {
                   <td style={{ padding: "10px 12px", fontWeight: 700 }}>{d.contacts?.display_name ?? "—"}</td>
                   <td style={{ padding: "10px 12px", textTransform: "capitalize" }}>{d.opp_type}</td>
                   <td style={{ padding: "10px 12px", color: "rgba(18,18,18,.65)" }}>
-                    {d.opp_type === "seller" ? (d.address ?? "—") : (d.target_areas ?? (d.budget_max ? fmt(d.budget_max) : "—"))}
+                    {d.address ?? (d.opp_type === "seller" ? "—" : (d.target_areas ?? (d.budget_max ? fmt(d.budget_max) : "—")))}
                   </td>
                   <td style={{ padding: "10px 12px" }}>{closeDate}</td>
                   <td style={{ padding: "10px 12px", fontWeight: gci ? 700 : 400, color: gci ? "#0b6b2a" : undefined }}>{gci ? fmt(gci) : "—"}</td>
