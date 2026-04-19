@@ -52,11 +52,22 @@ type PipelineDeal = {
   id: string;
   address: string;
   status: string;
+  opp_type: string;
+  buyer_stage: string | null;
+  seller_stage: string | null;
+  pipeline_status: string;
   price: number | null;
   close_date: string | null;
+  target_list_date: string | null;
   created_at: string;
   contact_id: string;
   contacts: { id: string; display_name: string } | null;
+};
+
+type ActivePipelineAlert = {
+  deal: PipelineDeal;
+  reason: string;
+  urgent: boolean;
 };
 
 type FollowUp = {
@@ -498,6 +509,7 @@ export default function MorningPage() {
 
   // Pipeline momentum alerts
   const [staleDealAlerts, setStaleDealAlerts] = useState<PipelineDeal[]>([]);
+  const [activePipelineAlerts, setActivePipelineAlerts] = useState<ActivePipelineAlert[]>([]);
 
   // Follow-ups
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
@@ -588,27 +600,6 @@ export default function MorningPage() {
       setFollowUps((fj.follow_ups ?? []) as FollowUp[]);
     }
 
-    if (pipelineRes.ok) {
-      const pj = await pipelineRes.json().catch(() => ({}));
-      const allDeals: PipelineDeal[] = pj.deals ?? [];
-      const today = Date.now();
-      const stale = allDeals.filter(d => {
-        const days = Math.floor((today - new Date(d.created_at).getTime()) / 86400000);
-        const thresholds: Record<string, number> = { lead: 60, showing: 30, offer_in: 14, under_contract: 60 };
-        const threshold = thresholds[d.status] ?? 999;
-        const closeOverdue = d.close_date && new Date(d.close_date) < new Date() && d.status === "under_contract";
-        return closeOverdue || days >= threshold;
-      });
-      // Sort: overdue close dates first, then by days in pipeline desc
-      stale.sort((a, b) => {
-        const aOverdue = a.close_date && new Date(a.close_date) < new Date() ? 1 : 0;
-        const bOverdue = b.close_date && new Date(b.close_date) < new Date() ? 1 : 0;
-        if (bOverdue !== aOverdue) return bOverdue - aOverdue;
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      });
-      setStaleDealAlerts(stale);
-    }
-
     if (!contactsRes.ok) {
       const j = await contactsRes.json().catch(() => ({}));
       setError(`Load error: ${(j as any).error ?? contactsRes.statusText}`);
@@ -617,10 +608,70 @@ export default function MorningPage() {
     }
 
     const { contacts: merged, todayCount: tc, wtdCount: wc } = await contactsRes.json();
-
     setContacts((merged ?? []) as ContactWithLastOutbound[]);
     setTodayCount(tc ?? 0);
     setWtdCount(wc ?? 0);
+
+    if (pipelineRes.ok) {
+      const pj = await pipelineRes.json().catch(() => ({}));
+      const allDeals: PipelineDeal[] = pj.deals ?? [];
+      const now = Date.now();
+
+      // Stale deal momentum alerts (legacy status-based)
+      const stale = allDeals.filter(d => {
+        const days = Math.floor((now - new Date(d.created_at).getTime()) / 86400000);
+        const thresholds: Record<string, number> = { lead: 60, showing: 30, offer_in: 14, under_contract: 60 };
+        const threshold = thresholds[d.status] ?? 999;
+        const closeOverdue = d.close_date && new Date(d.close_date) < new Date() && d.status === "under_contract";
+        return closeOverdue || days >= threshold;
+      });
+      stale.sort((a, b) => {
+        const aOverdue = a.close_date && new Date(a.close_date) < new Date() ? 1 : 0;
+        const bOverdue = b.close_date && new Date(b.close_date) < new Date() ? 1 : 0;
+        if (bOverdue !== aOverdue) return bOverdue - aOverdue;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+      setStaleDealAlerts(stale);
+
+      // Active pipeline touch alerts — buyers/sellers untouched 7+ days, or seller near target_list_date
+      const contactDaysSince: Record<string, number | null> = {};
+      for (const c of (merged ?? []) as ContactWithLastOutbound[]) {
+        contactDaysSince[c.id] = c.days_since_outbound ?? null;
+      }
+
+      const pipelineAlerts: ActivePipelineAlert[] = [];
+      const seen = new Set<string>();
+
+      for (const deal of allDeals) {
+        if (!["buyer", "seller"].includes(deal.opp_type)) continue;
+        if (deal.pipeline_status !== "active") continue;
+        if (seen.has(deal.contact_id)) continue;
+
+        // Seller near target_list_date — always surface if within 30 days
+        if (deal.opp_type === "seller" && deal.target_list_date) {
+          const daysToList = Math.ceil((new Date(deal.target_list_date).getTime() - now) / 86400000);
+          if (daysToList >= 0 && daysToList <= 30) {
+            const label = daysToList === 0 ? "Target list date is today" : `Target list date in ${daysToList}d`;
+            pipelineAlerts.push({ deal, reason: label, urgent: daysToList <= 7 });
+            seen.add(deal.contact_id);
+            continue;
+          }
+        }
+
+        // Untouched 7+ days
+        const d = contactDaysSince[deal.contact_id];
+        const untouched = d == null || d >= 7;
+        if (untouched) {
+          const typeLabel = deal.opp_type === "buyer" ? "Active buyer" : "Active seller";
+          const touchLabel = d == null ? "never touched" : `${d}d since last touch`;
+          pipelineAlerts.push({ deal, reason: `${typeLabel} — ${touchLabel}`, urgent: d == null || d >= 14 });
+          seen.add(deal.contact_id);
+        }
+      }
+
+      setActivePipelineAlerts(pipelineAlerts);
+    }
+
     setLoading(false);
   }
 
@@ -1310,6 +1361,43 @@ export default function MorningPage() {
                       </div>
                     </div>
                     <a className="btn" href="/pipeline" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>View →</a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Active pipeline — check-in needed ── */}
+      {activePipelineAlerts.length > 0 && (
+        <div className="section" style={{ marginTop: 12 }}>
+          <div className="sectionTitleRow">
+            <div className="sectionTitle">Active pipeline — check-in needed</div>
+            <div className="sectionSub">{activePipelineAlerts.length} buyer{activePipelineAlerts.length !== 1 ? "s/sellers" : "/seller"} without recent touch</div>
+          </div>
+          <div className="stack">
+            {activePipelineAlerts.map(({ deal, reason, urgent }) => {
+              const name = deal.contacts?.display_name ?? "Unknown";
+              const stageLabel = deal.opp_type === "buyer"
+                ? (deal.buyer_stage ?? "").replace(/_/g, " ")
+                : (deal.seller_stage ?? "").replace(/_/g, " ");
+              return (
+                <div key={deal.id} className="card cardPad" style={{ borderColor: urgent ? "rgba(200,0,0,.2)" : "rgba(200,100,0,.2)", background: urgent ? "rgba(200,0,0,.03)" : "rgba(200,100,0,.03)", padding: "10px 14px" }}>
+                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>{name}</div>
+                      <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                        <span className="badge" style={{ fontSize: 11 }}>{deal.opp_type}</span>
+                        {stageLabel && <span className="badge" style={{ fontSize: 11 }}>{stageLabel}</span>}
+                        {deal.address && <span style={{ fontSize: 12, color: "rgba(18,18,18,.55)" }}>{deal.address}</span>}
+                        <span style={{ fontSize: 12, fontWeight: 700, color: urgent ? "#8a0000" : "#92610a" }}>{reason}</span>
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <a className="btn" href={`/contacts/${deal.contact_id}`} style={{ fontSize: 12, textDecoration: "none" }}>Contact</a>
+                      <a className="btn" href="/pipeline" style={{ fontSize: 12, textDecoration: "none" }}>Pipeline →</a>
+                    </div>
                   </div>
                 </div>
               );
