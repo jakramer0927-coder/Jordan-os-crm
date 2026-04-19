@@ -219,11 +219,11 @@ export default function PipelinePage() {
   const [editCommissionPct, setEditCommissionPct] = useState("");
   const [editRefFeePct, setEditRefFeePct] = useState("");
   const [editRefFeeQuery, setEditRefFeeQuery] = useState("");
-  const [editRefFeeResults, setEditRefFeeResults] = useState<{ id: string; display_name: string }[]>([]);
+  const [editRefFeeResults, setEditRefFeeResults] = useState<ContactInfo[]>([]);
   const [editRefFeeId, setEditRefFeeId] = useState("");
   const [editRefFeeName, setEditRefFeeName] = useState("");
   const [editCoAgentQuery, setEditCoAgentQuery] = useState("");
-  const [editCoAgentResults, setEditCoAgentResults] = useState<{ id: string; display_name: string }[]>([]);
+  const [editCoAgentResults, setEditCoAgentResults] = useState<ContactInfo[]>([]);
   const [editCoAgentId, setEditCoAgentId] = useState("");
   const [editCoAgentName, setEditCoAgentName] = useState("");
 
@@ -238,7 +238,7 @@ export default function PipelinePage() {
   const [offerCompeting, setOfferCompeting] = useState("");
   const [offerAgentName, setOfferAgentName] = useState("");
   const [offerAgentQuery, setOfferAgentQuery] = useState("");
-  const [offerAgentResults, setOfferAgentResults] = useState<{ id: string; display_name: string }[]>([]);
+  const [offerAgentResults, setOfferAgentResults] = useState<ContactInfo[]>([]);
   const [offerAgentId, setOfferAgentId] = useState("");
   const [offerOutcome, setOfferOutcome] = useState<string>("pending");
   const [offerAcceptedPrice, setOfferAcceptedPrice] = useState("");
@@ -252,7 +252,7 @@ export default function PipelinePage() {
   const [prepItem, setPrepItem] = useState("");
   const [prepVendorName, setPrepVendorName] = useState("");
   const [prepVendorQuery, setPrepVendorQuery] = useState("");
-  const [prepVendorResults, setPrepVendorResults] = useState<{ id: string; display_name: string }[]>([]);
+  const [prepVendorResults, setPrepVendorResults] = useState<ContactInfo[]>([]);
   const [prepVendorId, setPrepVendorId] = useState("");
   const [prepCost, setPrepCost] = useState("");
   const [prepStatus, setPrepStatus] = useState<string>("planned");
