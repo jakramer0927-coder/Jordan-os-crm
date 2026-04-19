@@ -953,6 +953,10 @@ export default function PipelinePage() {
                 {/* Buyer-specific fields */}
                 {(isBuyer || isInvestor) && (
                   <>
+                    <div className="field">
+                      <div className="label">Property address</div>
+                      <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
+                    </div>
                     <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
                       <div className="field" style={{ minWidth: 140 }}>
                         <div className="label">Budget min</div>
