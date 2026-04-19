@@ -290,6 +290,11 @@ export default function PipelinePage() {
   const [newNotes, setNewNotes] = useState("");
   const [newSaving, setNewSaving] = useState(false);
   const [newError, setNewError] = useState<string | null>(null);
+  // Additional contacts on new deal
+  const [newCoContacts, setNewCoContacts] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [newCoQuery, setNewCoQuery] = useState("");
+  const [newCoResults, setNewCoResults] = useState<ContactInfo[]>([]);
+  const [newCoRole, setNewCoRole] = useState("co-buyer");
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -649,11 +654,23 @@ export default function PipelinePage() {
     });
     const j = await res.json();
     if (!res.ok) { setNewError(j?.error || "Create failed"); setNewSaving(false); return; }
+    const dealId = j.deal.id;
+
+    // Link any additional contacts
+    await Promise.all(newCoContacts.map(co =>
+      fetch("/api/opportunity-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deal_id: dealId, contact_id: co.id, role: co.role }),
+      })
+    ));
+
     setDeals(prev => [j.deal as Deal, ...prev]);
     setNewOpen(false);
     setNewContactId(""); setNewContactName(""); setNewContactQuery("");
     setNewAddress(""); setNewBudgetMin(""); setNewBudgetMax("");
     setNewTargetAreas(""); setNewEstValue(""); setNewMotivation(""); setNewNotes("");
+    setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
     setNewSaving(false);
   }
 
@@ -1513,6 +1530,52 @@ export default function PipelinePage() {
             <div className="field">
               <div className="label">Notes (optional)</div>
               <textarea className="textarea" value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="Any context…" style={{ minHeight: 60 }} />
+            </div>
+
+            {/* Additional contacts */}
+            <div>
+              <div className="label" style={{ marginBottom: 6 }}>Additional contacts (co-buyer, spouse, partner…)</div>
+              {newCoContacts.length > 0 && (
+                <div className="stack" style={{ marginBottom: 8, gap: 4 }}>
+                  {newCoContacts.map((co, i) => (
+                    <div key={co.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <span style={{ fontWeight: 700 }}>{co.name}</span>
+                      <span className="badge" style={{ fontSize: 11 }}>{co.role}</span>
+                      <button style={{ marginLeft: "auto", fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }}
+                        onClick={() => setNewCoContacts(prev => prev.filter((_, j) => j !== i))}>remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 160, position: "relative" }}>
+                  <input className="input" value={newCoQuery}
+                    onChange={e => { setNewCoQuery(e.target.value); searchContacts(e.target.value, setNewCoResults); }}
+                    placeholder="Search contacts…" />
+                  {newCoResults.length > 0 && (
+                    <div style={{ position: "absolute", zIndex: 10, left: 0, right: 0, background: "var(--paper)", border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {newCoResults.map(c => (
+                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13, width: "100%" }}
+                          onClick={() => {
+                            if (!newCoContacts.find(x => x.id === c.id) && c.id !== newContactId) {
+                              setNewCoContacts(prev => [...prev, { id: c.id, name: c.display_name, role: newCoRole }]);
+                            }
+                            setNewCoQuery(""); setNewCoResults([]);
+                          }}>
+                          {c.display_name} <span className="subtle">{c.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <select className="select" value={newCoRole} onChange={e => setNewCoRole(e.target.value)} style={{ minWidth: 120 }}>
+                  <option value="co-buyer">Co-buyer</option>
+                  <option value="co-seller">Co-seller</option>
+                  <option value="spouse">Spouse</option>
+                  <option value="partner">Partner</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
             </div>
 
             <div className="row" style={{ gap: 8, marginTop: 4 }}>
