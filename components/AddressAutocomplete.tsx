@@ -81,7 +81,7 @@ export default function AddressAutocomplete({ value, onChange, placeholder = "12
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      autoComplete="off"
+      autoComplete="new-password"
     />
   );
 }
