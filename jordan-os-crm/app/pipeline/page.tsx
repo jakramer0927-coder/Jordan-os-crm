@@ -803,16 +803,16 @@ export default function PipelinePage() {
         draggable
         onDragStart={e => { e.stopPropagation(); setDraggedDealId(deal.id); }}
         onDragEnd={() => { setDraggedDealId(null); setDragOverStage(null); }}
-        style={{ cursor: "grab", marginBottom: 8, opacity: isDragging ? 0.4 : 1, transition: "opacity .15s" }}
+        style={{ cursor: "grab", marginBottom: 8, opacity: isDragging ? 0.4 : 1, transition: "opacity .15s", overflow: "hidden", minWidth: 0 }}
         onClick={() => { if (!isDragging) { openDeal(deal); setOffers([]); setPrepItems([]); setActivities([]); setOppContacts([]); } }}
       >
-        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{name}</div>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
 
         {(deal.address) && (
-          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>{deal.address}</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deal.address}</div>
         )}
         {isBuyer && !deal.address && (deal.budget_max || deal.target_areas) && (
-          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {deal.budget_max ? fmt(deal.budget_max) : ""}
             {deal.budget_max && deal.target_areas ? " · " : ""}
             {deal.target_areas ?? ""}
@@ -822,14 +822,12 @@ export default function PipelinePage() {
           <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>{fmt(deal.list_price ?? deal.estimated_value)}</div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, gap: 6 }}>
-          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            {gci && <GciChip value={gci} />}
-          </div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", marginTop: 6, gap: 4 }}>
+          {gci && <GciChip value={gci} />}
           {nextStage && (
             <button
               className="btn"
-              style={{ fontSize: 11, padding: "2px 8px", flexShrink: 0, color: nextStage.color, borderColor: nextStage.color + "55" }}
+              style={{ fontSize: 11, padding: "2px 7px", color: nextStage.color, borderColor: nextStage.color + "55", whiteSpace: "nowrap" }}
               onClick={e => advanceStage(deal, e)}
               title={`Move to ${nextStage.label}`}
             >
@@ -882,20 +880,24 @@ export default function PipelinePage() {
 
   function BuyerKanban() {
     return (
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(190px, 1fr))`, gap: 12, overflowX: "auto" }}>
-        {BUYER_STAGES.map(stage => (
-          <div key={stage.value}>{KanbanColumn({ stage, deals: buyers.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "buyer" })}</div>
-        ))}
+      <div style={{ overflowX: "auto", width: "100%" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(180px, 1fr))`, gap: 10, minWidth: 700 }}>
+          {BUYER_STAGES.map(stage => (
+            <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: buyers.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "buyer" })}</div>
+          ))}
+        </div>
       </div>
     );
   }
 
   function SellerKanban() {
     return (
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(190px, 1fr))`, gap: 12, overflowX: "auto" }}>
-        {SELLER_STAGES.map(stage => (
-          <div key={stage.value}>{KanbanColumn({ stage, deals: sellers.filter(d => d.seller_stage === stage.value), oppType: "seller", singular: "seller" })}</div>
-        ))}
+      <div style={{ overflowX: "auto", width: "100%" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(150px, 1fr))`, gap: 10, minWidth: 700 }}>
+          {SELLER_STAGES.map(stage => (
+            <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: sellers.filter(d => d.seller_stage === stage.value), oppType: "seller", singular: "seller" })}</div>
+          ))}
+        </div>
       </div>
     );
   }
