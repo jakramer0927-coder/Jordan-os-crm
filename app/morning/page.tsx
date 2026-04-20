@@ -943,7 +943,6 @@ export default function MorningPage() {
       const ids = recs.map((r) => r.id);
       setLockedIds(ids);
       saveLockedIds(ids);
-      generateDrafts(recs);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds]);

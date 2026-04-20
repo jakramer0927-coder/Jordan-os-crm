@@ -111,7 +111,7 @@ export async function POST(req: Request) {
             .select("direction, channel, occurred_at, intent, summary")
             .eq("contact_id", contactId)
             .order("occurred_at", { ascending: false })
-            .limit(8);
+            .limit(3);
 
         if (tErr) {
             return NextResponse.json({ error: tErr.message }, { status: 500 });
@@ -120,29 +120,30 @@ export async function POST(req: Request) {
         // 3) Active deals for this contact
         const { data: activeDeals } = await supabaseAdmin
             .from("deals")
-            .select("address, role, status, price, close_date, notes, referral_source:referral_source_contact_id(display_name)")
+            .select("address, role, status, price, close_date, notes")
             .eq("contact_id", contactId)
             .eq("user_id", uid)
             .not("status", "in", '("closed_won","closed_lost")')
             .order("created_at", { ascending: false })
-            .limit(3);
+            .limit(2);
 
-        // 4) Recent text messages (if you have them)
+        // 4) Recent text messages
         const { data: texts } = await supabaseAdmin
             .from("text_messages")
             .select("direction, occurred_at, body")
             .eq("contact_id", contactId)
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
-            .limit(10);
+            .limit(3);
 
-        // 5) Voice examples
+        // 5) Voice examples matching this channel/intent
         const { data: examples, error: vErr } = await supabaseAdmin
             .from("user_voice_examples")
             .select("channel, intent, text, subject, snippet, body_preview, occurred_at, created_at")
             .eq("user_id", uid)
+            .eq("channel", channel)
             .order("occurred_at", { ascending: false })
-            .limit(15);
+            .limit(5);
 
         if (vErr) {
             return NextResponse.json({ error: vErr.message }, { status: 500 });
@@ -162,8 +163,7 @@ export async function POST(req: Request) {
             })
             .filter(Boolean);
 
-        // Keep it tight: best 6 examples max
-        const voiceSample = voiceExamples.slice(0, 6);
+        const voiceSample = voiceExamples.slice(0, 3);
 
         const contactSummary = {
             name: contact.display_name,
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
             notes: contact.notes,
         };
 
-        const recentTouchSummary = (touches ?? []).slice(0, 8).map((x: any) => ({
+        const recentTouchSummary = (touches ?? []).map((x: any) => ({
             direction: x.direction,
             channel: x.channel,
             occurred_at: x.occurred_at,
@@ -182,10 +182,10 @@ export async function POST(req: Request) {
             summary: x.summary,
         }));
 
-        const recentTextSummary = (texts ?? []).slice(0, 6).map((m: any) => ({
+        const recentTextSummary = (texts ?? []).map((m: any) => ({
             direction: m.direction,
             occurred_at: m.occurred_at,
-            body: typeof m.body === "string" ? m.body.slice(0, 300) : m.body,
+            body: typeof m.body === "string" ? m.body.slice(0, 200) : m.body,
         }));
 
         const lengthRule =
