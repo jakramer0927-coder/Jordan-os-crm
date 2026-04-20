@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
 const supabase = createSupabaseBrowserClient();
@@ -311,6 +311,8 @@ export default function PipelinePage() {
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
+  const deepLinkHandled = useRef(false);
+
   async function loadDeals() {
     setLoading(true);
     setError(null);
@@ -321,8 +323,28 @@ export default function PipelinePage() {
       ]);
       const activeJ = await activeRes.json();
       const pastJ = await pastRes.json();
-      const all = [...(activeJ.deals ?? []), ...(pastJ.deals ?? [])];
-      setDeals(all as Deal[]);
+      const all = [...(activeJ.deals ?? []), ...(pastJ.deals ?? [])] as Deal[];
+      setDeals(all);
+
+      // Handle ?deal=<id> deep link — open that deal on load
+      if (!deepLinkHandled.current) {
+        deepLinkHandled.current = true;
+        const params = new URLSearchParams(window.location.search);
+        const dealId = params.get("deal");
+        if (dealId) {
+          const target = all.find(d => d.id === dealId);
+          if (target) {
+            openDeal(target);
+            // Switch to correct main tab
+            if (target.opp_type === "seller") setMainTab("sellers");
+            else if (target.opp_type === "investor") setMainTab("investors");
+            else if (target.pipeline_status === "past_client") setMainTab("past_clients");
+            else setMainTab("buyers");
+            // Clean up URL without reload
+            window.history.replaceState({}, "", "/pipeline");
+          }
+        }
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to load pipeline");
     } finally {
@@ -981,7 +1003,11 @@ export default function PipelinePage() {
           <div style={{ padding: "18px 20px 0", borderBottom: "1px solid rgba(0,0,0,.08)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
               <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>{selectedDeal.contacts?.display_name ?? "—"}</div>
+                <a href={`/contacts/${selectedDeal.contact_id}`} style={{ fontWeight: 900, fontSize: 18, textDecoration: "none", color: "inherit" }}
+                  onMouseEnter={e => (e.currentTarget.style.textDecoration = "underline")}
+                  onMouseLeave={e => (e.currentTarget.style.textDecoration = "none")}>
+                  {selectedDeal.contacts?.display_name ?? "—"}
+                </a>
                 <div className="row" style={{ gap: 8, marginTop: 5, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, textTransform: "capitalize", color: "rgba(18,18,18,.5)" }}>{selectedDeal.opp_type}</span>
                   <StageChip label={stageConf.label} color={stageConf.color} bg={stageConf.bg} />

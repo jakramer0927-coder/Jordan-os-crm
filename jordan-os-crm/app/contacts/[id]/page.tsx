@@ -1091,7 +1091,7 @@ export default function ContactDetailPage() {
               </span>
               {/* Active deal stage chips */}
               {activeDeals.map(d => (
-                <a key={d.id} href="/pipeline" style={{ textDecoration: "none" }}>
+                <a key={d.id} href={`/pipeline?deal=${d.id}`} style={{ textDecoration: "none" }}>
                   <span className="badge" style={{ ...stageColor(d.status), fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
                     {d.role === "buyer" ? "Buyer" : d.role === "seller" ? "Seller" : d.role} · {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
                   </span>
@@ -1533,7 +1533,7 @@ export default function ContactDetailPage() {
                   {activeDeals.length > 0 && <span className="subtle" style={{ fontWeight: 400, fontSize: 12, marginLeft: 6 }}>{activeDeals.length} active</span>}
                 </div>
                 <div className="row" style={{ gap: 8 }}>
-                  <a href="/pipeline" className="subtle" style={{ fontSize: 12 }}>Manage in Pipeline →</a>
+                  <a href={activeDeals.length > 0 ? `/pipeline?deal=${activeDeals[0].id}` : "/pipeline"} className="subtle" style={{ fontSize: 12 }}>Manage in Pipeline →</a>
                   <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => dealFormOpen ? setDealFormOpen(false) : openNewDeal()}>
                     {dealFormOpen && !editingDeal ? "Cancel" : "+ Add"}
                   </button>

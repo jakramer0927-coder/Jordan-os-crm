@@ -1396,7 +1396,7 @@ export default function MorningPage() {
                     </div>
                     <div className="row" style={{ gap: 6, flexShrink: 0 }}>
                       <a className="btn" href={`/contacts/${deal.contact_id}`} style={{ fontSize: 12, textDecoration: "none" }}>Contact</a>
-                      <a className="btn" href="/pipeline" style={{ fontSize: 12, textDecoration: "none" }}>Pipeline →</a>
+                      <a className="btn" href={`/pipeline?deal=${deal.id}`} style={{ fontSize: 12, textDecoration: "none" }}>Deal →</a>
                     </div>
                   </div>
                 </div>
