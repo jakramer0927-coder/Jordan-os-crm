@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
@@ -1548,7 +1549,7 @@ export default function ContactDetailPage() {
                   <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
                     <div className="field" style={{ flex: 1, minWidth: 220 }}>
                       <div className="label">Address</div>
-                      <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
+                      <AddressAutocomplete value={dealAddress} onChange={setDealAddress} placeholder="123 Main St, City, CA 90210" />
                     </div>
                     <div className="field" style={{ minWidth: 130 }}>
                       <div className="label">Role</div>
