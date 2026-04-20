@@ -18,7 +18,17 @@
       "Bash(ls .env*)",
       "Bash(ls -la jordan-os-crm/.env*)",
       "Bash(npm run *)",
-      "Bash(ln -s /Users/jordankramer/projects/jordan-os-crm/.env.local /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/.env.local)"
+      "Bash(ln -s /Users/jordankramer/projects/jordan-os-crm/.env.local /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/.env.local)",
+      "Bash(cat -A /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx)",
+      "Bash(xxd)",
+      "Bash(cp /tmp/contacts_page_trimmed.tsx /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx)",
+      "Bash(tail -5 /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx)",
+      "Bash(git remote *)"
+    ],
+    "additionalDirectories": [
+      "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",
+      "/Users/jordankramer/projects/jordan-os-crm/app/contacts/[id]",
+      "/tmp"
     ]
   }
 }
