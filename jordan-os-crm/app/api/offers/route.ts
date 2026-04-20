@@ -23,12 +23,7 @@ export async function GET(req: Request) {
 
     const { data, error } = await supabaseAdmin
       .from("offers")
-      .select(`
-        id, property_address, offer_price, asking_price, terms_notes,
-        competing_offers_count, seller_agent_name, outcome, accepted_price,
-        cma_link, closed_price, listing_link, occurred_at, created_at,
-        seller_agent_contact:seller_agent_contact_id ( id, display_name )
-      `)
+      .select("*, seller_agent_contact:seller_agent_contact_id ( id, display_name )")
       .eq("deal_id", dealId)
       .eq("user_id", uid)
       .order("occurred_at", { ascending: false });
@@ -84,6 +79,28 @@ export async function POST(req: Request) {
       })
       .select("id, property_address, offer_price, asking_price, outcome, occurred_at")
       .single();
+
+    // If new columns don't exist yet, retry without them
+    if (error?.code === "42703") {
+      const basePayload = {
+        deal_id, user_id: uid,
+        property_address: (body.property_address as string).trim(),
+        offer_price: offer_price ?? null,
+        asking_price: asking_price ?? null,
+        terms_notes: terms_notes?.trim() || null,
+        competing_offers_count: competing_offers_count ?? null,
+        seller_agent_contact_id: seller_agent_contact_id || null,
+        seller_agent_name: seller_agent_name?.trim() || null,
+        outcome,
+        accepted_price: accepted_price ?? null,
+        cma_link: cma_link?.trim() || null,
+        occurred_at: occurred_at || new Date().toISOString(),
+      };
+      const { data: d2, error: e2 } = await supabaseAdmin.from("offers").insert(basePayload)
+        .select("id, property_address, offer_price, asking_price, outcome, occurred_at").single();
+      if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
+      return NextResponse.json({ offer: d2 });
+    }
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ offer: data });
