@@ -17,9 +17,13 @@ interface Props {
   autoFocus?: boolean;
 }
 
+const CATEGORIES = ["Client", "Sphere", "Agent", "Developer", "Vendor", "Other"];
+
 export default function ContactSearchInput({ selectedId, selectedName, onSelect, placeholder = "Search contacts…", autoFocus }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ContactResult[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createCategory, setCreateCategory] = useState("Client");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -42,17 +46,17 @@ export default function ContactSearchInput({ selectedId, selectedName, onSelect,
     const res = await fetch("/api/contacts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: query.trim(), category: "sphere" }),
+      body: JSON.stringify({ display_name: query.trim(), category: createCategory }),
     });
     const j = await res.json().catch(() => ({}));
     setCreating(false);
     if (!res.ok) { setCreateError(j?.error || "Failed to create contact"); return; }
     const newId = j?.id;
-    const newName = query.trim();
     if (newId) {
-      onSelect(newId, newName);
+      onSelect(newId, query.trim());
       setQuery("");
       setResults([]);
+      setShowCreate(false);
     }
   }
 
@@ -68,14 +72,14 @@ export default function ContactSearchInput({ selectedId, selectedName, onSelect,
     );
   }
 
-  const showDropdown = query.trim().length >= 2 && (results.length > 0 || !creating);
+  const showDropdown = query.trim().length >= 2 && results.length > 0 && !showCreate;
 
   return (
     <div style={{ position: "relative" }}>
       <input
         className="input"
         value={query}
-        onChange={e => setQuery(e.target.value)}
+        onChange={e => { setQuery(e.target.value); setShowCreate(false); }}
         placeholder={placeholder}
         autoFocus={autoFocus}
         autoComplete="new-password"
@@ -92,15 +96,37 @@ export default function ContactSearchInput({ selectedId, selectedName, onSelect,
           ))}
           <button
             className="btn"
-            style={{ width: "100%", borderRadius: 0, textAlign: "left", fontSize: 13, borderTop: results.length > 0 ? "1px solid rgba(0,0,0,.07)" : undefined, color: "var(--accent, #1a3f8a)", fontWeight: 700 }}
-            onClick={createContact}
-            disabled={creating}
+            style={{ width: "100%", borderRadius: 0, textAlign: "left", fontSize: 13, borderTop: "1px solid rgba(0,0,0,.07)", color: "#1a3f8a", fontWeight: 700 }}
+            onClick={() => setShowCreate(true)}
           >
-            {creating ? "Creating…" : `+ Create "${query.trim()}"`}
+            + Create "{query.trim()}"
           </button>
         </div>
       )}
-      {createError && <div style={{ fontSize: 12, color: "#8a0000", marginTop: 4 }}>{createError}</div>}
+      {!showCreate && query.trim().length >= 2 && results.length === 0 && (
+        <button
+          className="btn"
+          style={{ marginTop: 4, fontSize: 13, color: "#1a3f8a", fontWeight: 700 }}
+          onClick={() => setShowCreate(true)}
+        >
+          + Create "{query.trim()}"
+        </button>
+      )}
+      {showCreate && (
+        <div style={{ marginTop: 6, padding: "10px 12px", border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, background: "var(--paper, #fff)", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Create "{query.trim()}"</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select className="select" style={{ fontSize: 12 }} value={createCategory} onChange={e => setCreateCategory(e.target.value)}>
+              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+            <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={createContact} disabled={creating}>
+              {creating ? "Creating…" : "Create"}
+            </button>
+            <button className="btn" style={{ fontSize: 12 }} onClick={() => setShowCreate(false)}>Cancel</button>
+          </div>
+          {createError && <div style={{ fontSize: 12, color: "#8a0000" }}>{createError}</div>}
+        </div>
+      )}
     </div>
   );
 }
