@@ -555,8 +555,9 @@ export default function ContactDetailPage() {
   }
 
   // UI state
-  const [activeTab, setActiveTab] = useState<"draft" | "history" | "timeline">("draft");
+  const [activeTab, setActiveTab] = useState<"outreach" | "timeline" | "details">("outreach");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [touchSaved, setTouchSaved] = useState(false);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -693,6 +694,7 @@ export default function ContactDetailPage() {
 
   function openLog() {
     setLogOpen(true);
+    setTouchSaved(false);
     setLogChannel("text");
     setLogDirection("outbound");
     setLogIntent("check_in");
@@ -727,7 +729,7 @@ export default function ContactDetailPage() {
       return;
     }
 
-    setLogOpen(false);
+    setTouchSaved(true);
     await fetchAll();
   }
 
@@ -1067,22 +1069,34 @@ export default function ContactDetailPage() {
 
       {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <div className="card cardPad">
-        {/* Back + name row */}
+        {/* Nav links */}
+        <div className="row" style={{ gap: 16, marginBottom: 10, flexWrap: "wrap" }}>
+          <a href="/morning" style={{ fontSize: 12, textDecoration: "none", fontWeight: 700, color: "var(--ink)" }}>← Morning</a>
+          <a href="/contacts" className="subtle" style={{ fontSize: 12, textDecoration: "none" }}>Contacts</a>
+        </div>
+
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <a href="/contacts" className="subtle" style={{ fontSize: 12, textDecoration: "none", display: "block", marginBottom: 6 }}>← Contacts</a>
             <h1 className="h1" style={{ margin: 0, lineHeight: 1.1 }}>{contact.display_name}</h1>
 
-            {/* Badges */}
+            {/* Badges row */}
             <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
               <span className="badge" style={{ fontWeight: 700 }}>{prettyCategory(contact.category)}</span>
               {contact.tier && <span className="badge" style={{ fontWeight: 700 }}>Tier {contact.tier}</span>}
               {contact.client_type && <span className="badge" style={{ textTransform: "capitalize" }}>{contact.client_type.replace(/_/g, " ")}</span>}
-              {/* Relationship health */}
+              {/* Last touch with channel */}
               <span className="badge" style={{ color: healthColor, borderColor: `${healthColor}44`, fontWeight: 700, fontSize: 12 }}>
                 <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: healthColor, marginRight: 5, verticalAlign: "middle" }} />
-                {healthLabel}
+                {healthLabel}{lastOutbound && touches.find(t => t.direction === "outbound") ? ` · ${channelLabel(touches.find(t => t.direction === "outbound")!.channel)}` : ""}
               </span>
+              {/* Active deal stage chips */}
+              {activeDeals.map(d => (
+                <a key={d.id} href="/pipeline" style={{ textDecoration: "none" }}>
+                  <span className="badge" style={{ ...stageColor(d.status), fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                    {d.role === "buyer" ? "Buyer" : d.role === "seller" ? "Seller" : d.role} · {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                  </span>
+                </a>
+              ))}
             </div>
 
             {/* Contact info */}
@@ -1102,13 +1116,13 @@ export default function ContactDetailPage() {
             </button>
             <button
               className="btn btnPrimary"
-              onClick={() => { setActiveTab("draft"); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              onClick={() => { setActiveTab("outreach"); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
             >
               Draft message
             </button>
             <button className="btn" onClick={openLog}>Log touch</button>
-            <button className="btn" onClick={() => setAdvancedOpen((v) => !v)} style={{ fontSize: 12 }}>
-              {advancedOpen ? "Close ▲" : "Edit ▾"}
+            <button className="btn" style={{ fontSize: 12 }} onClick={() => { setActiveTab("details"); setAdvancedOpen(true); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+              Edit ▾
             </button>
           </div>
         </div>
@@ -1118,7 +1132,7 @@ export default function ContactDetailPage() {
           <div className="row" style={{ marginTop: 12, flexWrap: "wrap", gap: 6 }}>
             {milestones.map((m) => (
               <span key={m.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, background: "rgba(146,97,10,.09)", border: "1px solid rgba(146,97,10,.22)", fontSize: 13, fontWeight: 700, color: "#92610a" }}>
-                🎯 {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
+                {m.label}: {m.date}{m.daysAway === 0 ? " — today!" : m.daysAway === 1 ? " — tomorrow" : ` — ${m.daysAway}d`}
               </span>
             ))}
           </div>
@@ -1151,6 +1165,40 @@ export default function ContactDetailPage() {
             <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>in CRM</div>
           </div>
         </div>
+      </div>
+
+      {/* ── AI INTELLIGENCE (top priority) ────────────────────────────────── */}
+      <div className="card cardPad">
+        <div className="rowBetween" style={{ alignItems: "flex-start", marginBottom: aiContext || contact.notes ? 12 : 0 }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Relationship intelligence</div>
+            {aiContextUpdatedAt && (
+              <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>
+                Updated {new Date(aiContextUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+            )}
+          </div>
+          <button className="btn" style={{ fontSize: 12, padding: "2px 10px", flexShrink: 0 }} onClick={extractContext} disabled={extractingContext}>
+            {extractingContext ? "Generating…" : aiContext ? "Regenerate" : "Generate"}
+          </button>
+        </div>
+        {extractContextMsg && (
+          <div className={`alert ${extractContextMsg.startsWith("Error") ? "alertError" : "alertOk"}`} style={{ fontSize: 13, marginBottom: 10 }}>
+            {extractContextMsg}
+          </div>
+        )}
+        {contact.notes && (
+          <div style={{ fontSize: 13, color: "rgba(18,18,18,.6)", marginBottom: aiContext ? 12 : 0, paddingBottom: aiContext ? 12 : 0, borderBottom: aiContext ? "1px solid rgba(0,0,0,.07)" : undefined, whiteSpace: "pre-wrap" }}>
+            {contact.notes}
+          </div>
+        )}
+        {aiContext ? (
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.65 }}>{aiContext}</div>
+        ) : (
+          <div className="subtle" style={{ fontSize: 13 }}>
+            No AI summary yet — add notes, touches, or a text thread, then click Generate.
+          </div>
+        )}
       </div>
 
       {/* ── PREPARE / BRIEF PANEL ─────────────────────────────────────────── */}
@@ -1218,502 +1266,72 @@ export default function ContactDetailPage() {
         </div>
       )}
 
-      {/* ── EDIT PANEL (collapsed by default) ─────────────────────────────── */}
-      {advancedOpen && (
+      {/* ── FOLLOW-UPS ────────────────────────────────────────────────────── */}
+      {(followUps.length > 0 || fuFormOpen) && (
         <div className="card cardPad stack">
-          <div style={{ fontWeight: 900, fontSize: 15 }}>Edit contact</div>
-
-          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 240 }}>
-              <div className="label">Name</div>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="rowBetween" style={{ alignItems: "center" }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>
+              Follow-ups
+              {overdueFollowUps.length > 0 && (
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: "#8a0000", background: "rgba(200,0,0,.08)", border: "1px solid rgba(200,0,0,.2)", borderRadius: 4, padding: "1px 6px" }}>
+                  {overdueFollowUps.length} overdue
+                </span>
+              )}
             </div>
-            <div className="field" style={{ width: 220, minWidth: 180 }}>
-              <div className="label">Category</div>
-              <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option>Client</option>
-                <option>Agent</option>
-                <option>Developer</option>
-                <option>Vendor</option>
-                <option>Sphere</option>
-                <option>Other</option>
-              </select>
-            </div>
-            <div className="field" style={{ width: 140 }}>
-              <div className="label">Tier</div>
-              <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="field">
-            <div className="label">Client Type (optional)</div>
-            <input className="input" value={clientType} onChange={(e) => setClientType(e.target.value)} placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..." />
-          </div>
-
-          <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
-            <div className="field" style={{ flex: 1, minWidth: 220 }}>
-              <div className="label">Email (optional)</div>
-              <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 180 }}>
-              <div className="label">Phone (optional)</div>
-              <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(310) 555-0100" />
-            </div>
-          </div>
-
-          <div className="field">
-            <div className="label">Notes</div>
-            <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Context for AI drafts, relationship notes, key details…" style={{ minHeight: 80 }} />
-          </div>
-
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Milestones</div>
-          <div className="fieldGridMobile">
-            <div className="field">
-              <div className="label">Birthday</div>
-              <input className="input" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
-            </div>
-            <div className="field">
-              <div className="label">Close anniversary</div>
-              <input className="input" type="date" value={closeAnniversary} onChange={(e) => setCloseAnniversary(e.target.value)} />
-            </div>
-            <div className="field">
-              <div className="label">Move-in date</div>
-              <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
-            </div>
-          </div>
-
-          <div>
-            <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
-              {savingContact ? "Saving…" : "Save changes"}
+            <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => setFuFormOpen((v) => !v)}>
+              {fuFormOpen ? "Cancel" : "+ Add"}
             </button>
           </div>
-
-          <div className="hr" />
-
-          {/* Household */}
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Household / linked contacts</div>
-          {linkedContacts.map((lc) => (
-            <div key={lc.link_id} className="rowBetween" style={{ alignItems: "center", padding: "4px 0" }}>
-              <div>
-                <a href={`/contacts/${lc.contact.id}`} style={{ fontWeight: 700 }}>{lc.contact.display_name}</a>
-                <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{lc.contact.category}{lc.contact.tier ? ` · ${lc.contact.tier}` : ""}</span>
-                {lc.household_name && <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>({lc.household_name})</span>}
+          {fuFormOpen && (
+            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+              <div className="field">
+                <div className="label">Follow up on</div>
+                <input className="input" type="date" value={fuDate} onChange={(e) => setFuDate(e.target.value)} autoFocus />
               </div>
-              <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
+              <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                <div className="label">Context (optional)</div>
+                <input className="input" value={fuNote} onChange={(e) => setFuNote(e.target.value)} placeholder="e.g. Check if they decided on the listing" />
+              </div>
+              <button className="btn btnPrimary" onClick={saveFollowUp} disabled={fuSaving || !fuDate}>
+                {fuSaving ? "Saving…" : "Save"}
+              </button>
             </div>
-          ))}
-          <button className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
-            {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "+ Add another" : "+ Link contact"}
-          </button>
-          {linkOpen && (
-            <div className="stack" style={{ marginTop: 4 }}>
-              <input className="input" value={linkQ} onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }} placeholder="Type a name…" />
-              {linkResults.length > 0 && (
-                <div className="stack" style={{ gap: 4 }}>
-                  {linkResults.map((r) => (
-                    <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
-                      <span style={{ fontSize: 13 }}>{r.display_name} <span className="subtle">· {r.category}</span></span>
-                      <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
+          )}
+          {followUps.length > 0 && (
+            <div className="stack" style={{ gap: 0 }}>
+              {followUps.map((f, i) => {
+                const today = new Date().toISOString().slice(0, 10);
+                const overdue = f.due_date < today;
+                return (
+                  <div key={f.id} style={{ padding: "9px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: overdue ? "#8a0000" : undefined }}>
+                        {overdue ? "Overdue · " : ""}{f.due_date}
+                      </span>
+                      {f.note && <span className="subtle" style={{ fontSize: 13, marginLeft: 8 }}>{f.note}</span>}
                     </div>
-                  ))}
-                </div>
-              )}
-              <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="Household name (optional)" />
+                    <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => completeFollowUp(f.id)}>Done ✓</button>
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "rgba(18,18,18,.4)" }} onClick={() => deleteFollowUp(f.id)}>Remove</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-          {linkMsg && <div className="subtle" style={{ fontSize: 12, color: linkMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a" }}>{linkMsg}</div>}
-          {linkedContacts.length > 0 && (
-            <div style={{ paddingTop: 8, borderTop: "1px solid rgba(0,0,0,.07)" }}>
-              <div className="subtle" style={{ fontSize: 12, marginBottom: 6 }}>Copy all touches to each linked contact, then archive this one.</div>
-              {distributeMsg ? (
-                <div className="subtle" style={{ fontSize: 12, color: "#0b6b2a" }}>{distributeMsg}</div>
-              ) : distributeConfirm ? (
-                <div className="row">
-                  <span className="subtle" style={{ fontSize: 12 }}>This archives this contact.</span>
-                  <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>{distributing ? "Working…" : "Confirm"}</button>
-                  <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
-                </div>
-              ) : (
-                <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(true)}>Distribute & archive</button>
-              )}
-            </div>
-          )}
-
-          <div className="hr" />
-
-          {/* Buyer profile */}
-          {(contact.category || "").toLowerCase() === "client" && (() => {
-            const ct = (contact.client_type || "").toLowerCase();
-            if (ct.includes("past") || ct.includes("seller") || ct.includes("landlord")) return null;
-            return (
-              <>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>Buyer profile</div>
-                <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                  <div className="field" style={{ minWidth: 150 }}>
-                    <div className="label">Min budget</div>
-                    <input className="input" value={buyerBudgetMin} onChange={e => setBuyerBudgetMin(e.target.value)} placeholder="800,000" />
-                  </div>
-                  <div className="field" style={{ minWidth: 150 }}>
-                    <div className="label">Max budget</div>
-                    <input className="input" value={buyerBudgetMax} onChange={e => setBuyerBudgetMax(e.target.value)} placeholder="1,500,000" />
-                  </div>
-                  <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                    <div className="label">Target areas</div>
-                    <input className="input" value={buyerAreas} onChange={e => setBuyerAreas(e.target.value)} placeholder="Silver Lake, Los Feliz, Echo Park" />
-                  </div>
-                </div>
-                <div className="row" style={{ alignItems: "center", gap: 10 }}>
-                  <button className="btn" style={{ fontSize: 12 }} onClick={saveBuyerProfile} disabled={savingBuyer}>
-                    {savingBuyer ? "Saving…" : "Save buyer profile"}
-                  </button>
-                  {buyerMsg && <span style={{ fontSize: 12, color: buyerMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a", fontWeight: 700 }}>{buyerMsg}</span>}
-                </div>
-                <div className="hr" />
-              </>
-            );
-          })()}
-
-          {/* Danger zone */}
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
-            <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
-              {deleting ? "Deleting…" : "Delete contact"}
-            </button>
-          </div>
+        </div>
+      )}
+      {followUps.length === 0 && !fuFormOpen && (
+        <div style={{ paddingLeft: 2 }}>
+          <button className="btn" style={{ fontSize: 12 }} onClick={() => setFuFormOpen(true)}>+ Add follow-up</button>
         </div>
       )}
 
-      {/* ── AI CONTEXT ─────────────────────────────────────────────────────── */}
-      <div className="card cardPad">
-        <div className="rowBetween" style={{ alignItems: "flex-start", marginBottom: aiContext || contact.notes ? 12 : 0 }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Relationship intelligence</div>
-            {aiContextUpdatedAt && (
-              <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>
-                Updated {new Date(aiContextUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              </div>
-            )}
-          </div>
-          <button className="btn" style={{ fontSize: 12, padding: "2px 10px", flexShrink: 0 }} onClick={extractContext} disabled={extractingContext}>
-            {extractingContext ? "Generating…" : aiContext ? "Regenerate" : "Generate"}
-          </button>
-        </div>
-        {extractContextMsg && (
-          <div className={`alert ${extractContextMsg.startsWith("Error") ? "alertError" : "alertOk"}`} style={{ fontSize: 13, marginBottom: 10 }}>
-            {extractContextMsg}
-          </div>
-        )}
-        {contact.notes && (
-          <div style={{ fontSize: 13, color: "rgba(18,18,18,.6)", marginBottom: aiContext ? 12 : 0, paddingBottom: aiContext ? 12 : 0, borderBottom: aiContext ? "1px solid rgba(0,0,0,.07)" : undefined, whiteSpace: "pre-wrap" }}>
-            {contact.notes}
-          </div>
-        )}
-        {aiContext ? (
-          <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.65 }}>{aiContext}</div>
-        ) : (
-          <div className="subtle" style={{ fontSize: 13 }}>
-            No AI summary yet — add notes, touches, or deals, then click Generate.
-          </div>
-        )}
-      </div>
-
-      {/* ── TEXT THREAD UPLOAD ─────────────────────────────────────────────── */}
-      <div className="card cardPad stack">
-        <div>
-          <div style={{ fontWeight: 900, fontSize: 15 }}>Upload text thread</div>
-          <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>Paste an iMessage thread → improves AI drafts and relationship intelligence</div>
-        </div>
-        <TextThreadUploadPanel contactId={contact.id} />
-      </div>
-
-      {/* ── ACTIVE DEALS ───────────────────────────────────────────────────── */}
-      <div className="card cardPad stack">
-        <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div style={{ fontWeight: 900, fontSize: 15 }}>
-            Deals
-            {activeDeals.length > 0 && <span className="subtle" style={{ fontWeight: 400, fontSize: 13, marginLeft: 6 }}>{activeDeals.length} active</span>}
-          </div>
-          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => dealFormOpen ? setDealFormOpen(false) : openNewDeal()}>
-            {dealFormOpen && !editingDeal ? "Cancel" : "+ Add deal"}
-          </button>
-        </div>
-
-        {dealErr && <div className="alert alertError" style={{ fontSize: 13 }}>{dealErr}</div>}
-
-        {/* Inline form */}
-        {dealFormOpen && (
-          <div className="stack" style={{ paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)" }}>
-            <div style={{ fontWeight: 800, fontSize: 13 }}>{editingDeal ? "Edit deal" : "New deal"}</div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-              <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                <div className="label">Address</div>
-                <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
-              </div>
-              <div className="field" style={{ minWidth: 130 }}>
-                <div className="label">Role</div>
-                <select className="select" value={dealRole} onChange={e => setDealRole(e.target.value)}>
-                  <option value="buyer">Buyer</option>
-                  <option value="seller">Seller</option>
-                  <option value="landlord">Landlord</option>
-                  <option value="tenant">Tenant</option>
-                </select>
-              </div>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Stage</div>
-                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
-                  {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Price (optional)</div>
-                <input className="input" value={dealPrice} onChange={e => setDealPrice(e.target.value)} placeholder="1,250,000" />
-              </div>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Close date (optional)</div>
-                <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
-              </div>
-            </div>
-            <div className="field">
-              <div className="label">Referral source (optional)</div>
-              <input
-                className="input"
-                value={dealRefQuery}
-                onChange={e => searchRefSource(e.target.value)}
-                placeholder="Search contacts…"
-              />
-              {dealRefResults.length > 0 && (
-                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                  {dealRefResults.slice(0, 5).map(c => (
-                    <button
-                      key={c.id}
-                      className="btn"
-                      style={{ borderRadius: 0, textAlign: "left", justifyContent: "flex-start", fontSize: 13 }}
-                      onClick={() => { setDealRefSourceId(c.id); setDealRefSourceName(c.display_name); setDealRefQuery(c.display_name); setDealRefResults([]); }}
-                    >
-                      {c.display_name} <span style={{ color: "rgba(18,18,18,.4)", marginLeft: 6 }}>{c.category}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {dealRefSourceId && (
-                <div style={{ marginTop: 4, fontSize: 12, color: "rgba(18,18,18,.5)" }}>
-                  Linked: <strong>{dealRefSourceName}</strong>
-                  <button style={{ marginLeft: 8, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setDealRefSourceId(""); setDealRefSourceName(""); setDealRefQuery(""); }}>remove</button>
-                </div>
-              )}
-            </div>
-            <div className="field">
-              <div className="label">Notes (optional)</div>
-              <textarea className="textarea" value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="Any notes about this transaction…" style={{ minHeight: 70 }} />
-            </div>
-            <div className="row">
-              <button className="btn btnPrimary" onClick={saveDeal} disabled={dealBusy}>{dealBusy ? "Saving…" : "Save"}</button>
-              <button className="btn" onClick={() => setDealFormOpen(false)} disabled={dealBusy}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {/* Deal form */}
-        {dealFormOpen && (
-          <div className="stack" style={{ paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)" }}>
-            <div style={{ fontWeight: 800, fontSize: 13 }}>{editingDeal ? "Edit deal" : "New deal"}</div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-              <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                <div className="label">Address</div>
-                <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
-              </div>
-              <div className="field" style={{ minWidth: 130 }}>
-                <div className="label">Role</div>
-                <select className="select" value={dealRole} onChange={e => setDealRole(e.target.value)}>
-                  <option value="buyer">Buyer</option>
-                  <option value="seller">Seller</option>
-                  <option value="landlord">Landlord</option>
-                  <option value="tenant">Tenant</option>
-                </select>
-              </div>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Stage</div>
-                <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
-                  {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Price (optional)</div>
-                <input className="input" value={dealPrice} onChange={e => setDealPrice(e.target.value)} placeholder="1,250,000" />
-              </div>
-              <div className="field" style={{ minWidth: 160 }}>
-                <div className="label">Close date (optional)</div>
-                <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
-              </div>
-            </div>
-            <div className="field">
-              <div className="label">Referral source (optional)</div>
-              <input className="input" value={dealRefQuery} onChange={e => searchRefSource(e.target.value)} placeholder="Search contacts…" />
-              {dealRefResults.length > 0 && (
-                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                  {dealRefResults.slice(0, 5).map(c => (
-                    <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", justifyContent: "flex-start", fontSize: 13 }}
-                      onClick={() => { setDealRefSourceId(c.id); setDealRefSourceName(c.display_name); setDealRefQuery(c.display_name); setDealRefResults([]); }}>
-                      {c.display_name} <span style={{ color: "rgba(18,18,18,.4)", marginLeft: 6 }}>{c.category}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {dealRefSourceId && (
-                <div style={{ marginTop: 4, fontSize: 12, color: "rgba(18,18,18,.5)" }}>
-                  Linked: <strong>{dealRefSourceName}</strong>
-                  <button style={{ marginLeft: 8, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setDealRefSourceId(""); setDealRefSourceName(""); setDealRefQuery(""); }}>remove</button>
-                </div>
-              )}
-            </div>
-            <div className="field">
-              <div className="label">Notes (optional)</div>
-              <textarea className="textarea" value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="Any notes about this transaction…" style={{ minHeight: 70 }} />
-            </div>
-            <div className="row">
-              <button className="btn btnPrimary" onClick={saveDeal} disabled={dealBusy}>{dealBusy ? "Saving…" : "Save"}</button>
-              <button className="btn" onClick={() => setDealFormOpen(false)} disabled={dealBusy}>Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {/* Active deals */}
-        {activeDeals.length > 0 && (
-          <div className="stack" style={{ gap: 0 }}>
-            {activeDeals.map((d, i) => (
-              <div key={d.id} style={{ padding: "10px 0", borderBottom: i < activeDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
-                <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
-                    <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
-                      <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
-                      <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
-                        {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
-                      </span>
-                      {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
-                      {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
-                      {d.referral_source_name && <span className="badge">Ref: {d.referral_source_name}</span>}
-                    </div>
-                    {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>{d.notes}</div>}
-                  </div>
-                  <div className="row" style={{ flexShrink: 0, gap: 4 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Closed deals — collapsed */}
-        {closedDeals.length > 0 && (
-          <details style={{ marginTop: activeDeals.length > 0 ? 8 : 0 }}>
-            <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
-              {closedDeals.length} closed deal{closedDeals.length !== 1 ? "s" : ""}
-            </summary>
-            <div className="stack" style={{ gap: 0, marginTop: 6 }}>
-              {closedDeals.map((d, i) => (
-                <div key={d.id} style={{ padding: "8px 0", borderBottom: i < closedDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
-                  <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>{d.address}</div>
-                      <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
-                        <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
-                        <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
-                          {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
-                        </span>
-                        {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
-                        {d.close_date && <span className="badge">{new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
-                      </div>
-                    </div>
-                    <div className="row" style={{ flexShrink: 0, gap: 4 }}>
-                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
-                      <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {deals.length === 0 && !dealFormOpen && (
-          <div className="subtle" style={{ fontSize: 13 }}>No deals yet.</div>
-        )}
-      </div>
-
-      {/* ── FOLLOW-UPS ─────────────────────────────────────────────────────── */}
-      <div className="card cardPad stack">
-        <div className="rowBetween" style={{ alignItems: "center" }}>
-          <div style={{ fontWeight: 900, fontSize: 15 }}>
-            Follow-ups
-            {overdueFollowUps.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, color: "#8a0000", background: "rgba(200,0,0,.08)", border: "1px solid rgba(200,0,0,.2)", borderRadius: 4, padding: "1px 6px" }}>
-                {overdueFollowUps.length} overdue
-              </span>
-            )}
-          </div>
-          <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => setFuFormOpen((v) => !v)}>
-            {fuFormOpen ? "Cancel" : "+ Add"}
-          </button>
-        </div>
-
-        {fuFormOpen && (
-          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", paddingTop: 10, borderTop: "1px solid rgba(0,0,0,.07)" }}>
-            <div className="field">
-              <div className="label">Follow up on</div>
-              <input className="input" type="date" value={fuDate} onChange={(e) => setFuDate(e.target.value)} autoFocus />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 200 }}>
-              <div className="label">Context (optional)</div>
-              <input className="input" value={fuNote} onChange={(e) => setFuNote(e.target.value)} placeholder="e.g. Check if they decided on the listing" />
-            </div>
-            <button className="btn btnPrimary" onClick={saveFollowUp} disabled={fuSaving || !fuDate}>
-              {fuSaving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        )}
-
-        {followUps.length > 0 ? (
-          <div className="stack" style={{ gap: 0 }}>
-            {followUps.map((f, i) => {
-              const today = new Date().toISOString().slice(0, 10);
-              const overdue = f.due_date < today;
-              return (
-                <div key={f.id} style={{ padding: "9px 0", borderBottom: i < followUps.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: overdue ? "#8a0000" : undefined }}>
-                      {overdue ? "Overdue · " : ""}{f.due_date}
-                    </span>
-                    {f.note && <span className="subtle" style={{ fontSize: 13, marginLeft: 8 }}>{f.note}</span>}
-                  </div>
-                  <div className="row" style={{ gap: 4, flexShrink: 0 }}>
-                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => completeFollowUp(f.id)}>Done ✓</button>
-                    <button className="btn" style={{ fontSize: 11, padding: "2px 8px", color: "rgba(18,18,18,.4)" }} onClick={() => deleteFollowUp(f.id)}>Remove</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          !fuFormOpen && <div className="subtle" style={{ fontSize: 13 }}>No reminders set.</div>
-        )}
-      </div>
-
-      {/* ── DRAFT + HISTORY TABS ───────────────────────────────────────────── */}
+      {/* ── MAIN TABS ─────────────────────────────────────────────────────── */}
       <div className="card cardPad" id="contact-tabs">
         {/* Tab bar */}
         <div className="row" style={{ gap: 0, marginBottom: 16, borderBottom: "2px solid rgba(0,0,0,.08)" }}>
-          {([["draft", "Draft message"], ["history", `History (${touches.length})`], ["timeline", "Timeline"]] as const).map(([tab, label]) => (
+          {([["outreach", "Outreach"], ["timeline", "Timeline"], ["details", "Details"]] as const).map(([tab, label]) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1734,19 +1352,319 @@ export default function ContactDetailPage() {
           ))}
         </div>
 
-        {activeTab === "draft" && <VoiceDraftPanel contactId={contact.id} />}
-        {activeTab === "history" && <TouchHistory touches={touches} />}
+        {/* OUTREACH TAB: draft + text thread upload */}
+        {activeTab === "outreach" && (
+          <div className="stack">
+            <VoiceDraftPanel contactId={contact.id} />
+            <div className="hr" />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Upload text thread</div>
+              <div className="subtle" style={{ fontSize: 12, marginBottom: 10 }}>Paste an iMessage thread to improve AI drafts and relationship intelligence</div>
+              <TextThreadUploadPanel contactId={contact.id} />
+            </div>
+          </div>
+        )}
+
+        {/* TIMELINE TAB */}
         {activeTab === "timeline" && (
-          <ContactTimeline
-            contact={contact}
-            touches={touches}
-            deals={deals}
-            followUps={followUps}
-          />
+          <div className="stack">
+            <ContactTimeline
+              contact={contact}
+              touches={touches}
+              deals={deals}
+              followUps={followUps}
+            />
+            {touches.length > 0 && (
+              <details style={{ marginTop: 8 }}>
+                <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+                  Touch history ({touches.length})
+                </summary>
+                <div style={{ marginTop: 10 }}>
+                  <TouchHistory touches={touches} />
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* DETAILS TAB: edit + household + deals + danger */}
+        {activeTab === "details" && (
+          <div className="stack">
+
+            {/* Edit contact */}
+            <div>
+              <button
+                className="btn"
+                style={{ fontSize: 13, fontWeight: 700 }}
+                onClick={() => setAdvancedOpen((v) => !v)}
+              >
+                {advancedOpen ? "Close edit ▲" : "Edit contact ▾"}
+              </button>
+            </div>
+
+            {advancedOpen && (
+              <>
+                <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
+                  <div className="field" style={{ flex: 1, minWidth: 240 }}>
+                    <div className="label">Name</div>
+                    <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+                  </div>
+                  <div className="field" style={{ width: 220, minWidth: 180 }}>
+                    <div className="label">Category</div>
+                    <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+                      <option>Client</option>
+                      <option>Agent</option>
+                      <option>Developer</option>
+                      <option>Vendor</option>
+                      <option>Sphere</option>
+                      <option>Other</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ width: 140 }}>
+                    <div className="label">Tier</div>
+                    <select className="select" value={tier} onChange={(e) => setTier(e.target.value as any)}>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="field">
+                  <div className="label">Client Type (optional)</div>
+                  <input className="input" value={clientType} onChange={(e) => setClientType(e.target.value)} placeholder="buyer / seller / past_client / lead / landlord / tenant / sphere ..." />
+                </div>
+                <div className="fieldGridMobile" style={{ alignItems: "flex-end" }}>
+                  <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                    <div className="label">Email (optional)</div>
+                    <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                    <div className="label">Phone (optional)</div>
+                    <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(310) 555-0100" />
+                  </div>
+                </div>
+                <div className="field">
+                  <div className="label">Notes</div>
+                  <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Context for AI drafts, relationship notes, key details…" style={{ minHeight: 80 }} />
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>Milestones</div>
+                <div className="fieldGridMobile">
+                  <div className="field">
+                    <div className="label">Birthday</div>
+                    <input className="input" type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <div className="label">Close anniversary</div>
+                    <input className="input" type="date" value={closeAnniversary} onChange={(e) => setCloseAnniversary(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <div className="label">Move-in date</div>
+                    <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
+                    {savingContact ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            <div className="hr" />
+
+            {/* Household */}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Household / linked contacts</div>
+              {linkedContacts.map((lc) => (
+                <div key={lc.link_id} className="rowBetween" style={{ alignItems: "center", padding: "4px 0" }}>
+                  <div>
+                    <a href={`/contacts/${lc.contact.id}`} style={{ fontWeight: 700 }}>{lc.contact.display_name}</a>
+                    <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>{lc.contact.category}{lc.contact.tier ? ` · ${lc.contact.tier}` : ""}</span>
+                    {lc.household_name && <span className="subtle" style={{ marginLeft: 8, fontSize: 12 }}>({lc.household_name})</span>}
+                  </div>
+                  <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
+                </div>
+              ))}
+              <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
+                {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "+ Add another" : "+ Link contact"}
+              </button>
+              {linkOpen && (
+                <div className="stack" style={{ marginTop: 4 }}>
+                  <input className="input" value={linkQ} onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }} placeholder="Type a name…" />
+                  {linkResults.length > 0 && (
+                    <div className="stack" style={{ gap: 4 }}>
+                      {linkResults.map((r) => (
+                        <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
+                          <span style={{ fontSize: 13 }}>{r.display_name} <span className="subtle">· {r.category}</span></span>
+                          <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="Household name (optional)" />
+                </div>
+              )}
+              {linkMsg && <div className="subtle" style={{ fontSize: 12, color: linkMsg.startsWith("Error") ? "#8a0000" : "#0b6b2a" }}>{linkMsg}</div>}
+              {linkedContacts.length > 0 && (
+                <div style={{ paddingTop: 8, borderTop: "1px solid rgba(0,0,0,.07)", marginTop: 8 }}>
+                  <div className="subtle" style={{ fontSize: 12, marginBottom: 6 }}>Copy all touches to each linked contact, then archive this one.</div>
+                  {distributeMsg ? (
+                    <div className="subtle" style={{ fontSize: 12, color: "#0b6b2a" }}>{distributeMsg}</div>
+                  ) : distributeConfirm ? (
+                    <div className="row">
+                      <span className="subtle" style={{ fontSize: 12 }}>This archives this contact.</span>
+                      <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={distributeToLinked} disabled={distributing}>{distributing ? "Working…" : "Confirm"}</button>
+                      <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(false)}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button className="btn" style={{ fontSize: 12 }} onClick={() => setDistributeConfirm(true)}>Distribute & archive</button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="hr" />
+
+            {/* Deals */}
+            <div>
+              <div className="rowBetween" style={{ alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  Deals
+                  {activeDeals.length > 0 && <span className="subtle" style={{ fontWeight: 400, fontSize: 12, marginLeft: 6 }}>{activeDeals.length} active</span>}
+                </div>
+                <div className="row" style={{ gap: 8 }}>
+                  <a href="/pipeline" className="subtle" style={{ fontSize: 12 }}>Manage in Pipeline →</a>
+                  <button className="btn" style={{ fontSize: 12, padding: "2px 10px" }} onClick={() => dealFormOpen ? setDealFormOpen(false) : openNewDeal()}>
+                    {dealFormOpen && !editingDeal ? "Cancel" : "+ Add"}
+                  </button>
+                </div>
+              </div>
+
+              {dealErr && <div className="alert alertError" style={{ fontSize: 13 }}>{dealErr}</div>}
+
+              {dealFormOpen && (
+                <div className="stack" style={{ paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)" }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>{editingDeal ? "Edit deal" : "New deal"}</div>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                      <div className="label">Address</div>
+                      <input className="input" value={dealAddress} onChange={e => setDealAddress(e.target.value)} placeholder="123 Main St, City, CA 90210" autoFocus />
+                    </div>
+                    <div className="field" style={{ minWidth: 130 }}>
+                      <div className="label">Role</div>
+                      <select className="select" value={dealRole} onChange={e => setDealRole(e.target.value)}>
+                        <option value="buyer">Buyer</option>
+                        <option value="seller">Seller</option>
+                        <option value="landlord">Landlord</option>
+                        <option value="tenant">Tenant</option>
+                      </select>
+                    </div>
+                    <div className="field" style={{ minWidth: 160 }}>
+                      <div className="label">Stage</div>
+                      <select className="select" value={dealStatus} onChange={e => setDealStatus(e.target.value as DealStage)}>
+                        {DEAL_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div className="field" style={{ minWidth: 160 }}>
+                      <div className="label">Price (optional)</div>
+                      <input className="input" value={dealPrice} onChange={e => setDealPrice(e.target.value)} placeholder="1,250,000" />
+                    </div>
+                    <div className="field" style={{ minWidth: 160 }}>
+                      <div className="label">Close date (optional)</div>
+                      <input className="input" type="date" value={dealCloseDate} onChange={e => setDealCloseDate(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <div className="label">Notes (optional)</div>
+                    <textarea className="textarea" value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="Any notes about this transaction…" style={{ minHeight: 70 }} />
+                  </div>
+                  <div className="row">
+                    <button className="btn btnPrimary" onClick={saveDeal} disabled={dealBusy}>{dealBusy ? "Saving…" : "Save"}</button>
+                    <button className="btn" onClick={() => setDealFormOpen(false)} disabled={dealBusy}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {activeDeals.length > 0 && (
+                <div className="stack" style={{ gap: 0 }}>
+                  {activeDeals.map((d, i) => (
+                    <div key={d.id} style={{ padding: "10px 0", borderBottom: i < activeDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                      <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: 14, wordBreak: "break-word" }}>{d.address}</div>
+                          <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
+                            <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
+                            <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
+                              {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                            </span>
+                            {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
+                            {d.close_date && <span className="badge">Close {new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                            {d.referral_source_name && <span className="badge">Ref: {d.referral_source_name}</span>}
+                          </div>
+                          {d.notes && <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>{d.notes}</div>}
+                        </div>
+                        <div className="row" style={{ flexShrink: 0, gap: 4 }}>
+                          <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
+                          <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {closedDeals.length > 0 && (
+                <details style={{ marginTop: activeDeals.length > 0 ? 8 : 0 }}>
+                  <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+                    {closedDeals.length} closed deal{closedDeals.length !== 1 ? "s" : ""}
+                  </summary>
+                  <div className="stack" style={{ gap: 0, marginTop: 6 }}>
+                    {closedDeals.map((d, i) => (
+                      <div key={d.id} style={{ padding: "8px 0", borderBottom: i < closedDeals.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                        <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>{d.address}</div>
+                            <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                              <span className="badge" style={{ textTransform: "capitalize" }}>{d.role}</span>
+                              <span className="badge" style={{ textTransform: "capitalize", ...stageColor(d.status) }}>
+                                {DEAL_STAGES.find(s => s.value === d.status)?.label ?? d.status}
+                              </span>
+                              {d.price != null && <span className="badge">${Number(d.price).toLocaleString()}</span>}
+                              {d.close_date && <span className="badge">{new Date(d.close_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                            </div>
+                          </div>
+                          <div className="row" style={{ flexShrink: 0, gap: 4 }}>
+                            <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => openEditDeal(d)} disabled={dealBusy}>Edit</button>
+                            <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => deleteDeal(d.id)} disabled={dealBusy}>Remove</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {deals.length === 0 && !dealFormOpen && (
+                <div className="subtle" style={{ fontSize: 13 }}>No deals yet.</div>
+              )}
+            </div>
+
+            <div className="hr" />
+
+            {/* Danger zone */}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
+              <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete contact"}
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Log touch modal (kept functional but less noisy text) */}
+      {/* Log touch modal */}
       {logOpen && (
         <div
           className="modalSheet"
@@ -1767,96 +1685,108 @@ export default function ContactDetailPage() {
                 <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
                 <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
               </div>
-              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
+              <button className="btn btnFullMobile" onClick={() => { setLogOpen(false); setTouchSaved(false); }}>
                 Close
               </button>
             </div>
 
-            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
-              <div className="field" style={{ width: 160, minWidth: 160 }}>
-                <div className="label">Direction</div>
-                <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
-                  <option value="outbound">outbound</option>
-                  <option value="inbound">inbound</option>
-                </select>
+            {touchSaved ? (
+              <div className="stack" style={{ marginTop: 16, gap: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#0b6b2a" }}>Touch saved</div>
+                <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                  <a href="/morning" className="btn btnPrimary">← Back to Morning</a>
+                  <button className="btn" onClick={() => { setLogOpen(false); setTouchSaved(false); }}>Stay here</button>
+                </div>
               </div>
+            ) : (
+              <>
+                <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
+                  <div className="field" style={{ width: 160, minWidth: 160 }}>
+                    <div className="label">Direction</div>
+                    <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
+                      <option value="outbound">outbound</option>
+                      <option value="inbound">inbound</option>
+                    </select>
+                  </div>
 
-              <div className="field" style={{ width: 160, minWidth: 160 }}>
-                <div className="label">Channel</div>
-                <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
-                  <option value="email">email</option>
-                  <option value="text">text</option>
-                  <option value="call">call</option>
-                  <option value="in_person">in_person</option>
-                  <option value="social_dm">social_dm</option>
-                  <option value="other">other</option>
-                </select>
-              </div>
+                  <div className="field" style={{ width: 160, minWidth: 160 }}>
+                    <div className="label">Channel</div>
+                    <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
+                      <option value="email">email</option>
+                      <option value="text">text</option>
+                      <option value="call">call</option>
+                      <option value="in_person">in_person</option>
+                      <option value="social_dm">social_dm</option>
+                      <option value="other">other</option>
+                    </select>
+                  </div>
 
-              <div className="field" style={{ width: 220, minWidth: 220 }}>
-                <div className="label">Intent</div>
-                <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
-                  <option value="check_in">check_in</option>
-                  <option value="referral_ask">referral_ask</option>
-                  <option value="review_ask">review_ask</option>
-                  <option value="deal_followup">deal_followup</option>
-                  <option value="collaboration">collaboration</option>
-                  <option value="event_invite">event_invite</option>
-                  <option value="other">other</option>
-                </select>
-              </div>
+                  <div className="field" style={{ width: 220, minWidth: 220 }}>
+                    <div className="label">Intent</div>
+                    <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
+                      <option value="check_in">check_in</option>
+                      <option value="referral_ask">referral_ask</option>
+                      <option value="review_ask">review_ask</option>
+                      <option value="deal_followup">deal_followup</option>
+                      <option value="collaboration">collaboration</option>
+                      <option value="event_invite">event_invite</option>
+                      <option value="other">other</option>
+                    </select>
+                  </div>
 
-              <div className="field" style={{ width: 220, minWidth: 220 }}>
-                <div className="label">Occurred at</div>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={logOccurredAt}
-                  onChange={(e) => setLogOccurredAt(e.target.value)}
-                />
-              </div>
-            </div>
+                  <div className="field" style={{ width: 220, minWidth: 220 }}>
+                    <div className="label">Occurred at</div>
+                    <input
+                      className="input"
+                      type="datetime-local"
+                      value={logOccurredAt}
+                      onChange={(e) => setLogOccurredAt(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-            <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
-              <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                <div className="label">Source</div>
-                <input
-                  className="input"
-                  value={logSource}
-                  onChange={(e) => setLogSource(e.target.value)}
-                  placeholder="manual / gmail / sms"
-                />
-              </div>
+                <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
+                  <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                    <div className="label">Source</div>
+                    <input
+                      className="input"
+                      value={logSource}
+                      onChange={(e) => setLogSource(e.target.value)}
+                      placeholder="manual / gmail / sms"
+                    />
+                  </div>
 
-              <div className="field" style={{ flex: 1, minWidth: 260 }}>
-                <div className="label">Link (optional)</div>
-                <input
-                  className="input"
-                  value={logLink}
-                  onChange={(e) => setLogLink(e.target.value)}
-                  placeholder="thread link / calendar link"
-                />
-              </div>
-            </div>
+                  <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                    <div className="label">Link (optional)</div>
+                    <input
+                      className="input"
+                      value={logLink}
+                      onChange={(e) => setLogLink(e.target.value)}
+                      placeholder="thread link / calendar link"
+                    />
+                  </div>
+                </div>
 
-            <div className="field" style={{ marginTop: 10 }}>
-              <div className="label">Summary (optional)</div>
-              <textarea
-                className="textarea"
-                value={logSummary}
-                onChange={(e) => setLogSummary(e.target.value)}
-                placeholder="Quick note about what happened"
-              />
-            </div>
+                <div className="field" style={{ marginTop: 10 }}>
+                  <div className="label">Summary (optional)</div>
+                  <textarea
+                    className="textarea"
+                    value={logSummary}
+                    onChange={(e) => setLogSummary(e.target.value)}
+                    placeholder="Quick note about what happened"
+                  />
+                </div>
 
-            <div className="rowResponsive" style={{ marginTop: 12 }}>
-              <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
-                {savingTouch ? "Saving…" : "Save touch"}
-              </button>
-              <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
-                Cancel
-              </button>
-            </div>
+                <div className="rowResponsive" style={{ marginTop: 12 }}>
+                  <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
+                    {savingTouch ? "Saving…" : "Save touch"}
+                  </button>
+                  <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
