@@ -270,6 +270,21 @@ export default function PipelinePage() {
   const [offerListingLink, setOfferListingLink] = useState("");
   const [offerSaving, setOfferSaving] = useState(false);
 
+  // Offer editing
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
+  const [editOfferAddress, setEditOfferAddress] = useState("");
+  const [editOfferPrice, setEditOfferPrice] = useState("");
+  const [editOfferAskingPrice, setEditOfferAskingPrice] = useState("");
+  const [editOfferAcceptedPrice, setEditOfferAcceptedPrice] = useState("");
+  const [editOfferClosedPrice, setEditOfferClosedPrice] = useState("");
+  const [editOfferCompeting, setEditOfferCompeting] = useState("");
+  const [editOfferOutcome, setEditOfferOutcome] = useState("pending");
+  const [editOfferTerms, setEditOfferTerms] = useState("");
+  const [editOfferAgentName, setEditOfferAgentName] = useState("");
+  const [editOfferListingLink, setEditOfferListingLink] = useState("");
+  const [editOfferCmaLink, setEditOfferCmaLink] = useState("");
+  const [editOfferSaving, setEditOfferSaving] = useState(false);
+
   // Listing prep state
   const [prepItems, setPrepItems] = useState<PrepItem[]>([]);
   const [prepLoading, setPrepLoading] = useState(false);
@@ -611,6 +626,62 @@ export default function PipelinePage() {
       body: JSON.stringify({ id: offerId, outcome }),
     });
     setOffers(prev => prev.map(o => o.id === offerId ? { ...o, outcome } : o));
+  }
+
+  function startEditOffer(offer: Offer) {
+    setEditingOfferId(offer.id);
+    setEditOfferAddress(offer.property_address);
+    setEditOfferPrice(offer.offer_price ? String(offer.offer_price) : "");
+    setEditOfferAskingPrice(offer.asking_price ? String(offer.asking_price) : "");
+    setEditOfferAcceptedPrice(offer.accepted_price ? String(offer.accepted_price) : "");
+    setEditOfferClosedPrice(offer.closed_price ? String(offer.closed_price) : "");
+    setEditOfferCompeting(offer.competing_offers_count != null ? String(offer.competing_offers_count) : "");
+    setEditOfferOutcome(offer.outcome);
+    setEditOfferTerms(offer.terms_notes ?? "");
+    setEditOfferAgentName(offer.seller_agent_contact?.display_name ?? offer.seller_agent_name ?? "");
+    setEditOfferListingLink(offer.listing_link ?? "");
+    setEditOfferCmaLink(offer.cma_link ?? "");
+  }
+
+  async function saveOfferEdit() {
+    if (!editingOfferId) return;
+    setEditOfferSaving(true);
+    const res = await fetch("/api/offers", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingOfferId,
+        property_address: editOfferAddress.trim(),
+        offer_price: editOfferPrice ? Number(editOfferPrice) : null,
+        asking_price: editOfferAskingPrice ? Number(editOfferAskingPrice) : null,
+        accepted_price: editOfferAcceptedPrice ? Number(editOfferAcceptedPrice) : null,
+        closed_price: editOfferClosedPrice ? Number(editOfferClosedPrice) : null,
+        competing_offers_count: editOfferCompeting ? Number(editOfferCompeting) : null,
+        outcome: editOfferOutcome,
+        terms_notes: editOfferTerms || null,
+        seller_agent_name: editOfferAgentName || null,
+        listing_link: editOfferListingLink || null,
+        cma_link: editOfferCmaLink || null,
+      }),
+    });
+    setEditOfferSaving(false);
+    if (res.ok) {
+      setOffers(prev => prev.map(o => o.id === editingOfferId ? {
+        ...o,
+        property_address: editOfferAddress.trim(),
+        offer_price: editOfferPrice ? Number(editOfferPrice) : null,
+        asking_price: editOfferAskingPrice ? Number(editOfferAskingPrice) : null,
+        accepted_price: editOfferAcceptedPrice ? Number(editOfferAcceptedPrice) : null,
+        closed_price: editOfferClosedPrice ? Number(editOfferClosedPrice) : null,
+        competing_offers_count: editOfferCompeting ? Number(editOfferCompeting) : null,
+        outcome: editOfferOutcome,
+        terms_notes: editOfferTerms || null,
+        seller_agent_name: editOfferAgentName || null,
+        listing_link: editOfferListingLink || null,
+        cma_link: editOfferCmaLink || null,
+      } : o));
+      setEditingOfferId(null);
+    }
   }
 
   async function deleteOffer(offerId: string) {
@@ -1425,45 +1496,117 @@ export default function PipelinePage() {
                 )}
                 {offers.map(offer => (
                   <div key={offer.id} className="card cardPad">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                      <div style={{ fontWeight: 800, fontSize: 14 }}>{offer.property_address}</div>
-                      <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-                        {OFFER_OUTCOMES.map(o => (
-                          <button key={o} className="btn" style={{ fontSize: 11, padding: "2px 8px",
-                            fontWeight: offer.outcome === o ? 900 : 400,
-                            background: offer.outcome === o ? outcomeColor(o) : undefined,
-                            color: offer.outcome === o ? "white" : undefined }}
-                            onClick={() => updateOfferOutcome(offer.id, o)}>
-                            {o}
-                          </button>
-                        ))}
-                        <button className="btn" style={{ fontSize: 11, color: "#8a0000" }} onClick={() => deleteOffer(offer.id)}>✕</button>
-                      </div>
-                    </div>
-                    <div className="row" style={{ marginTop: 6, gap: 12, flexWrap: "wrap", fontSize: 13 }}>
-                      {offer.asking_price && <span><span className="subtle">Ask:</span> {fmt(offer.asking_price)}</span>}
-                      {offer.offer_price && <span><span className="subtle">Offer:</span> {fmt(offer.offer_price)}</span>}
-                      {offer.accepted_price && <span><span className="subtle">Accepted:</span> {fmt(offer.accepted_price)}</span>}
-                      {offer.closed_price && (
-                        <span style={{ fontWeight: 700, color: offer.outcome === "rejected" ? "#8a0000" : "#0b6b2a" }}>
-                          <span className="subtle">{offer.outcome === "rejected" ? "Winning offer:" : "Closed:"}</span> {fmt(offer.closed_price)}
-                          {offer.outcome === "rejected" && offer.offer_price && (
-                            <span className="subtle"> ({fmt(offer.closed_price - offer.offer_price)} gap)</span>
+                    {editingOfferId === offer.id ? (
+                      <div className="stack">
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                            <div className="label">Property address</div>
+                            <input className="input" value={editOfferAddress} onChange={e => setEditOfferAddress(e.target.value)} />
+                          </div>
+                          <div className="field" style={{ minWidth: 130 }}>
+                            <div className="label">Asking price</div>
+                            <input className="input" value={editOfferAskingPrice} onChange={e => setEditOfferAskingPrice(e.target.value)} placeholder="1,500,000" />
+                          </div>
+                          <div className="field" style={{ minWidth: 130 }}>
+                            <div className="label">Our offer</div>
+                            <input className="input" value={editOfferPrice} onChange={e => setEditOfferPrice(e.target.value)} placeholder="1,450,000" />
+                          </div>
+                        </div>
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ minWidth: 110 }}>
+                            <div className="label">Competing offers</div>
+                            <input className="input" value={editOfferCompeting} onChange={e => setEditOfferCompeting(e.target.value)} placeholder="4" />
+                          </div>
+                          <div className="field" style={{ minWidth: 130 }}>
+                            <div className="label">Outcome</div>
+                            <select className="select" value={editOfferOutcome} onChange={e => setEditOfferOutcome(e.target.value)}>
+                              {OFFER_OUTCOMES.map(o => <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>)}
+                            </select>
+                          </div>
+                          {(editOfferOutcome === "accepted" || editOfferOutcome === "countered") && (
+                            <div className="field" style={{ minWidth: 130 }}>
+                              <div className="label">Accepted / counter price</div>
+                              <input className="input" value={editOfferAcceptedPrice} onChange={e => setEditOfferAcceptedPrice(e.target.value)} placeholder="1,475,000" />
+                            </div>
                           )}
-                        </span>
-                      )}
-                      {offer.competing_offers_count != null && <span className="subtle">{offer.competing_offers_count} competing</span>}
-                    </div>
-                    {(offer.seller_agent_contact?.display_name || offer.seller_agent_name) && (
-                      <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.55)" }}>
-                        Seller's agent: {offer.seller_agent_contact?.display_name || offer.seller_agent_name}
+                          {(editOfferOutcome === "accepted" || editOfferOutcome === "rejected") && (
+                            <div className="field" style={{ minWidth: 130 }}>
+                              <div className="label">{editOfferOutcome === "rejected" ? "Winning offer price" : "Closed price"}</div>
+                              <input className="input" value={editOfferClosedPrice} onChange={e => setEditOfferClosedPrice(e.target.value)} placeholder="1,475,000" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="field">
+                          <div className="label">Seller's agent</div>
+                          <input className="input" value={editOfferAgentName} onChange={e => setEditOfferAgentName(e.target.value)} placeholder="Agent name…" />
+                        </div>
+                        <div className="field">
+                          <div className="label">{editOfferOutcome === "rejected" ? "Notes — why we lost, contingency differences, commission terms, etc." : "Terms / contingencies"}</div>
+                          <textarea className="textarea" value={editOfferTerms} onChange={e => setEditOfferTerms(e.target.value)}
+                            placeholder={editOfferOutcome === "rejected" ? "e.g. Winning buyer waived inspection, paid buyer commissions, all-cash close in 14 days…" : "21-day inspection, loan contingency, close 30 days…"}
+                            style={{ minHeight: 60 }} />
+                        </div>
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+                          <div className="field" style={{ flex: 1 }}>
+                            <div className="label">Listing link</div>
+                            <input className="input" value={editOfferListingLink} onChange={e => setEditOfferListingLink(e.target.value)} placeholder="https://…" />
+                          </div>
+                          <div className="field" style={{ flex: 1 }}>
+                            <div className="label">CMA link</div>
+                            <input className="input" value={editOfferCmaLink} onChange={e => setEditOfferCmaLink(e.target.value)} placeholder="https://…" />
+                          </div>
+                        </div>
+                        <div className="row" style={{ gap: 8 }}>
+                          <button className="btn btnPrimary" style={{ fontSize: 12 }} onClick={saveOfferEdit} disabled={editOfferSaving}>
+                            {editOfferSaving ? "Saving…" : "Save changes"}
+                          </button>
+                          <button className="btn" style={{ fontSize: 12 }} onClick={() => setEditingOfferId(null)}>Cancel</button>
+                        </div>
                       </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 800, fontSize: 14 }}>{offer.property_address}</div>
+                          <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                            <button className="btn" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => startEditOffer(offer)}>Edit</button>
+                            {OFFER_OUTCOMES.map(o => (
+                              <button key={o} className="btn" style={{ fontSize: 11, padding: "2px 8px",
+                                fontWeight: offer.outcome === o ? 900 : 400,
+                                background: offer.outcome === o ? outcomeColor(o) : undefined,
+                                color: offer.outcome === o ? "white" : undefined }}
+                                onClick={() => updateOfferOutcome(offer.id, o)}>
+                                {o}
+                              </button>
+                            ))}
+                            <button className="btn" style={{ fontSize: 11, color: "#8a0000" }} onClick={() => deleteOffer(offer.id)}>✕</button>
+                          </div>
+                        </div>
+                        <div className="row" style={{ marginTop: 6, gap: 12, flexWrap: "wrap", fontSize: 13 }}>
+                          {offer.asking_price && <span><span className="subtle">Ask:</span> {fmt(offer.asking_price)}</span>}
+                          {offer.offer_price && <span><span className="subtle">Offer:</span> {fmt(offer.offer_price)}</span>}
+                          {offer.accepted_price && <span><span className="subtle">Accepted:</span> {fmt(offer.accepted_price)}</span>}
+                          {offer.closed_price && (
+                            <span style={{ fontWeight: 700, color: offer.outcome === "rejected" ? "#8a0000" : "#0b6b2a" }}>
+                              <span className="subtle">{offer.outcome === "rejected" ? "Winning offer:" : "Closed:"}</span> {fmt(offer.closed_price)}
+                              {offer.outcome === "rejected" && offer.offer_price && (
+                                <span className="subtle"> ({fmt(offer.closed_price - offer.offer_price)} gap)</span>
+                              )}
+                            </span>
+                          )}
+                          {offer.competing_offers_count != null && <span className="subtle">{offer.competing_offers_count} competing</span>}
+                        </div>
+                        {(offer.seller_agent_contact?.display_name || offer.seller_agent_name) && (
+                          <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.55)" }}>
+                            Seller's agent: {offer.seller_agent_contact?.display_name || offer.seller_agent_name}
+                          </div>
+                        )}
+                        {offer.terms_notes && <div style={{ fontSize: 12, marginTop: 6, color: "rgba(18,18,18,.65)", whiteSpace: "pre-wrap" }}>{offer.terms_notes}</div>}
+                        <div className="row" style={{ gap: 10, marginTop: 4 }}>
+                          {offer.listing_link && <a href={offer.listing_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>Listing →</a>}
+                          {offer.cma_link && <a href={offer.cma_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>CMA →</a>}
+                        </div>
+                      </>
                     )}
-                    {offer.terms_notes && <div style={{ fontSize: 12, marginTop: 6, color: "rgba(18,18,18,.65)", whiteSpace: "pre-wrap" }}>{offer.terms_notes}</div>}
-                    <div className="row" style={{ gap: 10, marginTop: 4 }}>
-                      {offer.listing_link && <a href={offer.listing_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>Listing →</a>}
-                      {offer.cma_link && <a href={offer.cma_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>CMA →</a>}
-                    </div>
                   </div>
                 ))}
               </div>
