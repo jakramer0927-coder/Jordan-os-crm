@@ -752,10 +752,13 @@ export default function PipelinePage() {
   const pastClients = deals.filter(d => d.pipeline_status === "past_client");
 
   // GCI metrics
+  const BUYER_STAGES_FOR_ACTIVE_GCI: BuyerStage[] = ["actively_searching", "offer", "under_contract", "closed"];
+  const SELLER_STAGES_FOR_ACTIVE_GCI: SellerStage[] = ["signed_agreement", "listing_prepped", "on_market", "in_contract", "sold"];
+
   const activeGci = deals
     .filter(d => d.pipeline_status === "active" && (
-      d.buyer_stage === "offer" || d.buyer_stage === "under_contract" ||
-      d.seller_stage === "on_market" || d.seller_stage === "in_contract"
+      (d.buyer_stage && BUYER_STAGES_FOR_ACTIVE_GCI.includes(d.buyer_stage)) ||
+      (d.seller_stage && SELLER_STAGES_FOR_ACTIVE_GCI.includes(d.seller_stage))
     ))
     .reduce((sum, d) => sum + (estGci(d) ?? 0), 0);
 
