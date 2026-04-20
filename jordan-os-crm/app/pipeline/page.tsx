@@ -193,6 +193,8 @@ export default function PipelinePage() {
   // Main tabs
   type MainTab = "buyers" | "sellers" | "investors" | "past_clients";
   const [mainTab, setMainTab] = useState<MainTab>("buyers");
+  const [groupByContact, setGroupByContact] = useState(false);
+  const [expandedContacts, setExpandedContacts] = useState<Set<string>>(new Set());
 
   // ── Deal modal ──
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
@@ -858,6 +860,46 @@ export default function PipelinePage() {
     );
   }
 
+  function GroupedContactCard({ contactId, name, deals: groupDeals }: { contactId: string; name: string; deals: Deal[] }) {
+    const expanded = expandedContacts.has(contactId);
+    const totalGci = groupDeals.reduce((s, d) => s + (estGci(d) ?? 0), 0);
+    return (
+      <div className="card cardPad" style={{ marginBottom: 8, overflow: "hidden", minWidth: 0 }}>
+        <div
+          style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+          onClick={() => setExpandedContacts(prev => {
+            const next = new Set(prev);
+            next.has(contactId) ? next.delete(contactId) : next.add(contactId);
+            return next;
+          })}
+        >
+          <div style={{ fontWeight: 800, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {totalGci > 0 && <GciChip value={totalGci} />}
+            <span style={{ fontSize: 12, fontWeight: 700, background: "rgba(0,0,0,.08)", borderRadius: 99, padding: "1px 7px" }}>{groupDeals.length}</span>
+            <span style={{ fontSize: 11, color: "rgba(18,18,18,.4)" }}>{expanded ? "▲" : "▼"}</span>
+          </div>
+        </div>
+        {expanded && (
+          <div style={{ marginTop: 8, borderTop: "1px solid rgba(0,0,0,.07)", paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            {groupDeals.map(d => (
+              <div
+                key={d.id}
+                style={{ cursor: "pointer", padding: "6px 8px", borderRadius: 6, background: "rgba(0,0,0,.04)", fontSize: 13 }}
+                onClick={() => { openDeal(d); setOffers([]); setPrepItems([]); setActivities([]); setOppContacts([]); }}
+              >
+                <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {d.address || d.target_areas || (d.budget_max ? fmt(d.budget_max) : "No address")}
+                </div>
+                {estGci(d) && <div style={{ fontSize: 11, color: "rgba(18,18,18,.5)", marginTop: 2 }}>{fmt(estGci(d)!)}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function KanbanColumn({ stage, deals: colDeals, oppType, singular }: {
     stage: { value: string; label: string; color: string; bg: string };
     deals: Deal[];
@@ -866,6 +908,22 @@ export default function PipelinePage() {
   }) {
     const isOver = dragOverStage === stage.value;
     const stageGci = colDeals.reduce((s, d) => s + (estGci(d) ?? 0), 0);
+
+    const cards = (() => {
+      if (!groupByContact) return colDeals.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>);
+      const groups = new Map<string, Deal[]>();
+      for (const d of colDeals) {
+        const key = d.contact_id;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(d);
+      }
+      return Array.from(groups.entries()).map(([contactId, groupDeals]) =>
+        groupDeals.length === 1
+          ? <div key={groupDeals[0].id}>{DealCard({ deal: groupDeals[0] })}</div>
+          : <div key={contactId}>{GroupedContactCard({ contactId, name: groupDeals[0].contacts?.display_name ?? "Unknown", deals: groupDeals })}</div>
+      );
+    })();
+
     return (
       <div
         onDragOver={e => { e.preventDefault(); setDragOverStage(stage.value); }}
@@ -887,7 +945,7 @@ export default function PipelinePage() {
             {stageGci > 0 ? ` · ${fmt(stageGci)}` : ""}
           </div>
         </div>
-        {colDeals.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
+        {cards}
         {colDeals.length === 0 && (
           <div style={{ fontSize: 12, color: "rgba(18,18,18,.25)", padding: "12px 0", textAlign: "center", borderRadius: 6, border: "1px dashed rgba(18,18,18,.12)" }}>
             Drop here
@@ -1791,15 +1849,27 @@ export default function PipelinePage() {
         </div>
 
         {/* Main tabs */}
-        <div className="row" style={{ gap: 0, marginTop: 16, borderBottom: "2px solid rgba(0,0,0,.08)" }}>
-          {MAIN_TABS.map(({ key, label, count }) => (
-            <button key={key} onClick={() => setMainTab(key)}
-              style={{ background: "none", border: "none", borderBottom: mainTab === key ? "2px solid var(--ink)" : "2px solid transparent",
-                marginBottom: -2, padding: "6px 16px 10px", fontWeight: mainTab === key ? 900 : 500,
-                fontSize: 14, cursor: "pointer", color: mainTab === key ? "var(--ink)" : "rgba(18,18,18,.45)" }}>
-              {label} {count > 0 && <span style={{ fontSize: 12, opacity: 0.6 }}>({count})</span>}
+        <div className="rowBetween" style={{ marginTop: 16, borderBottom: "2px solid rgba(0,0,0,.08)", alignItems: "flex-end" }}>
+          <div className="row" style={{ gap: 0 }}>
+            {MAIN_TABS.map(({ key, label, count }) => (
+              <button key={key} onClick={() => setMainTab(key)}
+                style={{ background: "none", border: "none", borderBottom: mainTab === key ? "2px solid var(--ink)" : "2px solid transparent",
+                  marginBottom: -2, padding: "6px 16px 10px", fontWeight: mainTab === key ? 900 : 500,
+                  fontSize: 14, cursor: "pointer", color: mainTab === key ? "var(--ink)" : "rgba(18,18,18,.45)" }}>
+                {label} {count > 0 && <span style={{ fontSize: 12, opacity: 0.6 }}>({count})</span>}
+              </button>
+            ))}
+          </div>
+          {(mainTab === "buyers" || mainTab === "sellers") && (
+            <button
+              onClick={() => setGroupByContact(g => !g)}
+              style={{ marginBottom: 6, fontSize: 12, padding: "2px 10px", fontWeight: groupByContact ? 900 : 400,
+                background: groupByContact ? "var(--ink)" : "transparent", color: groupByContact ? "var(--paper)" : "rgba(18,18,18,.5)",
+                border: "1px solid rgba(0,0,0,.15)", borderRadius: 99, cursor: "pointer" }}
+            >
+              Group by contact
             </button>
-          ))}
+          )}
         </div>
       </div>
 
