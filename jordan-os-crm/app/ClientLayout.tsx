@@ -73,8 +73,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     const j = await res.json().catch(() => ({}));
     setQaSaving(false);
     if (!res.ok) { setQaError(j?.error || "Save failed"); return; }
-    setQaSuccess(`${qaName.trim()} added ✓`);
-    setQaName(""); setQaPhone(""); setQaEmail(""); setQaNotes("");
+    setQuickAddOpen(false);
   }
 
   function openQuickLog() {
@@ -127,9 +126,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     });
     setQlSaving(false);
     if (error) { setQlError(error.message); return; }
-    setQlSuccess(`Logged touch with ${qlContactName} ✓`);
-    setQlContactId(""); setQlContactName(""); setQlContactQuery("");
-    setQlSummary(""); setQlNlInput(""); setQlChannel("text");
+    setQuickLogOpen(false);
   }
 
   const navLinks = [

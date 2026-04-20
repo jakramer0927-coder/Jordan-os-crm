@@ -542,11 +542,7 @@ export default function PipelinePage() {
         commission_pct: editCommissionPct ? Number(editCommissionPct) : null,
         referral_fee_pct: editRefFeePct ? Number(editRefFeePct) : null,
       } : d));
-      setSelectedDeal(prev => prev ? { ...prev,
-        buyer_stage: prev.opp_type !== "seller" ? editBuyerStage : prev.buyer_stage,
-        seller_stage: prev.opp_type === "seller" ? editSellerStage : prev.seller_stage,
-        pipeline_status: editPipelineStatus,
-      } : null);
+      setSelectedDeal(null);
     } finally {
       setSaving(false);
     }
