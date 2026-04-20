@@ -1492,16 +1492,20 @@ export default function MorningPage() {
                     {(() => {
                       const generating = draftsGenerating.has(c.id);
                       const draft = aiDrafts[c.id];
-                      const fallback = !draft && !generating
-                        ? buildDraftWithVoice({ contact: c, intent: draftIntents[c.id] ?? "check_in", channel: c.suggested_channel, voice })
-                        : null;
+                      if (!generating && !draft) return (
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: "1px 8px", marginTop: 10 }}
+                          onClick={() => regenerateDraft(c)}
+                        >
+                          Draft
+                        </button>
+                      );
                       return (
                         <div style={{ marginTop: 10 }} className="cardSoft cardPad">
                           <div className="rowBetween" style={{ marginBottom: 8 }}>
                             <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                              <span className="small muted bold">
-                                {draft ? "Jordan AI draft" : fallback ? "Template draft" : ""}
-                              </span>
+                              <span className="small muted bold">AI draft</span>
                               {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
                                 const active = (draftIntents[c.id] ?? "check_in") === intent;
                                 return (
@@ -1527,11 +1531,11 @@ export default function MorningPage() {
                               })}
                             </div>
                             <div className="row" style={{ gap: 4 }}>
-                              {!generating && (draft || fallback) && (
+                              {!generating && draft && (
                                 <button
                                   className="btn"
                                   style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
-                                  onClick={() => copyDraft(c.id, draft ?? fallback ?? "")}
+                                  onClick={() => copyDraft(c.id, draft)}
                                 >
                                   {copiedId === c.id ? "Copied ✓" : "Copy"}
                                 </button>
@@ -1564,8 +1568,8 @@ export default function MorningPage() {
                               ))}
                             </div>
                           ) : (
-                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14, animation: draft ? "fadeIn .3s ease" : undefined }}>
-                              {draft ?? fallback}
+                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14, animation: "fadeIn .3s ease" }}>
+                              {draft}
                             </div>
                           )}
                         </div>
