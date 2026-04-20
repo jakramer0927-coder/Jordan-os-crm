@@ -824,13 +824,12 @@ export default function PipelinePage() {
 
   function DealCard({ deal }: { deal: Deal }) {
     const isBuyer = deal.opp_type !== "seller";
-    const stages = isBuyer ? BUYER_STAGES : SELLER_STAGES;
-    const currentVal = isBuyer ? deal.buyer_stage : deal.seller_stage;
-    const stageIdx = stages.findIndex(s => s.value === currentVal);
-    const nextStage = stages[stageIdx + 1] ?? null;
     const gci = estGci(deal);
     const name = deal.contacts?.display_name ?? "Unknown";
     const isDragging = draggedDealId === deal.id;
+    const price = isBuyer
+      ? (deal.budget_max ?? null)
+      : (deal.list_price ?? deal.estimated_value ?? null);
 
     return (
       <div
@@ -841,35 +840,19 @@ export default function PipelinePage() {
         style={{ cursor: "grab", marginBottom: 8, opacity: isDragging ? 0.4 : 1, transition: "opacity .15s", overflow: "hidden", minWidth: 0 }}
         onClick={() => { if (!isDragging) { openDeal(deal); setOffers([]); setPrepItems([]); setActivities([]); setOppContacts([]); } }}
       >
-        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-
-        {(deal.address) && (
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+        {deal.address && (
           <div className="subtle" style={{ fontSize: 12, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deal.address}</div>
         )}
-        {isBuyer && !deal.address && (deal.budget_max || deal.target_areas) && (
-          <div className="subtle" style={{ fontSize: 12, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {deal.budget_max ? fmt(deal.budget_max) : ""}
-            {deal.budget_max && deal.target_areas ? " · " : ""}
-            {deal.target_areas ?? ""}
-          </div>
+        {!deal.address && deal.target_areas && (
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deal.target_areas}</div>
         )}
-        {!isBuyer && !deal.address && (deal.list_price || deal.estimated_value) && (
-          <div className="subtle" style={{ fontSize: 12, marginBottom: 2 }}>{fmt(deal.list_price ?? deal.estimated_value)}</div>
+        {price && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.6)", marginBottom: 2 }}>{fmt(price)}</div>
         )}
-
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", marginTop: 6, gap: 4 }}>
-          {gci && <GciChip value={gci} />}
-          {nextStage && (
-            <button
-              className="btn"
-              style={{ fontSize: 11, padding: "2px 7px", color: nextStage.color, borderColor: nextStage.color + "55", whiteSpace: "nowrap" }}
-              onClick={e => advanceStage(deal, e)}
-              title={`Move to ${nextStage.label}`}
-            >
-              → {nextStage.label}
-            </button>
-          )}
-        </div>
+        {gci && (
+          <div style={{ marginTop: 4 }}><GciChip value={gci} /></div>
+        )}
       </div>
     );
   }
