@@ -293,6 +293,7 @@ export default function PipelinePage() {
   const [newBudgetMax, setNewBudgetMax] = useState("");
   const [newTargetAreas, setNewTargetAreas] = useState("");
   const [newEstValue, setNewEstValue] = useState("");
+  const [newCommissionPct, setNewCommissionPct] = useState("");
   const [newMotivation, setNewMotivation] = useState("");
   const [newNotes, setNewNotes] = useState("");
   const [newSaving, setNewSaving] = useState(false);
@@ -700,6 +701,7 @@ export default function PipelinePage() {
       body.budget_max = newBudgetMax ? Number(newBudgetMax) : null;
       body.target_areas = newTargetAreas || null;
     }
+    body.commission_pct = newCommissionPct ? Number(newCommissionPct) : null;
     const res = await fetch("/api/pipeline", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -723,6 +725,7 @@ export default function PipelinePage() {
     setNewContactId(""); setNewContactName(""); setNewContactQuery("");
     setNewAddress(""); setNewBudgetMin(""); setNewBudgetMax("");
     setNewTargetAreas(""); setNewEstValue(""); setNewMotivation(""); setNewNotes("");
+    setNewCommissionPct("");
     setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
     setNewSaving(false);
   }
@@ -1052,6 +1055,10 @@ export default function PipelinePage() {
                       <div className="label">Budget max</div>
                       <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="1,500,000" />
                     </div>
+                    <div className="field" style={{ minWidth: 100 }}>
+                      <div className="label">Commission %</div>
+                      <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                    </div>
                     <div className="field" style={{ flex: 1, minWidth: 180 }}>
                       <div className="label">Target areas</div>
                       <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
@@ -1064,6 +1071,10 @@ export default function PipelinePage() {
                     <div className="field" style={{ minWidth: 140 }}>
                       <div className="label">List price</div>
                       <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
+                    </div>
+                    <div className="field" style={{ minWidth: 100 }}>
+                      <div className="label">Commission %</div>
+                      <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
                     </div>
                     <div className="field" style={{ minWidth: 140 }}>
                       <div className="label">Target list date</div>
@@ -1592,9 +1603,15 @@ export default function PipelinePage() {
                   <div className="label">Property address</div>
                   <input className="input" value={newAddress} onChange={e => setNewAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
                 </div>
-                <div className="field">
-                  <div className="label">Estimated value</div>
-                  <input className="input" value={newEstValue} onChange={e => setNewEstValue(e.target.value)} placeholder="2,000,000" />
+                <div className="row" style={{ gap: 10 }}>
+                  <div className="field" style={{ flex: 1 }}>
+                    <div className="label">Estimated value</div>
+                    <input className="input" value={newEstValue} onChange={e => setNewEstValue(e.target.value)} placeholder="2,000,000" />
+                  </div>
+                  <div className="field" style={{ minWidth: 100 }}>
+                    <div className="label">Commission %</div>
+                    <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
+                  </div>
                 </div>
               </>
             ) : (
@@ -1607,6 +1624,10 @@ export default function PipelinePage() {
                   <div className="field" style={{ flex: 1 }}>
                     <div className="label">Budget max</div>
                     <input className="input" value={newBudgetMax} onChange={e => setNewBudgetMax(e.target.value)} placeholder="1,500,000" />
+                  </div>
+                  <div className="field" style={{ minWidth: 100 }}>
+                    <div className="label">Commission %</div>
+                    <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
                   </div>
                 </div>
                 <div className="field">
