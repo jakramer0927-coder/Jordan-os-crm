@@ -1614,26 +1614,21 @@ export default function PipelinePage() {
                 {/* Add contact */}
                 <div className="field">
                   <div className="label">Add person to this deal</div>
-                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                    <input className="input" style={{ flex: 1, minWidth: 200 }} value={contactSearchQuery}
-                      onChange={e => { setContactSearchQuery(e.target.value); searchContacts(e.target.value, setContactSearchResults); }}
-                      placeholder="Search contacts…" />
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <ContactSearchInput
+                        selectedId=""
+                        selectedName=""
+                        onSelect={(id) => { if (id) { addOppContact(id, contactRole); setContactSearchQuery(""); } }}
+                        placeholder="Search or create contact…"
+                      />
+                    </div>
                     <select className="select" value={contactRole} onChange={e => setContactRole(e.target.value)} style={{ width: 130 }}>
                       <option value="co-buyer">Co-buyer</option>
                       <option value="co-seller">Co-seller</option>
                       <option value="secondary">Secondary</option>
                     </select>
                   </div>
-                  {contactSearchResults.length > 0 && (
-                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {contactSearchResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                          onClick={() => addOppContact(c.id, contactRole)} disabled={contactAdding}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
             )}
