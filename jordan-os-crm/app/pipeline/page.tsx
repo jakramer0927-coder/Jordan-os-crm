@@ -1374,9 +1374,9 @@ export default function PipelinePage() {
                           <input className="input" value={offerAcceptedPrice} onChange={e => setOfferAcceptedPrice(e.target.value)} placeholder="1,475,000" />
                         </div>
                       )}
-                      {offerOutcome === "accepted" && (
+                      {(offerOutcome === "accepted" || offerOutcome === "rejected") && (
                         <div className="field" style={{ minWidth: 140 }}>
-                          <div className="label">Closed price</div>
+                          <div className="label">{offerOutcome === "rejected" ? "Winning offer price" : "Closed price"}</div>
                           <input className="input" value={offerClosedPrice} onChange={e => setOfferClosedPrice(e.target.value)} placeholder="1,475,000" />
                         </div>
                       )}
@@ -1398,8 +1398,10 @@ export default function PipelinePage() {
                       )}
                     </div>
                     <div className="field">
-                      <div className="label">Terms / contingencies</div>
-                      <textarea className="textarea" value={offerTerms} onChange={e => setOfferTerms(e.target.value)} placeholder="21-day inspection, loan contingency, close 30 days…" style={{ minHeight: 60 }} />
+                      <div className="label">{offerOutcome === "rejected" ? "Notes — why we lost, contingency differences, commission terms, etc." : "Terms / contingencies"}</div>
+                      <textarea className="textarea" value={offerTerms} onChange={e => setOfferTerms(e.target.value)}
+                        placeholder={offerOutcome === "rejected" ? "e.g. Winning buyer waived inspection, paid buyer commissions, all-cash close in 14 days…" : "21-day inspection, loan contingency, close 30 days…"}
+                        style={{ minHeight: 60 }} />
                     </div>
                     <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
                       <div className="field" style={{ flex: 1 }}>
@@ -1442,7 +1444,14 @@ export default function PipelinePage() {
                       {offer.asking_price && <span><span className="subtle">Ask:</span> {fmt(offer.asking_price)}</span>}
                       {offer.offer_price && <span><span className="subtle">Offer:</span> {fmt(offer.offer_price)}</span>}
                       {offer.accepted_price && <span><span className="subtle">Accepted:</span> {fmt(offer.accepted_price)}</span>}
-                      {offer.closed_price && <span style={{ fontWeight: 700, color: "#0b6b2a" }}><span className="subtle">Closed:</span> {fmt(offer.closed_price)}</span>}
+                      {offer.closed_price && (
+                        <span style={{ fontWeight: 700, color: offer.outcome === "rejected" ? "#8a0000" : "#0b6b2a" }}>
+                          <span className="subtle">{offer.outcome === "rejected" ? "Winning offer:" : "Closed:"}</span> {fmt(offer.closed_price)}
+                          {offer.outcome === "rejected" && offer.offer_price && (
+                            <span className="subtle"> ({fmt(offer.closed_price - offer.offer_price)} gap)</span>
+                          )}
+                        </span>
+                      )}
                       {offer.competing_offers_count != null && <span className="subtle">{offer.competing_offers_count} competing</span>}
                     </div>
                     {(offer.seller_agent_contact?.display_name || offer.seller_agent_name) && (
