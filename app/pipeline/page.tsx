@@ -108,6 +108,13 @@ const SELLER_STAGES: { value: SellerStage; label: string; color: string; bg: str
   { value: "sold",             label: "Sold",             color: "#0b6b2a",            bg: "rgba(11,107,42,.06)" },
 ];
 
+const INVESTOR_STAGES: { value: BuyerStage; label: string; color: string; bg: string }[] = [
+  { value: "actively_searching", label: "Searching",       color: "#1a3f8a",            bg: "rgba(11,60,140,.06)" },
+  { value: "offer",              label: "Offer",           color: "rgba(120,60,0,.9)",  bg: "rgba(120,60,0,.06)" },
+  { value: "under_contract",     label: "Under Contract",  color: "#5b21b6",            bg: "rgba(91,33,182,.06)" },
+  { value: "closed",             label: "Closed",          color: "#0b6b2a",            bg: "rgba(11,107,42,.06)" },
+];
+
 const OFFER_OUTCOMES = ["pending", "accepted", "countered", "rejected", "withdrawn"] as const;
 const PREP_STATUSES = ["planned", "in_progress", "completed"] as const;
 
@@ -976,11 +983,14 @@ export default function PipelinePage() {
     );
   }
 
-  function InvestorView() {
-    if (investors.length === 0) return <div className="subtle">No active investors — add one with + New.</div>;
+  function InvestorKanban() {
     return (
-      <div className="stack">
-        {investors.map(d => <div key={d.id}>{DealCard({ deal: d })}</div>)}
+      <div style={{ overflowX: "auto", width: "100%" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${INVESTOR_STAGES.length}, minmax(180px, 1fr))`, gap: 10, minWidth: 600 }}>
+          {INVESTOR_STAGES.map(stage => (
+            <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: investors.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "investor" })}</div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -1876,7 +1886,7 @@ export default function PipelinePage() {
       <div className="card cardPad">
         {mainTab === "buyers"      && BuyerKanban()}
         {mainTab === "sellers"     && SellerKanban()}
-        {mainTab === "investors"   && InvestorView()}
+        {mainTab === "investors"   && InvestorKanban()}
         {mainTab === "past_clients" && PastClientView()}
       </div>
 
