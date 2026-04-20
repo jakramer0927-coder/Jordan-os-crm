@@ -111,7 +111,7 @@ export async function POST(req: Request) {
             .select("direction, channel, occurred_at, intent, summary")
             .eq("contact_id", contactId)
             .order("occurred_at", { ascending: false })
-            .limit(25);
+            .limit(8);
 
         if (tErr) {
             return NextResponse.json({ error: tErr.message }, { status: 500 });
@@ -134,15 +134,15 @@ export async function POST(req: Request) {
             .eq("contact_id", contactId)
             .eq("user_id", uid)
             .order("created_at", { ascending: false })
-            .limit(40);
+            .limit(10);
 
-        // 4) Voice examples
+        // 5) Voice examples
         const { data: examples, error: vErr } = await supabaseAdmin
             .from("user_voice_examples")
             .select("channel, intent, text, subject, snippet, body_preview, occurred_at, created_at")
             .eq("user_id", uid)
             .order("occurred_at", { ascending: false })
-            .limit(60);
+            .limit(15);
 
         if (vErr) {
             return NextResponse.json({ error: vErr.message }, { status: 500 });
@@ -162,8 +162,8 @@ export async function POST(req: Request) {
             })
             .filter(Boolean);
 
-        // Keep it tight: best 20 examples max
-        const voiceSample = voiceExamples.slice(0, 20);
+        // Keep it tight: best 6 examples max
+        const voiceSample = voiceExamples.slice(0, 6);
 
         const contactSummary = {
             name: contact.display_name,
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
             notes: contact.notes,
         };
 
-        const recentTouchSummary = (touches ?? []).slice(0, 12).map((x: any) => ({
+        const recentTouchSummary = (touches ?? []).slice(0, 8).map((x: any) => ({
             direction: x.direction,
             channel: x.channel,
             occurred_at: x.occurred_at,
@@ -182,10 +182,10 @@ export async function POST(req: Request) {
             summary: x.summary,
         }));
 
-        const recentTextSummary = (texts ?? []).slice(0, 12).map((m: any) => ({
+        const recentTextSummary = (texts ?? []).slice(0, 6).map((m: any) => ({
             direction: m.direction,
             occurred_at: m.occurred_at,
-            body: m.body,
+            body: typeof m.body === "string" ? m.body.slice(0, 300) : m.body,
         }));
 
         const lengthRule =
