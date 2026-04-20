@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
+import ContactSearchInput from "@/components/ContactSearchInput";
 const supabase = createSupabaseBrowserClient();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1671,20 +1672,11 @@ export default function PipelinePage() {
 
             <div className="field">
               <div className="label">Contact *</div>
-              <input className="input" value={newContactQuery}
-                onChange={e => { setNewContactQuery(e.target.value); searchContacts(e.target.value, setNewContactResults); }}
-                placeholder="Search contacts…" />
-              {newContactResults.length > 0 && (
-                <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                  {newContactResults.map(c => (
-                    <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                      onClick={() => { setNewContactId(c.id); setNewContactName(c.display_name); setNewContactQuery(c.display_name); setNewContactResults([]); }}>
-                      {c.display_name} <span className="subtle">{c.category}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {newContactId && <div style={{ fontSize: 12, color: "rgba(18,18,18,.5)", marginTop: 4 }}>Selected: <strong>{newContactName}</strong></div>}
+              <ContactSearchInput
+                selectedId={newContactId}
+                selectedName={newContactName}
+                onSelect={(id, name) => { setNewContactId(id); setNewContactName(name); setNewContactQuery(id ? name : ""); }}
+              />
             </div>
 
             {newType === "seller" ? (

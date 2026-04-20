@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import ContactSearchInput from "@/components/ContactSearchInput";
 
 function NavLink({ href, label, onClick }: { href: string; label: string; onClick?: () => void }) {
   const pathname = usePathname();
@@ -314,33 +315,13 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
             {!qlSuccess && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {/* Contact */}
-                {qlContactId ? (
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, flex: 1 }}>{qlContactName}</div>
-                    <button className="btn" style={{ fontSize: 11 }} onClick={() => { setQlContactId(""); setQlContactName(""); setQlContactQuery(""); }}>Change</button>
-                  </div>
-                ) : (
-                  <div>
-                    <input
-                      className="input"
-                      placeholder="Who did you reach out to?"
-                      value={qlContactQuery}
-                      onChange={e => searchQlContacts(e.target.value)}
-                      autoFocus
-                    />
-                    {qlContactResults.length > 0 && (
-                      <div style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden", maxHeight: 180, overflowY: "auto" }}>
-                        {qlContactResults.slice(0, 6).map(r => (
-                          <div key={r.id} style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid rgba(0,0,0,.06)" }}
-                            onClick={() => { setQlContactId(r.id); setQlContactName(r.display_name); setQlContactResults([]); setQlContactQuery(""); }}>
-                            <strong>{r.display_name}</strong>
-                            <span style={{ marginLeft: 8, color: "rgba(18,18,18,.45)", fontSize: 12 }}>{r.category}{r.tier ? ` · Tier ${r.tier}` : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <ContactSearchInput
+                  selectedId={qlContactId}
+                  selectedName={qlContactName}
+                  onSelect={(id, name) => { setQlContactId(id); setQlContactName(name); setQlContactQuery(id ? name : ""); }}
+                  placeholder="Who did you reach out to?"
+                  autoFocus
+                />
 
                 {/* Natural language input */}
                 <div>
