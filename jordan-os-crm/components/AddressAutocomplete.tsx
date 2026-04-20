@@ -12,7 +12,8 @@ interface Props {
 
 declare global {
   interface Window {
-    google: typeof google;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    google: any;
     initGooglePlaces?: () => void;
   }
 }
@@ -40,7 +41,8 @@ function loadGooglePlaces(apiKey: string, onReady: () => void) {
 
 export default function AddressAutocomplete({ value, onChange, placeholder = "123 Main St, City, CA 90001", className, style }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const autocompleteRef = useRef<any>(null);
   const [ready, setReady] = useState(scriptLoaded);
 
   const initAutocomplete = useCallback(() => {
