@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 const supabase = createSupabaseBrowserClient();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1055,7 +1056,7 @@ export default function PipelinePage() {
                 {/* Core fields — always visible */}
                 <div className="field">
                   <div className="label">Property address</div>
-                  <input className="input" value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
+                  <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
                 </div>
 
                 {(isBuyer || isInvestor) && (
@@ -1258,7 +1259,7 @@ export default function PipelinePage() {
                     <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
                       <div className="field" style={{ flex: 1, minWidth: 200 }}>
                         <div className="label">Property address *</div>
-                        <input className="input" value={offerAddress} onChange={e => setOfferAddress(e.target.value)} placeholder="123 Main St…" autoFocus />
+                        <AddressAutocomplete value={offerAddress} onChange={setOfferAddress} placeholder="123 Main St…" />
                       </div>
                       <div className="field" style={{ minWidth: 140 }}>
                         <div className="label">Asking price</div>
@@ -1610,7 +1611,7 @@ export default function PipelinePage() {
               <>
                 <div className="field">
                   <div className="label">Property address</div>
-                  <input className="input" value={newAddress} onChange={e => setNewAddress(e.target.value)} placeholder="123 Main St, LA, CA 90001" />
+                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} placeholder="123 Main St, LA, CA 90001" />
                 </div>
                 <div className="row" style={{ gap: 10 }}>
                   <div className="field" style={{ flex: 1 }}>
