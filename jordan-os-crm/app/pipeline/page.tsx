@@ -65,6 +65,8 @@ type Offer = {
   outcome: string;
   accepted_price: number | null;
   cma_link: string | null;
+  closed_price: number | null;
+  listing_link: string | null;
   occurred_at: string;
   seller_agent_contact: { id: string; display_name: string } | null;
 };
@@ -257,6 +259,8 @@ export default function PipelinePage() {
   const [offerOutcome, setOfferOutcome] = useState<string>("pending");
   const [offerAcceptedPrice, setOfferAcceptedPrice] = useState("");
   const [offerCmaLink, setOfferCmaLink] = useState("");
+  const [offerClosedPrice, setOfferClosedPrice] = useState("");
+  const [offerListingLink, setOfferListingLink] = useState("");
   const [offerSaving, setOfferSaving] = useState(false);
 
   // Listing prep state
@@ -577,6 +581,8 @@ export default function PipelinePage() {
         outcome: offerOutcome,
         accepted_price: offerAcceptedPrice ? Number(offerAcceptedPrice) : null,
         cma_link: offerCmaLink || null,
+        closed_price: offerClosedPrice ? Number(offerClosedPrice) : null,
+        listing_link: offerListingLink || null,
       }),
     });
     if (res.ok) {
@@ -585,6 +591,7 @@ export default function PipelinePage() {
       setOfferTerms(""); setOfferCompeting(""); setOfferAgentName("");
       setOfferAgentId(""); setOfferAgentQuery(""); setOfferOutcome("pending");
       setOfferAcceptedPrice(""); setOfferCmaLink("");
+      setOfferClosedPrice(""); setOfferListingLink("");
       loadOffers(selectedDeal.id);
     }
     setOfferSaving(false);
@@ -1374,6 +1381,12 @@ export default function PipelinePage() {
                           <input className="input" value={offerAcceptedPrice} onChange={e => setOfferAcceptedPrice(e.target.value)} placeholder="1,475,000" />
                         </div>
                       )}
+                      {offerOutcome === "accepted" && (
+                        <div className="field" style={{ minWidth: 140 }}>
+                          <div className="label">Closed price</div>
+                          <input className="input" value={offerClosedPrice} onChange={e => setOfferClosedPrice(e.target.value)} placeholder="1,475,000" />
+                        </div>
+                      )}
                     </div>
                     <div className="field">
                       <div className="label">Seller's agent</div>
@@ -1396,6 +1409,10 @@ export default function PipelinePage() {
                       <textarea className="textarea" value={offerTerms} onChange={e => setOfferTerms(e.target.value)} placeholder="21-day inspection, loan contingency, close 30 days…" style={{ minHeight: 60 }} />
                     </div>
                     <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+                      <div className="field" style={{ flex: 1 }}>
+                        <div className="label">Listing link</div>
+                        <input className="input" value={offerListingLink} onChange={e => setOfferListingLink(e.target.value)} placeholder="https://www.zillow.com/…" />
+                      </div>
                       <div className="field" style={{ flex: 1 }}>
                         <div className="label">CMA link</div>
                         <input className="input" value={offerCmaLink} onChange={e => setOfferCmaLink(e.target.value)} placeholder="https://…" />
@@ -1432,6 +1449,7 @@ export default function PipelinePage() {
                       {offer.asking_price && <span><span className="subtle">Ask:</span> {fmt(offer.asking_price)}</span>}
                       {offer.offer_price && <span><span className="subtle">Offer:</span> {fmt(offer.offer_price)}</span>}
                       {offer.accepted_price && <span><span className="subtle">Accepted:</span> {fmt(offer.accepted_price)}</span>}
+                      {offer.closed_price && <span style={{ fontWeight: 700, color: "#0b6b2a" }}><span className="subtle">Closed:</span> {fmt(offer.closed_price)}</span>}
                       {offer.competing_offers_count != null && <span className="subtle">{offer.competing_offers_count} competing</span>}
                     </div>
                     {(offer.seller_agent_contact?.display_name || offer.seller_agent_name) && (
@@ -1440,7 +1458,10 @@ export default function PipelinePage() {
                       </div>
                     )}
                     {offer.terms_notes && <div style={{ fontSize: 12, marginTop: 6, color: "rgba(18,18,18,.65)", whiteSpace: "pre-wrap" }}>{offer.terms_notes}</div>}
-                    {offer.cma_link && <a href={offer.cma_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)", display: "block", marginTop: 4 }}>CMA →</a>}
+                    <div className="row" style={{ gap: 10, marginTop: 4 }}>
+                      {offer.listing_link && <a href={offer.listing_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>Listing →</a>}
+                      {offer.cma_link && <a href={offer.cma_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>CMA →</a>}
+                    </div>
                   </div>
                 ))}
               </div>

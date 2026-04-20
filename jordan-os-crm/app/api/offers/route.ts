@@ -26,7 +26,7 @@ export async function GET(req: Request) {
       .select(`
         id, property_address, offer_price, asking_price, terms_notes,
         competing_offers_count, seller_agent_name, outcome, accepted_price,
-        cma_link, occurred_at, created_at,
+        cma_link, closed_price, listing_link, occurred_at, created_at,
         seller_agent_contact:seller_agent_contact_id ( id, display_name )
       `)
       .eq("deal_id", dealId)
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const {
       deal_id, property_address, offer_price, asking_price, terms_notes,
       competing_offers_count, seller_agent_contact_id, seller_agent_name,
-      outcome = "pending", accepted_price, cma_link, occurred_at,
+      outcome = "pending", accepted_price, cma_link, closed_price, listing_link, occurred_at,
     } = body;
 
     if (!deal_id || !property_address?.trim()) {
@@ -78,6 +78,8 @@ export async function POST(req: Request) {
         outcome,
         accepted_price: accepted_price ?? null,
         cma_link: cma_link?.trim() || null,
+        closed_price: closed_price ?? null,
+        listing_link: listing_link?.trim() || null,
         occurred_at: occurred_at || new Date().toISOString(),
       })
       .select("id, property_address, offer_price, asking_price, outcome, occurred_at")
@@ -103,7 +105,7 @@ export async function PATCH(req: Request) {
     const allowed = [
       "property_address", "offer_price", "asking_price", "terms_notes",
       "competing_offers_count", "seller_agent_contact_id", "seller_agent_name",
-      "outcome", "accepted_price", "cma_link", "occurred_at",
+      "outcome", "accepted_price", "cma_link", "closed_price", "listing_link", "occurred_at",
     ];
     const updates: Record<string, unknown> = {};
     for (const k of allowed) {
