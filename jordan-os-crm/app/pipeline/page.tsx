@@ -130,6 +130,12 @@ function calcNetGci(deal: Deal): number | null {
   return gross - refFee;
 }
 
+function estDealValue(deal: Deal): number | null {
+  if (deal.price) return deal.price;
+  if (deal.opp_type === "seller") return deal.list_price ?? deal.estimated_value ?? null;
+  return deal.budget_max ?? null;
+}
+
 function estGci(deal: Deal): number | null {
   if (deal.buyer_stage === "closed" || deal.seller_stage === "sold") return calcNetGci(deal);
   const base = deal.opp_type === "seller"
@@ -781,16 +787,16 @@ export default function PipelinePage() {
   const BUYER_STAGES_FOR_ACTIVE_GCI: BuyerStage[] = ["actively_searching", "offer", "under_contract", "closed"];
   const SELLER_STAGES_FOR_ACTIVE_GCI: SellerStage[] = ["signed_agreement", "listing_prepped", "on_market", "in_contract", "sold"];
 
-  const activeGci = deals
-    .filter(d => d.pipeline_status === "active" && (
-      (d.buyer_stage && BUYER_STAGES_FOR_ACTIVE_GCI.includes(d.buyer_stage)) ||
-      (d.seller_stage && SELLER_STAGES_FOR_ACTIVE_GCI.includes(d.seller_stage))
-    ))
-    .reduce((sum, d) => sum + (estGci(d) ?? 0), 0);
+  const activeDeals = deals.filter(d => d.pipeline_status === "active" && (
+    (d.buyer_stage && BUYER_STAGES_FOR_ACTIVE_GCI.includes(d.buyer_stage)) ||
+    (d.seller_stage && SELLER_STAGES_FOR_ACTIVE_GCI.includes(d.seller_stage))
+  ));
+  const activeGci = activeDeals.reduce((sum, d) => sum + (estGci(d) ?? 0), 0);
+  const activeDealValue = activeDeals.reduce((sum, d) => sum + (estDealValue(d) ?? 0), 0);
 
-  const totalPipelineGci = deals
-    .filter(d => d.pipeline_status === "active")
-    .reduce((sum, d) => sum + (estGci(d) ?? 0), 0);
+  const allActiveDeals = deals.filter(d => d.pipeline_status === "active");
+  const totalPipelineGci = allActiveDeals.reduce((sum, d) => sum + (estGci(d) ?? 0), 0);
+  const totalPipelineValue = allActiveDeals.reduce((sum, d) => sum + (estDealValue(d) ?? 0), 0);
 
   const closedGciYtd = deals
     .filter(d => {
@@ -1814,11 +1820,13 @@ export default function PipelinePage() {
           <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(11,107,42,.7)", marginBottom: 3 }}>ACTIVE GCI</div>
             <div style={{ fontSize: 20, fontWeight: 900, color: "#0b6b2a" }}>{fmt(activeGci)}</div>
-            <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>Offer / under contract stage</div>
+            {activeDealValue > 0 && <div style={{ fontSize: 11, color: "#0b6b2a", opacity: 0.6, marginTop: 1 }}>{fmt(activeDealValue)} deal value</div>}
+            <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>Searching · Offer · Under contract</div>
           </div>
           <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,60,140,.05)", border: "1px solid rgba(11,60,140,.15)" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(11,60,140,.7)", marginBottom: 3 }}>TOTAL PIPELINE</div>
             <div style={{ fontSize: 20, fontWeight: 900, color: "#1a3f8a" }}>{fmt(totalPipelineGci)}</div>
+            {totalPipelineValue > 0 && <div style={{ fontSize: 11, color: "#1a3f8a", opacity: 0.6, marginTop: 1 }}>{fmt(totalPipelineValue)} deal value</div>}
             <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>All active opportunities</div>
           </div>
           {closedGciYtd > 0 && (
