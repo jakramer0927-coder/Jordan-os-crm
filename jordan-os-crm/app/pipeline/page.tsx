@@ -111,7 +111,11 @@ const PREP_STATUSES = ["planned", "in_progress", "completed"] as const;
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    const s = m % 1 === 0 ? m.toFixed(0) : parseFloat(m.toFixed(2)).toString();
+    return `$${s}M`;
+  }
   if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
   return `$${n.toLocaleString()}`;
 }
