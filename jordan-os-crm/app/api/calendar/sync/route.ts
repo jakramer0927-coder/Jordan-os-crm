@@ -35,7 +35,6 @@ export async function POST(req: Request) {
 
     const calendar = google.calendar({ version: "v3", auth });
 
-    // Fetch events from the past N days up to today
     const timeMin = new Date(Date.now() - days * 86400000).toISOString();
     const timeMax = new Date().toISOString();
 
@@ -50,7 +49,7 @@ export async function POST(req: Request) {
 
     const events = eventsRes.data.items ?? [];
 
-    // Get all contacts for this user with emails
+    // Build email→contactId from primary emails
     const { data: contacts } = await supabaseAdmin
       .from("contacts")
       .select("id, email")
@@ -62,24 +61,38 @@ export async function POST(req: Request) {
       if (c.email) emailToContactId.set(c.email.toLowerCase().trim(), c.id);
     }
 
+    // Also pull from contact_emails table (multiple emails per contact)
+    const { data: extraEmails } = await supabaseAdmin
+      .from("contact_emails")
+      .select("contact_id, email")
+      .eq("user_id", uid);
+
+    for (const row of extraEmails ?? []) {
+      if (row.email && !emailToContactId.has(row.email.toLowerCase().trim())) {
+        emailToContactId.set(row.email.toLowerCase().trim(), row.contact_id);
+      }
+    }
+
     let imported = 0;
     let skipped = 0;
+    let unmatchedQueued = 0;
 
     for (const event of events) {
-      // Skip all-day events (no time component)
       if (!event.start?.dateTime) continue;
-      // Skip cancelled events
       if (event.status === "cancelled") continue;
-      // Skip events the user declined
       const mySelf = event.attendees?.find((a) => a.self);
       if (mySelf && mySelf.responseStatus === "declined") continue;
 
       const occurredAt = event.start.dateTime;
       const summary = event.summary?.trim() || "Meeting";
+      const googleEventId = event.id ?? null;
 
-      // Find attendees that match contacts (exclude self)
-      const attendeeEmails = (event.attendees ?? [])
-        .filter((a) => !a.self)
+      const nonSelfAttendees = (event.attendees ?? []).filter((a) => !a.self);
+
+      // If no attendees at all, skip silently (solo blocks)
+      if (nonSelfAttendees.length === 0) { skipped++; continue; }
+
+      const attendeeEmails = nonSelfAttendees
         .map((a) => a.email?.toLowerCase() ?? "")
         .filter(Boolean);
 
@@ -89,10 +102,34 @@ export async function POST(req: Request) {
         if (cid) matchedContactIds.add(cid);
       }
 
-      if (matchedContactIds.size === 0) { skipped++; continue; }
+      if (matchedContactIds.size === 0) {
+        // No CRM match — add to review queue
+        if (googleEventId) {
+          const attendeeNames = nonSelfAttendees
+            .map((a) => a.displayName || a.email || "")
+            .filter(Boolean);
+
+          await supabaseAdmin
+            .from("calendar_review_queue")
+            .upsert(
+              {
+                user_id: uid,
+                google_event_id: googleEventId,
+                event_title: summary,
+                occurred_at: occurredAt,
+                attendee_emails: attendeeEmails,
+                attendee_names: attendeeNames,
+                dismissed: false,
+              },
+              { onConflict: "user_id,google_event_id", ignoreDuplicates: true }
+            );
+          unmatchedQueued++;
+        }
+        skipped++;
+        continue;
+      }
 
       for (const contactId of matchedContactIds) {
-        // Dedupe: skip if a meeting touch already exists within 30 min of this event
         const windowStart = new Date(new Date(occurredAt).getTime() - 30 * 60000).toISOString();
         const windowEnd = new Date(new Date(occurredAt).getTime() + 30 * 60000).toISOString();
 
@@ -115,17 +152,17 @@ export async function POST(req: Request) {
           occurred_at: occurredAt,
           summary,
           source: "calendar",
+          user_id: uid,
         });
         imported++;
       }
     }
 
-    // Update last_calendar_sync_at
     await supabaseAdmin
       .from("user_settings")
       .upsert({ user_id: uid, last_calendar_sync_at: new Date().toISOString() }, { onConflict: "user_id" });
 
-    return NextResponse.json({ ok: true, imported, skipped, events_scanned: events.length });
+    return NextResponse.json({ ok: true, imported, skipped, events_scanned: events.length, unmatched_queued: unmatchedQueued });
   } catch (e) {
     return serverError("CALENDAR_SYNC_CRASH", e);
   }

@@ -15,9 +15,65 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // calendar sync
+  // calendar sync + review queue
   const [calSyncing, setCalSyncing] = useState(false);
   const [calSyncedAt, setCalSyncedAt] = useState<string | null>(null);
+
+  type ReviewItem = {
+    id: string;
+    event_title: string;
+    occurred_at: string;
+    attendee_emails: string[];
+    attendee_names: string[];
+  };
+  const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([]);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [linkQuery, setLinkQuery] = useState<Record<string, string>>({});
+  const [linkResults, setLinkResults] = useState<Record<string, { id: string; display_name: string }[]>>({});
+  const [linkWorking, setLinkWorking] = useState<string | null>(null);
+
+  async function loadReviewQueue() {
+    const res = await fetch("/api/calendar/review");
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setReviewQueue(j.items ?? []);
+    }
+  }
+
+  async function searchContacts(itemId: string, q: string) {
+    setLinkQuery((prev) => ({ ...prev, [itemId]: q }));
+    if (q.trim().length < 2) { setLinkResults((prev) => ({ ...prev, [itemId]: [] })); return; }
+    const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q)}`);
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setLinkResults((prev) => ({ ...prev, [itemId]: j.contacts ?? [] }));
+    }
+  }
+
+  async function linkToContact(itemId: string, contactId: string) {
+    setLinkWorking(itemId);
+    const res = await fetch("/api/calendar/review", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: itemId, action: "link", contact_id: contactId }),
+    });
+    setLinkWorking(null);
+    if (res.ok) {
+      setReviewQueue((prev) => prev.filter((i) => i.id !== itemId));
+      setLinkingId(null);
+    }
+  }
+
+  async function dismissItem(itemId: string) {
+    setLinkWorking(itemId);
+    await fetch("/api/calendar/review", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: itemId, action: "dismiss" }),
+    });
+    setLinkWorking(null);
+    setReviewQueue((prev) => prev.filter((i) => i.id !== itemId));
+  }
 
   async function runCalendarSync() {
     if (!uid) return;
@@ -33,7 +89,8 @@ export default function IntegrationsPage() {
     setCalSyncing(false);
     if (!res.ok) { setErr(j?.error || "Calendar sync failed"); return; }
     setCalSyncedAt(new Date().toISOString());
-    setMsg(`Calendar sync done — ${j.imported} meetings imported from ${j.events_scanned} events`);
+    setMsg(`Calendar sync done — ${j.imported} imported, ${j.unmatched_queued ?? 0} unmatched queued for review`);
+    await loadReviewQueue();
   }
 
   // bulk extraction
@@ -72,6 +129,7 @@ export default function IntegrationsPage() {
     if (sData?.voice_coached_at) setCoachedAt(sData.voice_coached_at);
 
     setReady(true);
+    await loadReviewQueue();
   }
 
   async function connectGoogle() {
@@ -248,6 +306,75 @@ export default function IntegrationsPage() {
           </div>
         )}
       </div>
+
+      {/* Calendar review queue */}
+      {reviewQueue.length > 0 && (
+        <div className="card cardPad">
+          <div style={{ fontWeight: 900, marginBottom: 4 }}>Unmatched meetings — {reviewQueue.length} need review</div>
+          <div className="muted small" style={{ marginBottom: 14 }}>
+            These calendar events had attendees but no email match in your CRM. Link each one to a contact to log the touch, or dismiss.
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {reviewQueue.map((item, i) => {
+              const isLinking = linkingId === item.id;
+              const working = linkWorking === item.id;
+              const date = new Date(item.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+              const attendees = item.attendee_names.length > 0 ? item.attendee_names : item.attendee_emails;
+              return (
+                <div key={item.id} style={{ padding: "12px 0", borderBottom: i < reviewQueue.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{item.event_title}</div>
+                      <div className="muted small" style={{ marginTop: 2 }}>
+                        {date} · {attendees.slice(0, 3).join(", ")}{attendees.length > 3 ? ` +${attendees.length - 3} more` : ""}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <button
+                        className="btn btnPrimary"
+                        style={{ fontSize: 12 }}
+                        disabled={working}
+                        onClick={() => setLinkingId(isLinking ? null : item.id)}
+                      >
+                        {isLinking ? "Cancel" : "Link contact"}
+                      </button>
+                      <button
+                        className="btn"
+                        style={{ fontSize: 12 }}
+                        disabled={working}
+                        onClick={() => dismissItem(item.id)}
+                      >
+                        {working ? "…" : "Dismiss"}
+                      </button>
+                    </div>
+                  </div>
+                  {isLinking && (
+                    <div style={{ marginTop: 10 }}>
+                      <input
+                        className="input"
+                        placeholder="Search contacts…"
+                        value={linkQuery[item.id] ?? ""}
+                        onChange={(e) => searchContacts(item.id, e.target.value)}
+                        style={{ marginBottom: 6 }}
+                        autoFocus
+                      />
+                      {(linkResults[item.id] ?? []).map((c) => (
+                        <div
+                          key={c.id}
+                          style={{ padding: "8px 10px", cursor: "pointer", borderRadius: 6, fontSize: 13, fontWeight: 600, background: "rgba(0,0,0,.03)", marginBottom: 4 }}
+                          onClick={() => linkToContact(item.id, c.id)}
+                        >
+                          {c.display_name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Bulk extraction */}
       <div className="card cardPad">
