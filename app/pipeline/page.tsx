@@ -1185,7 +1185,7 @@ export default function PipelinePage() {
 
             {/* ── Details tab ── */}
             {modalTab === "details" && (() => {
-              const isClosed = editPipelineStatus === "past_client";
+              const isClosed = editPipelineStatus === "past_client" || editBuyerStage === "closed" || editSellerStage === "sold";
 
               // Shared sub-components
               const gciCalc = editCommissionPct && (editPrice || editListPrice || editEstValue || editBudgetMax) && (() => {
@@ -1357,7 +1357,7 @@ export default function PipelinePage() {
                               background: editBuyerStage === s.value ? s.bg : undefined,
                               color: editBuyerStage === s.value ? s.color : undefined,
                               borderColor: editBuyerStage === s.value ? s.color + "55" : undefined }}
-                            onClick={() => setEditBuyerStage(s.value)}>
+                            onClick={() => { setEditBuyerStage(s.value); if (s.value === "closed") setEditPipelineStatus("past_client"); }}>
                             {s.label}
                           </button>
                         ))}
@@ -1371,7 +1371,7 @@ export default function PipelinePage() {
                               background: editSellerStage === s.value ? s.bg : undefined,
                               color: editSellerStage === s.value ? s.color : undefined,
                               borderColor: editSellerStage === s.value ? s.color + "55" : undefined }}
-                            onClick={() => setEditSellerStage(s.value)}>
+                            onClick={() => { setEditSellerStage(s.value); if (s.value === "sold") setEditPipelineStatus("past_client"); }}>
                             {s.label}
                           </button>
                         ))}
