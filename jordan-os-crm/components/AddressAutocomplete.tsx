@@ -2,9 +2,16 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
+export interface PlaceData {
+  formatted_address: string;
+  neighborhood: string | null;
+  city: string | null;
+}
+
 interface Props {
   value: string;
   onChange: (value: string) => void;
+  onPlaceSelect?: (data: PlaceData) => void;
   placeholder?: string;
   className?: string;
   style?: React.CSSProperties;
@@ -39,7 +46,11 @@ function loadGooglePlaces(apiKey: string, onReady: () => void) {
   document.head.appendChild(script);
 }
 
-export default function AddressAutocomplete({ value, onChange, placeholder = "123 Main St, City, CA 90001", className, style }: Props) {
+function extractFromComponents(components: any[], type: string): string | null {
+  return components.find((c: any) => c.types.includes(type))?.long_name ?? null;
+}
+
+export default function AddressAutocomplete({ value, onChange, onPlaceSelect, placeholder = "123 Main St, City, CA 90001", className, style }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const autocompleteRef = useRef<any>(null);
@@ -50,16 +61,27 @@ export default function AddressAutocomplete({ value, onChange, placeholder = "12
     const ac = new window.google.maps.places.Autocomplete(inputRef.current, {
       types: ["address"],
       componentRestrictions: { country: "us" },
-      fields: ["formatted_address"],
+      fields: ["formatted_address", "address_components"],
     });
     ac.addListener("place_changed", () => {
       const place = ac.getPlace();
       if (place.formatted_address) {
         onChange(place.formatted_address);
+        if (onPlaceSelect) {
+          const comps: any[] = place.address_components ?? [];
+          // neighborhood → sublocality_level_1 → sublocality → null
+          const neighborhood =
+            extractFromComponents(comps, "neighborhood") ??
+            extractFromComponents(comps, "sublocality_level_1") ??
+            extractFromComponents(comps, "sublocality") ??
+            null;
+          const city = extractFromComponents(comps, "locality") ?? null;
+          onPlaceSelect({ formatted_address: place.formatted_address, neighborhood, city });
+        }
       }
     });
     autocompleteRef.current = ac;
-  }, [onChange]);
+  }, [onChange, onPlaceSelect]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;

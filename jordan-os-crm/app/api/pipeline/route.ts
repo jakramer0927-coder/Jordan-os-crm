@@ -68,7 +68,7 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const {
-      contact_id, opp_type = "buyer", address, role, notes,
+      contact_id, opp_type = "buyer", address, neighborhood, role, notes,
       pipeline_status: rawPipelineStatus,
       // Buyer fields
       buyer_stage: rawBuyerStage,
@@ -122,6 +122,7 @@ export async function POST(req: Request) {
 
     // Seller fields — always set address (empty string satisfies legacy NOT NULL constraint)
     insert.address = address?.trim() || "";
+    if (neighborhood) insert.neighborhood = neighborhood.trim();
     if (list_price != null) insert.list_price = list_price;
     if (estimated_value != null) insert.estimated_value = estimated_value;
     if (market_notes) insert.market_notes = market_notes;
@@ -168,7 +169,7 @@ export async function PATCH(req: Request) {
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
     const allowed = [
-      "address", "role", "notes", "opp_type",
+      "address", "neighborhood", "role", "notes", "opp_type",
       "buyer_stage", "seller_stage", "pipeline_status",
       "budget_min", "budget_max", "target_areas",
       "pre_approval_amount", "pre_approval_lender",

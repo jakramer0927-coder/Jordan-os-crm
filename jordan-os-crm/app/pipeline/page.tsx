@@ -224,6 +224,7 @@ export default function PipelinePage() {
   const [editSellerStage, setEditSellerStage] = useState<SellerStage>("initial_meeting");
   const [editPipelineStatus, setEditPipelineStatus] = useState<PipelineStatus>("active");
   const [editAddress, setEditAddress] = useState("");
+  const [editNeighborhood, setEditNeighborhood] = useState<string | null>(null);
   const [editNotes, setEditNotes] = useState("");
   const [editMotivation, setEditMotivation] = useState("");
   const [editTimelineNotes, setEditTimelineNotes] = useState("");
@@ -331,6 +332,7 @@ export default function PipelinePage() {
   const [newContactId, setNewContactId] = useState("");
   const [newContactName, setNewContactName] = useState("");
   const [newAddress, setNewAddress] = useState("");
+  const [newNeighborhood, setNewNeighborhood] = useState<string | null>(null);
   const [newBudgetMin, setNewBudgetMin] = useState("");
   const [newBudgetMax, setNewBudgetMax] = useState("");
   const [newTargetAreas, setNewTargetAreas] = useState("");
@@ -408,6 +410,7 @@ export default function PipelinePage() {
     setEditSellerStage(deal.seller_stage ?? "initial_meeting");
     setEditPipelineStatus(deal.pipeline_status);
     setEditAddress(deal.address ?? "");
+    setEditNeighborhood((deal as any).neighborhood ?? null);
     setEditNotes(deal.notes ?? "");
     setEditMotivation(deal.motivation ?? "");
     setEditTimelineNotes(deal.timeline_notes ?? "");
@@ -530,6 +533,7 @@ export default function PipelinePage() {
       const body: Record<string, unknown> = {
         id: selectedDeal.id,
         address: editAddress || null,
+        neighborhood: editNeighborhood ?? null,
         notes: editNotes || null,
         motivation: editMotivation || null,
         timeline_notes: editTimelineNotes || null,
@@ -821,6 +825,7 @@ export default function PipelinePage() {
       opp_type: newType,
       notes: newNotes || null,
       motivation: newMotivation || null,
+      neighborhood: newNeighborhood ?? null,
     };
     body.address = newAddress || null;
     if (newType === "seller") {
@@ -859,7 +864,7 @@ export default function PipelinePage() {
     setDeals(prev => [j.deal as Deal, ...prev]);
     setNewOpen(false);
     setNewContactId(""); setNewContactName(""); setNewContactQuery("");
-    setNewAddress(""); setNewBudgetMin(""); setNewBudgetMax("");
+    setNewAddress(""); setNewNeighborhood(null); setNewBudgetMin(""); setNewBudgetMax("");
     setNewTargetAreas(""); setNewEstValue(""); setNewMotivation(""); setNewNotes("");
     setNewCommissionPct("");
     setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
@@ -1264,7 +1269,7 @@ export default function PipelinePage() {
 
                   <div className="field">
                     <div className="label">Property address</div>
-                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
+                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} onPlaceSelect={(p) => { setEditAddress(p.formatted_address); setEditNeighborhood(p.neighborhood); }} placeholder="123 Main St, LA, CA 90001" />
                   </div>
 
                   <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
@@ -1397,7 +1402,7 @@ export default function PipelinePage() {
 
                   <div className="field">
                     <div className="label">Property address</div>
-                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
+                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} onPlaceSelect={(p) => { setEditAddress(p.formatted_address); setEditNeighborhood(p.neighborhood); }} placeholder="123 Main St, LA, CA 90001" />
                   </div>
 
                   {(isBuyer || isInvestor) && (
@@ -2010,7 +2015,7 @@ export default function PipelinePage() {
               <>
                 <div className="field">
                   <div className="label">Property address</div>
-                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} placeholder="123 Main St, LA, CA 90001" />
+                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} onPlaceSelect={(p) => { setNewAddress(p.formatted_address); setNewNeighborhood(p.neighborhood); }} placeholder="123 Main St, LA, CA 90001" />
                 </div>
                 {newPipelineStatus === "active" && (
                   <div className="row" style={{ gap: 10 }}>
@@ -2029,7 +2034,7 @@ export default function PipelinePage() {
               <>
                 <div className="field">
                   <div className="label">Property address</div>
-                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} placeholder="123 Main St, LA, CA 90001" />
+                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} onPlaceSelect={(p) => { setNewAddress(p.formatted_address); setNewNeighborhood(p.neighborhood); }} placeholder="123 Main St, LA, CA 90001" />
                 </div>
                 {newPipelineStatus === "active" && (
                   <>
