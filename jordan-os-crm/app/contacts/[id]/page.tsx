@@ -35,6 +35,7 @@ type Contact = {
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
+  home_address: string | null;
 };
 
 type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
@@ -477,6 +478,7 @@ export default function ContactDetailPage() {
   const [birthday, setBirthday] = useState("");
   const [closeAnniversary, setCloseAnniversary] = useState("");
   const [moveInDate, setMoveInDate] = useState("");
+  const [homeAddress, setHomeAddress] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
   const [logOpen, setLogOpen] = useState(false);
@@ -608,7 +610,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -638,6 +640,7 @@ export default function ContactDetailPage() {
     setBirthday(c.birthday ?? "");
     setCloseAnniversary(c.close_anniversary ?? "");
     setMoveInDate(c.move_in_date ?? "");
+    setHomeAddress(c.home_address ?? "");
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -708,6 +711,7 @@ export default function ContactDetailPage() {
         birthday: birthday || null,
         close_anniversary: closeAnniversary || null,
         move_in_date: moveInDate || null,
+        home_address: homeAddress.trim() || null,
       })
       .eq("id", contact.id);
 
@@ -1147,6 +1151,12 @@ export default function ContactDetailPage() {
                 {contact.phone && <a href={`tel:${contact.phone}`} style={{ color: "inherit" }}>{contact.phone}</a>}
               </div>
             )}
+            {contact.home_address && (
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: "var(--ink)" }}>Home: </span>
+                {contact.home_address}
+              </div>
+            )}
             {/* Property address from most recent closed deal */}
             {mostRecentClosedDeal && (
               <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
@@ -1492,6 +1502,10 @@ export default function ContactDetailPage() {
                     <div className="label">Phone (optional)</div>
                     <input className="input" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(310) 555-0100" />
                   </div>
+                </div>
+                <div className="field">
+                  <div className="label">Home address (optional)</div>
+                  <AddressAutocomplete value={homeAddress} onChange={setHomeAddress} placeholder="123 Main St, Los Angeles, CA 90001" />
                 </div>
                 <div className="field">
                   <div className="label">Notes</div>
