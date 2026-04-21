@@ -2012,37 +2012,43 @@ export default function PipelinePage() {
                   <div className="label">Property address</div>
                   <AddressAutocomplete value={newAddress} onChange={setNewAddress} placeholder="123 Main St, LA, CA 90001" />
                 </div>
-                <div className="row" style={{ gap: 10 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <div className="label">Estimated value</div>
-                    <input className="input" value={newEstValue} onChange={e => setNewEstValue(e.target.value)} placeholder="2,000,000" />
+                {newPipelineStatus === "active" && (
+                  <div className="row" style={{ gap: 10 }}>
+                    <div className="field" style={{ flex: 1 }}>
+                      <div className="label">Estimated value</div>
+                      <input className="input" value={newEstValue} onChange={e => setNewEstValue(e.target.value)} placeholder="2,000,000" />
+                    </div>
+                    <div className="field" style={{ minWidth: 100 }}>
+                      <div className="label">Commission %</div>
+                      <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
+                    </div>
                   </div>
-                  <div className="field" style={{ minWidth: 100 }}>
-                    <div className="label">Commission %</div>
-                    <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
-                  </div>
-                </div>
+                )}
               </>
             ) : (
               <>
-                <div className="row" style={{ gap: 10 }}>
-                  <div className="field" style={{ flex: 1 }}>
-                    <div className="label">Budget min</div>
-                    <input className="input" value={newBudgetMin} onChange={e => setNewBudgetMin(e.target.value)} placeholder="800,000" />
-                  </div>
-                  <div className="field" style={{ flex: 1 }}>
-                    <div className="label">Budget max</div>
-                    <input className="input" value={newBudgetMax} onChange={e => setNewBudgetMax(e.target.value)} placeholder="1,500,000" />
-                  </div>
-                  <div className="field" style={{ minWidth: 100 }}>
-                    <div className="label">Commission %</div>
-                    <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
-                  </div>
-                </div>
-                <div className="field">
-                  <div className="label">Target areas</div>
-                  <input className="input" value={newTargetAreas} onChange={e => setNewTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
-                </div>
+                {newPipelineStatus === "active" && (
+                  <>
+                    <div className="row" style={{ gap: 10 }}>
+                      <div className="field" style={{ flex: 1 }}>
+                        <div className="label">Budget min</div>
+                        <input className="input" value={newBudgetMin} onChange={e => setNewBudgetMin(e.target.value)} placeholder="800,000" />
+                      </div>
+                      <div className="field" style={{ flex: 1 }}>
+                        <div className="label">Budget max</div>
+                        <input className="input" value={newBudgetMax} onChange={e => setNewBudgetMax(e.target.value)} placeholder="1,500,000" />
+                      </div>
+                      <div className="field" style={{ minWidth: 100 }}>
+                        <div className="label">Commission %</div>
+                        <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
+                      </div>
+                    </div>
+                    <div className="field">
+                      <div className="label">Target areas</div>
+                      <input className="input" value={newTargetAreas} onChange={e => setNewTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
+                    </div>
+                  </>
+                )}
               </>
             )}
 
