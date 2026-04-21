@@ -228,9 +228,16 @@ export default function InsightsPage() {
   const bizMetrics = useMemo(() => {
     const cutoff = timeframeCutoff(timeframe);
 
-    const filtered = allDeals.filter(d => new Date(d.created_at) >= cutoff);
-    const closed = filtered.filter(d => d.pipeline_status === "past_client");
+    // Closed deals: filter by close_date (when the deal actually closed)
+    const closed = allDeals.filter(d =>
+      d.pipeline_status === "past_client" &&
+      d.close_date &&
+      new Date(d.close_date) >= cutoff
+    );
+    // Active deals are current pipeline — not timeframe-filtered
     const active = allDeals.filter(d => d.pipeline_status === "active");
+    // For source breakdown, use closed deals in timeframe + active pipeline
+    const filtered = [...closed, ...active];
 
     const closedGci = closed.reduce((sum, d) => sum + dealGci(d), 0);
     const projectedGci = active.reduce((sum, d) => {
