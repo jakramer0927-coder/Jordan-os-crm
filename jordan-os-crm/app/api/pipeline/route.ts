@@ -69,17 +69,23 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const {
       contact_id, opp_type = "buyer", address, role, notes,
+      pipeline_status: rawPipelineStatus,
       // Buyer fields
-      buyer_stage = "initial_meeting",
+      buyer_stage: rawBuyerStage,
       budget_min, budget_max, target_areas, pre_approval_amount, pre_approval_lender,
       motivation, timeline_notes,
       // Seller fields
-      seller_stage = "initial_meeting",
+      seller_stage: rawSellerStage,
       list_price, estimated_value, market_notes, cma_link, target_list_date,
       // Financial
       price, close_date, commission_pct, referral_fee_pct,
       referral_source_contact_id, referral_fee_contact_id, co_agent_contact_id,
     } = body;
+
+    const isClosed = rawPipelineStatus === "past_client";
+    const buyer_stage = isClosed ? "closed" : (rawBuyerStage || "initial_meeting");
+    const seller_stage = isClosed ? "sold" : (rawSellerStage || "initial_meeting");
+    const pipeline_status = isClosed ? "past_client" : "active";
 
     if (!contact_id) {
       return NextResponse.json({ error: "contact_id required" }, { status: 400 });
@@ -93,7 +99,7 @@ export async function POST(req: Request) {
       user_id: uid,
       contact_id,
       opp_type,
-      pipeline_status: "active",
+      pipeline_status,
       role: role || (opp_type === "seller" ? "seller" : "buyer"),
       notes: notes?.trim() || null,
       // Set the appropriate stage

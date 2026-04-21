@@ -335,6 +335,10 @@ export default function PipelinePage() {
   const [newBudgetMax, setNewBudgetMax] = useState("");
   const [newTargetAreas, setNewTargetAreas] = useState("");
   const [newEstValue, setNewEstValue] = useState("");
+  const [newPipelineStatus, setNewPipelineStatus] = useState<"active" | "past_client">("active");
+  const [newClosePrice, setNewClosePrice] = useState("");
+  const [newCloseDate, setNewCloseDate] = useState("");
+  const [newRefFeePct, setNewRefFeePct] = useState("");
   const [newRefSourceId, setNewRefSourceId] = useState("");
   const [newRefSourceName, setNewRefSourceName] = useState("");
   const [newCommissionPct, setNewCommissionPct] = useState("");
@@ -826,7 +830,13 @@ export default function PipelinePage() {
       body.budget_max = newBudgetMax ? Number(newBudgetMax) : null;
       body.target_areas = newTargetAreas || null;
     }
+    body.pipeline_status = newPipelineStatus;
     body.commission_pct = newCommissionPct ? Number(newCommissionPct) : null;
+    if (newPipelineStatus === "past_client") {
+      body.price = newClosePrice ? Number(newClosePrice.replace(/[^0-9.]/g, "")) : null;
+      body.close_date = newCloseDate || null;
+      body.referral_fee_pct = newRefFeePct ? Number(newRefFeePct) : null;
+    }
     body.referral_source_contact_id = newRefSourceId || null;
     const res = await fetch("/api/pipeline", {
       method: "POST",
@@ -854,6 +864,7 @@ export default function PipelinePage() {
     setNewCommissionPct("");
     setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
     setNewRefSourceId(""); setNewRefSourceName("");
+    setNewPipelineStatus("active"); setNewClosePrice(""); setNewCloseDate(""); setNewRefFeePct("");
     setNewSaving(false);
   }
 
@@ -1975,6 +1986,17 @@ export default function PipelinePage() {
               </div>
             </div>
 
+            {/* Active vs Closed toggle */}
+            <div>
+              <div className="label" style={{ marginBottom: 6 }}>Status</div>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn" style={{ fontWeight: newPipelineStatus === "active" ? 900 : 400, background: newPipelineStatus === "active" ? "var(--ink)" : undefined, color: newPipelineStatus === "active" ? "var(--paper)" : undefined }}
+                  onClick={() => setNewPipelineStatus("active")}>Active</button>
+                <button className="btn" style={{ fontWeight: newPipelineStatus === "past_client" ? 900 : 400, background: newPipelineStatus === "past_client" ? "rgba(11,107,42,.15)" : undefined, color: newPipelineStatus === "past_client" ? "#0b6b2a" : undefined, borderColor: newPipelineStatus === "past_client" ? "rgba(11,107,42,.3)" : undefined }}
+                  onClick={() => setNewPipelineStatus("past_client")}>Already Closed</button>
+              </div>
+            </div>
+
             <div className="field">
               <div className="label">Contact *</div>
               <ContactSearchInput
@@ -2024,6 +2046,29 @@ export default function PipelinePage() {
               </>
             )}
 
+            {newPipelineStatus === "past_client" && (
+              <>
+                <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                  <div className="field" style={{ minWidth: 150 }}>
+                    <div className="label">Close price</div>
+                    <input className="input" value={newClosePrice} onChange={e => setNewClosePrice(e.target.value)} placeholder="1,800,000" />
+                  </div>
+                  <div className="field" style={{ minWidth: 140 }}>
+                    <div className="label">Close date</div>
+                    <input className="input" type="date" value={newCloseDate} onChange={e => setNewCloseDate(e.target.value)} />
+                  </div>
+                  <div className="field" style={{ minWidth: 110 }}>
+                    <div className="label">Commission %</div>
+                    <input className="input" value={newCommissionPct} onChange={e => setNewCommissionPct(e.target.value)} placeholder="2.5" />
+                  </div>
+                  <div className="field" style={{ minWidth: 110 }}>
+                    <div className="label">Referral fee %</div>
+                    <input className="input" value={newRefFeePct} onChange={e => setNewRefFeePct(e.target.value)} placeholder="25" />
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="field">
               <div className="label">Referred by (optional)</div>
               <ContactSearchInput
@@ -2033,10 +2078,12 @@ export default function PipelinePage() {
                 placeholder="Who sent you this client?"
               />
             </div>
-            <div className="field">
-              <div className="label">Motivation (optional)</div>
-              <input className="input" value={newMotivation} onChange={e => setNewMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
-            </div>
+            {newPipelineStatus === "active" && (
+              <div className="field">
+                <div className="label">Motivation (optional)</div>
+                <input className="input" value={newMotivation} onChange={e => setNewMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
+              </div>
+            )}
             <div className="field">
               <div className="label">Notes (optional)</div>
               <textarea className="textarea" value={newNotes} onChange={e => setNewNotes(e.target.value)} placeholder="Any context…" style={{ minHeight: 60 }} />
