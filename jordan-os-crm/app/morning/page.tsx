@@ -425,17 +425,21 @@ const DEFAULT_RULES: MorningRules = {
   minSphere: 0,
 };
 
-const RULES_KEY = "morning_rules_v1";
-const LOCK_KEY = "morning_lock_v1";
+// Keys are scoped to uid so multiple agents on the same browser don't share settings.
+// Fall back to legacy unscoped key so existing data migrates automatically on first use.
+const LEGACY_RULES_KEY = "morning_rules_v1";
+const LEGACY_LOCK_KEY = "morning_lock_v1";
+const rulesKey = (uid: string) => `morning_rules_v1_${uid}`;
+const lockKey = (uid: string) => `morning_lock_v1_${uid}`;
 
 function todayDateString(): string {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-function loadLockedIds(): string[] | null {
+function loadLockedIds(uid: string): string[] | null {
   try {
-    const raw = localStorage.getItem(LOCK_KEY);
+    const raw = localStorage.getItem(lockKey(uid)) ?? localStorage.getItem(LEGACY_LOCK_KEY);
     if (!raw) return null;
     const { date, ids } = JSON.parse(raw) as { date: string; ids: string[] };
     if (date !== todayDateString()) return null;
@@ -445,19 +449,19 @@ function loadLockedIds(): string[] | null {
   }
 }
 
-function saveLockedIds(ids: string[]) {
+function saveLockedIds(uid: string, ids: string[]) {
   try {
-    localStorage.setItem(LOCK_KEY, JSON.stringify({ date: todayDateString(), ids }));
+    localStorage.setItem(lockKey(uid), JSON.stringify({ date: todayDateString(), ids }));
   } catch { /* ignore */ }
 }
 
-function clearLockedIds() {
-  try { localStorage.removeItem(LOCK_KEY); } catch { /* ignore */ }
+function clearLockedIds(uid: string) {
+  try { localStorage.removeItem(lockKey(uid)); } catch { /* ignore */ }
 }
 
-function loadRules(): MorningRules {
+function loadRules(uid: string): MorningRules {
   try {
-    const raw = localStorage.getItem(RULES_KEY);
+    const raw = localStorage.getItem(rulesKey(uid)) ?? localStorage.getItem(LEGACY_RULES_KEY);
     if (!raw) return DEFAULT_RULES;
     const parsed = JSON.parse(raw) as Partial<MorningRules>;
     return { ...DEFAULT_RULES, ...parsed };
@@ -466,8 +470,8 @@ function loadRules(): MorningRules {
   }
 }
 
-function saveRules(r: MorningRules) {
-  try { localStorage.setItem(RULES_KEY, JSON.stringify(r)); } catch { /* ignore */ }
+function saveRules(uid: string, r: MorningRules) {
+  try { localStorage.setItem(rulesKey(uid), JSON.stringify(r)); } catch { /* ignore */ }
 }
 
 export default function MorningPage() {
@@ -492,11 +496,8 @@ export default function MorningPage() {
   const [touchLink, setTouchLink] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
-  // stable list + completed tracking — persisted per calendar day
-  const [lockedIds, setLockedIds] = useState<string[] | null>(() => {
-    if (typeof window === "undefined") return null;
-    return loadLockedIds();
-  });
+  // stable list + completed tracking — persisted per calendar day (loaded after uid is known)
+  const [lockedIds, setLockedIds] = useState<string[] | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   // AI-generated drafts keyed by contact ID
@@ -535,11 +536,8 @@ export default function MorningPage() {
   const [syncGmail, setSyncGmail] = useState<string | null>(null);
   const [syncCalendar, setSyncCalendar] = useState<string | null>(null);
 
-  // operating rules — load synchronously on first render to avoid re-render loop
-  const [rules, setRules] = useState<MorningRules>(() => {
-    if (typeof window === "undefined") return DEFAULT_RULES;
-    return loadRules();
-  });
+  // operating rules — loaded after uid is known (in init effect)
+  const [rules, setRules] = useState<MorningRules>(DEFAULT_RULES);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesReady, setRulesReady] = useState(false);
 
@@ -572,13 +570,13 @@ export default function MorningPage() {
     setMsg(null);
     setLoading(true);
     // Only clear the lock on a manual refresh — not on initial page load
-    if (forceRefresh) {
-      setLockedIds(null);
-      clearLockedIds();
-    }
-
     const user = await requireSession();
     if (!user) { setLoading(false); return; }
+
+    if (forceRefresh) {
+      setLockedIds(null);
+      clearLockedIds(user.id);
+    }
 
     // Fetch contacts+touches+counts, voice profile, sync status, follow-ups, and pipeline in parallel
     const [contactsRes, syncRes, followUpsRes, pipelineRes] = await Promise.all([
@@ -778,6 +776,10 @@ export default function MorningPage() {
       if (!alive) return;
       if (!user) return;
 
+      // Load uid-scoped localStorage values now that we have the uid
+      setRules(loadRules(user.id));
+      setLockedIds(loadLockedIds(user.id));
+
       setReady(true);
       await load();
     };
@@ -942,7 +944,7 @@ export default function MorningPage() {
     if (lockedIds === null && recs.length > 0) {
       const ids = recs.map((r) => r.id);
       setLockedIds(ids);
-      saveLockedIds(ids);
+      if (uid) saveLockedIds(uid, ids);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds]);
@@ -1159,7 +1161,7 @@ export default function MorningPage() {
                       const val = Math.max(min, Math.min(max, Number(e.target.value) || min));
                       const next = { ...rules, [key]: val };
                       setRules(next);
-                      saveRules(next);
+                      if (uid) saveRules(uid, next);
                     }}
                     style={{ width: 72 }}
                   />

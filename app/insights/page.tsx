@@ -90,11 +90,11 @@ type Timeframe = "ytd" | "trailing12" | "trailing3";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const RULES_KEY = "morning_rules_v1";
-
-function loadDailyGoal(): number {
+function loadDailyGoal(uid?: string): number {
   try {
-    const raw = localStorage.getItem(RULES_KEY);
+    // Try uid-scoped key first, fall back to legacy
+    const key = uid ? `morning_rules_v1_${uid}` : "morning_rules_v1";
+    const raw = localStorage.getItem(key) ?? (uid ? localStorage.getItem("morning_rules_v1") : null);
     if (!raw) return 5;
     return (JSON.parse(raw) as { totalRecs?: number })?.totalRecs ?? 5;
   } catch { return 5; }
@@ -228,12 +228,12 @@ export default function InsightsPage() {
   const bizMetrics = useMemo(() => {
     const cutoff = timeframeCutoff(timeframe);
 
-    // Closed deals: filter by close_date (when the deal actually closed)
-    const closed = allDeals.filter(d =>
-      d.pipeline_status === "past_client" &&
-      d.close_date &&
-      new Date(d.close_date) >= cutoff
-    );
+    // Closed deals: filter by close_date; fall back to created_at if close_date missing
+    const closed = allDeals.filter(d => {
+      if (d.pipeline_status !== "past_client") return false;
+      const dateStr = d.close_date || d.created_at;
+      return new Date(dateStr) >= cutoff;
+    });
     // Active deals are current pipeline — not timeframe-filtered
     const active = allDeals.filter(d => d.pipeline_status === "active");
     // For source breakdown, use closed deals in timeframe + active pipeline
@@ -700,12 +700,12 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
   }
 
   useEffect(() => {
-    if (typeof window !== "undefined") setDailyGoal(loadDailyGoal());
     let alive = true;
     const init = async () => {
       const { data } = await supabase.auth.getSession();
       if (!alive) return;
       if (!data.session) { window.location.href = "/login"; return; }
+      if (typeof window !== "undefined") setDailyGoal(loadDailyGoal(data.session.user.id));
       setReady(true);
       await fetchAll();
     };
@@ -777,21 +777,38 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
 
       {/* ── Pipeline Snapshot ────────────────────────────────────────────────── */}
       <div className="card cardPad">
-        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Pipeline snapshot — {tfLabel}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 16 }}>
-          {[
-            { label: "Active deals", value: activeCount.toString(), sub: "currently in pipeline" },
-            { label: "Projected GCI", value: fmt$(projectedGci), sub: "from active deals" },
-            { label: "Closed deals", value: closedCount.toString(), sub: `${buyers}B / ${sellers}S` },
-            { label: "Closed GCI", value: fmt$(closedGci), sub: tfLabel },
-            { label: "Avg close price", value: avgClosePrice > 0 ? fmt$(avgClosePrice) : "—", sub: "closed deals" },
-          ].map(item => (
-            <div key={item.label} style={{ textAlign: "center", padding: "12px 8px", background: "rgba(0,0,0,.025)", borderRadius: 8 }}>
-              <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{item.value}</div>
-              <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4, color: "rgba(18,18,18,.55)" }}>{item.label}</div>
-              <div style={{ fontSize: 11, color: "rgba(18,18,18,.38)", marginTop: 2 }}>{item.sub}</div>
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Pipeline snapshot</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={{ padding: "12px", background: "rgba(0,0,0,.025)", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(18,18,18,.45)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Current pipeline</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { label: "Active deals", value: activeCount.toString() },
+                { label: "Projected GCI", value: fmt$(projectedGci) },
+              ].map(item => (
+                <div key={item.label}>
+                  <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{item.value}</div>
+                  <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4, color: "rgba(18,18,18,.55)" }}>{item.label}</div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+          <div style={{ padding: "12px", background: "rgba(0,0,0,.025)", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(18,18,18,.45)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Closed — {tfLabel}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              {[
+                { label: "Closed deals", value: closedCount.toString(), sub: `${buyers}B / ${sellers}S` },
+                { label: "Closed GCI", value: fmt$(closedGci) },
+                { label: "Avg close price", value: avgClosePrice > 0 ? fmt$(avgClosePrice) : "—" },
+              ].map(item => (
+                <div key={item.label}>
+                  <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{item.value}</div>
+                  <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4, color: "rgba(18,18,18,.55)" }}>{item.label}</div>
+                  {"sub" in item && item.sub && <div style={{ fontSize: 11, color: "rgba(18,18,18,.38)", marginTop: 2 }}>{item.sub}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

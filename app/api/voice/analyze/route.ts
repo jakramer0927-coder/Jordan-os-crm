@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUser, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -12,26 +12,27 @@ type Tip = { issue: string; recommendation: string; example?: string };
 
 export async function POST(req: Request) {
   try {
-    const uid = await getVerifiedUid();
-    if (!uid) return unauthorized();
+    const user = await getVerifiedUser();
+    if (!user) return unauthorized();
 
     const body = await req.json().catch(() => ({})) as { text?: string };
     const text = (body?.text || "").trim();
 
     if (!text || text.length < 10) return NextResponse.json({ observations: [], score: null });
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
 
-    // Load coaching tips from user_settings
+    // Load coaching tips and agent name from user_settings
     const { data: settings } = await supabaseAdmin
       .from("user_settings")
-      .select("voice_coaching_tips, voice_style_guide")
-      .eq("user_id", uid)
+      .select("voice_coaching_tips, voice_style_guide, agent_name")
+      .eq("user_id", user.id)
       .maybeSingle();
 
     const tips: Tip[] = (settings as any)?.voice_coaching_tips || [];
     const styleGuide: string = (settings as any)?.voice_style_guide || "";
+    const agentName = (settings as any)?.agent_name || user.name || user.email?.split("@")[0] || "this agent";
 
     if (tips.length === 0 && !styleGuide) {
       return NextResponse.json({
@@ -40,16 +41,16 @@ export async function POST(req: Request) {
       });
     }
 
-    const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001";
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
     const tipsSummary = tips.length > 0
       ? tips.map((t, i) => `${i + 1}. ${t.issue}: ${t.recommendation}`).join("\n")
       : "";
 
-    const prompt = `You are reviewing an outbound message written by Jordan Kramer, a luxury LA real estate advisor.
+    const prompt = `You are reviewing an outbound message written by ${agentName}, a real estate professional.
 
-${tipsSummary ? `Jordan's known improvement areas:\n${tipsSummary}\n` : ""}
-${styleGuide ? `Jordan's style guide:\n${styleGuide}\n` : ""}
+${tipsSummary ? `${agentName}'s known improvement areas:\n${tipsSummary}\n` : ""}
+${styleGuide ? `${agentName}'s style guide:\n${styleGuide}\n` : ""}
 
 MESSAGE TO REVIEW:
 """
@@ -62,22 +63,21 @@ If the message is strong, say so briefly.
 
 Return JSON: { "observations": ["...", "..."], "score": 1-10 }`;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        max_tokens: 512,
-        temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        response_format: { type: "json_object" },
       }),
     });
 
     const j = await res.json();
     if (!res.ok) return NextResponse.json({ observations: [], score: null });
 
-    const raw = j?.content?.[0]?.text || "{}";
-    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const parsed = JSON.parse(j?.choices?.[0]?.message?.content || "{}");
     return NextResponse.json({
       observations: parsed.observations || [],
       score: parsed.score || null,

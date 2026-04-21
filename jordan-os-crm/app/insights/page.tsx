@@ -90,11 +90,11 @@ type Timeframe = "ytd" | "trailing12" | "trailing3";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const RULES_KEY = "morning_rules_v1";
-
-function loadDailyGoal(): number {
+function loadDailyGoal(uid?: string): number {
   try {
-    const raw = localStorage.getItem(RULES_KEY);
+    // Try uid-scoped key first, fall back to legacy
+    const key = uid ? `morning_rules_v1_${uid}` : "morning_rules_v1";
+    const raw = localStorage.getItem(key) ?? (uid ? localStorage.getItem("morning_rules_v1") : null);
     if (!raw) return 5;
     return (JSON.parse(raw) as { totalRecs?: number })?.totalRecs ?? 5;
   } catch { return 5; }
@@ -700,12 +700,12 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
   }
 
   useEffect(() => {
-    if (typeof window !== "undefined") setDailyGoal(loadDailyGoal());
     let alive = true;
     const init = async () => {
       const { data } = await supabase.auth.getSession();
       if (!alive) return;
       if (!data.session) { window.location.href = "/login"; return; }
+      if (typeof window !== "undefined") setDailyGoal(loadDailyGoal(data.session.user.id));
       setReady(true);
       await fetchAll();
     };

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -14,45 +15,37 @@ async function insertContactEmail(contactId: string, email: string) {
     is_primary: false,
     source: "unmatched_link",
   });
-
-  // ignore duplicates
-  if (
-    error &&
-    !String(error.message || "")
-      .toLowerCase()
-      .includes("duplicate")
-  ) {
-    throw error;
-  }
+  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) throw error;
 }
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const uid = String(body.uid || "");
-  const email = String(body.email || "")
-    .toLowerCase()
-    .trim();
-  const contactId = String(body.contact_id || "");
+  try {
+    const uid = await getVerifiedUid();
+    if (!uid) return unauthorized();
 
-  if (!isUuid(uid)) return NextResponse.json({ error: "Invalid uid" }, { status: 400 });
-  if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
-  if (!isUuid(contactId))
-    return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const email = String(body.email || "").toLowerCase().trim();
+    const contactId = String(body.contact_id || "");
 
-  // Add email to contact_emails (so Gmail sync matches going forward)
-  await insertContactEmail(contactId, email);
+    if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
+    if (!isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
-  // Mark unmatched recipient as linked
-  const { error: uErr } = await supabaseAdmin
-    .from("unmatched_recipients")
-    .update({
-      status: "linked",
-      created_contact_id: contactId,
-      last_seen_at: new Date().toISOString(),
-    })
-    .eq("email", email);
+    // Verify the contact belongs to this user
+    const { data: contact } = await supabaseAdmin
+      .from("contacts").select("id").eq("id", contactId).eq("user_id", uid).maybeSingle();
+    if (!contact) return NextResponse.json({ error: "Contact not found" }, { status: 404 });
 
-  if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+    await insertContactEmail(contactId, email);
 
-  return NextResponse.json({ ok: true });
+    const { error: uErr } = await supabaseAdmin
+      .from("unmatched_recipients")
+      .update({ status: "linked", created_contact_id: contactId, last_seen_at: new Date().toISOString() })
+      .eq("email", email)
+      .eq("user_id", uid);
+
+    if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return serverError("UNMATCHED_LINK_CRASH", e);
+  }
 }

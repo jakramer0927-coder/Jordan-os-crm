@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
+import { getVerifiedUser, unauthorized } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -12,8 +12,8 @@ type Tip = { issue: string; recommendation: string; example?: string };
 
 export async function POST(req: Request) {
   try {
-    const uid = await getVerifiedUid();
-    if (!uid) return unauthorized();
+    const user = await getVerifiedUser();
+    if (!user) return unauthorized();
 
     const body = await req.json().catch(() => ({})) as { text?: string };
     const text = (body?.text || "").trim();
@@ -23,15 +23,16 @@ export async function POST(req: Request) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
 
-    // Load coaching tips from user_settings
+    // Load coaching tips and agent name from user_settings
     const { data: settings } = await supabaseAdmin
       .from("user_settings")
-      .select("voice_coaching_tips, voice_style_guide")
-      .eq("user_id", uid)
+      .select("voice_coaching_tips, voice_style_guide, agent_name")
+      .eq("user_id", user.id)
       .maybeSingle();
 
     const tips: Tip[] = (settings as any)?.voice_coaching_tips || [];
     const styleGuide: string = (settings as any)?.voice_style_guide || "";
+    const agentName = (settings as any)?.agent_name || user.name || user.email?.split("@")[0] || "this agent";
 
     if (tips.length === 0 && !styleGuide) {
       return NextResponse.json({
@@ -46,10 +47,10 @@ export async function POST(req: Request) {
       ? tips.map((t, i) => `${i + 1}. ${t.issue}: ${t.recommendation}`).join("\n")
       : "";
 
-    const prompt = `You are reviewing an outbound message written by Jordan Kramer, a luxury LA real estate advisor.
+    const prompt = `You are reviewing an outbound message written by ${agentName}, a real estate professional.
 
-${tipsSummary ? `Jordan's known improvement areas:\n${tipsSummary}\n` : ""}
-${styleGuide ? `Jordan's style guide:\n${styleGuide}\n` : ""}
+${tipsSummary ? `${agentName}'s known improvement areas:\n${tipsSummary}\n` : ""}
+${styleGuide ? `${agentName}'s style guide:\n${styleGuide}\n` : ""}
 
 MESSAGE TO REVIEW:
 """

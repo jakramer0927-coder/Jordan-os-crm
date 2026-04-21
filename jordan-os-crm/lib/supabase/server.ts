@@ -40,6 +40,18 @@ export async function getVerifiedUid(): Promise<string | null> {
   }
 }
 
+export async function getVerifiedUser(): Promise<{ id: string; email: string | null; name: string | null } | null> {
+  try {
+    const client = await createSupabaseServerClient();
+    const { data: { user }, error } = await client.auth.getUser();
+    if (error || !user) return null;
+    const name = (user.user_metadata?.full_name as string | undefined) ?? null;
+    return { id: user.id, email: user.email ?? null, name };
+  } catch {
+    return null;
+  }
+}
+
 /** Standard 401 response. */
 export function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

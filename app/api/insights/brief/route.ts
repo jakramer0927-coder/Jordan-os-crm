@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getVerifiedUser, unauthorized, serverError } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
-    const uid = await getVerifiedUid();
-    if (!uid) return unauthorized();
+    const user = await getVerifiedUser();
+    if (!user) return unauthorized();
 
     const body = await req.json().catch(() => ({}));
     const { summary } = body;
@@ -17,9 +18,22 @@ export async function POST(req: Request) {
 
     const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
-    const system = `You are a candid business analyst for Jordan Kramer, a luxury real estate agent at Compass Los Angeles.
-His business context: ~20 transactions/year, GCI target $25M, 85% referral-driven, ~12,000-contact CRM, clients are tech/finance/entertainment executives.
-Mix: ~30% sellers, 45% buyers, 25% leases. One active listing: 840 California Ave, Venice at $4.95M.
+    // Load per-user agent context from user_settings
+    const { data: settings } = await supabaseAdmin
+      .from("user_settings")
+      .select("agent_name, agent_context")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const agentName = (settings as any)?.agent_name || user.name || user.email?.split("@")[0] || "this agent";
+    const agentContext = (settings as any)?.agent_context || "";
+
+    const contextBlock = agentContext
+      ? `Agent context: ${agentContext}`
+      : `Agent: ${agentName}, real estate professional.`;
+
+    const system = `You are a candid business analyst for a real estate agent.
+${contextBlock}
 
 Write a candid 4–5 sentence business brief covering:
 1. What's genuinely strong in the data
@@ -27,7 +41,7 @@ Write a candid 4–5 sentence business brief covering:
 3. One non-obvious pattern worth paying attention to
 4. One specific, actionable recommendation
 
-Use his actual numbers. Be direct — no hedging, no filler. Write in second person ("Your pipeline…", "You have…"). Do not use bullet points — write in prose.`;
+Use their actual numbers. Be direct — no hedging, no filler. Write in second person ("Your pipeline…", "You have…"). Do not use bullet points — write in prose.`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
