@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 type Touch = {
   id: string;
   contact_id: string;
@@ -18,6 +20,24 @@ type Contact = {
   category: string;
   tier: string | null;
   created_at: string;
+};
+
+type Deal = {
+  id: string;
+  contact_id: string;
+  opp_type: string;
+  pipeline_status: string;
+  price: number | null;
+  list_price: number | null;
+  estimated_value: number | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  commission_pct: number | null;
+  close_date: string | null;
+  created_at: string;
+  neighborhood: string | null;
+  address: string | null;
+  referral_source: { id: string; display_name: string; category: string | null } | null;
 };
 
 type WeekSummary = {
@@ -45,10 +65,13 @@ type CatCompliance = { total: number; onCadence: number };
 type RefSourceRow = {
   contact_id: string;
   display_name: string;
+  category: string | null;
   deals_total: number;
   deals_closed: number;
   pipeline_value: number;
   closed_value: number;
+  closed_gci: number;
+  pipeline_gci: number;
 };
 
 type RefAskOpportunity = {
@@ -62,6 +85,8 @@ type RefAskOpportunity = {
   score: number;
   reason: string;
 };
+
+type Timeframe = "ytd" | "trailing12" | "trailing3";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -120,13 +145,39 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function fmt$(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+  return `$${n.toLocaleString()}`;
+}
+
+function dealGci(d: Deal): number {
+  const price = d.price ?? 0;
+  const pct = d.commission_pct ?? 2.5;
+  return price * pct / 100;
+}
+
+function dealProjectedValue(d: Deal): number {
+  if (d.opp_type === "seller") return d.list_price ?? d.estimated_value ?? d.price ?? 0;
+  return d.budget_max ?? d.price ?? 0;
+}
+
+function timeframeCutoff(tf: Timeframe): Date {
+  const now = new Date();
+  if (tf === "ytd") return new Date(now.getFullYear(), 0, 1);
+  if (tf === "trailing12") { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d; }
+  const d = new Date(now); d.setMonth(d.getMonth() - 3); return d;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function InsightsPage() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dailyGoal, setDailyGoal] = useState(5);
+  const [timeframe, setTimeframe] = useState<Timeframe>("ytd");
 
+  // Accountability state
   const [out7, setOut7] = useState(0);
   const [out7Prev, setOut7Prev] = useState(0);
   const [out30, setOut30] = useState(0);
@@ -146,11 +197,15 @@ export default function InsightsPage() {
   const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
   const [refSources, setRefSources] = useState<RefSourceRow[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
-  const [agentsTotal, setAgentsTotal] = useState(0);
-  const [clientsTotal, setClientsTotal] = useState(0);
   const [aClientsTotal, setAClientsTotal] = useState(0);
   const [aClientsDueOrOverdue, setAClientsDueOrOverdue] = useState(0);
   const [aClientsVeryOverdue, setAClientsVeryOverdue] = useState(0);
+  const [allContacts, setAllContacts] = useState<Contact[]>([]);
+
+  // Business intelligence state
+  const [allDeals, setAllDeals] = useState<Deal[]>([]);
+  const [aiBrief, setAiBrief] = useState<string | null>(null);
+  const [aiBriefLoading, setAiBriefLoading] = useState(false);
 
   const wow = useMemo(() => deltaPct(out7, out7Prev), [out7, out7Prev]);
   const wdElapsed = useMemo(() => weekdaysElapsed(), [ready]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -169,35 +224,182 @@ export default function InsightsPage() {
     return { total: aComp + velocity + agent + ask + growth };
   }, [aClientsTotal, aClientsDueOrOverdue, out30, dailyGoal, out7, agents7, refAsks30, contactsTotal]);
 
+  // ── Business metrics (timeframe-filtered) ────────────────────────────────────
+  const bizMetrics = useMemo(() => {
+    const cutoff = timeframeCutoff(timeframe);
+
+    const filtered = allDeals.filter(d => new Date(d.created_at) >= cutoff);
+    const closed = filtered.filter(d => d.pipeline_status === "past_client");
+    const active = allDeals.filter(d => d.pipeline_status === "active");
+
+    const closedGci = closed.reduce((sum, d) => sum + dealGci(d), 0);
+    const projectedGci = active.reduce((sum, d) => {
+      const val = dealProjectedValue(d);
+      return sum + val * ((d.commission_pct ?? 2.5) / 100);
+    }, 0);
+    const closedCount = closed.length;
+    const activeCount = active.length;
+
+    const buyers = closed.filter(d => d.opp_type === "buyer").length;
+    const sellers = closed.filter(d => d.opp_type === "seller").length;
+
+    const avgClosePrice = closed.length > 0
+      ? closed.reduce((s, d) => s + (d.price ?? 0), 0) / closed.length
+      : 0;
+
+    // Price buckets (closed deals)
+    const priceBuckets: Record<string, number> = { "<$2M": 0, "$2–5M": 0, "$5–10M": 0, "$10M+": 0 };
+    for (const d of closed) {
+      const p = d.price ?? 0;
+      if (p < 2_000_000) priceBuckets["<$2M"]++;
+      else if (p < 5_000_000) priceBuckets["$2–5M"]++;
+      else if (p < 10_000_000) priceBuckets["$5–10M"]++;
+      else priceBuckets["$10M+"]++;
+    }
+
+    // Geographic distribution (all active + closed deals)
+    const neighborhoodMap = new Map<string, { count: number; gci: number }>();
+    for (const d of [...active, ...closed]) {
+      const n = d.neighborhood?.trim() || null;
+      if (!n) continue;
+      const existing = neighborhoodMap.get(n) ?? { count: 0, gci: 0 };
+      existing.count++;
+      existing.gci += dealGci(d);
+      neighborhoodMap.set(n, existing);
+    }
+    const neighborhoods = [...neighborhoodMap.entries()]
+      .map(([name, v]) => ({ name, count: v.count, gci: v.gci }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // Business source breakdown (filtered deals)
+    const sourceByCategory: Record<string, { count: number; gci: number }> = {};
+    let noSource = 0;
+    for (const d of filtered) {
+      const cat = (d.referral_source?.category || "").toLowerCase() || null;
+      const gci = dealGci(d);
+      if (!cat) { noSource++; continue; }
+      const key = cat === "agent" ? "Agent" : cat === "client" ? "Client" : cat === "sphere" ? "Sphere" : cat === "developer" ? "Developer" : "Other";
+      const existing = sourceByCategory[key] ?? { count: 0, gci: 0 };
+      existing.count++;
+      existing.gci += gci;
+      sourceByCategory[key] = existing;
+    }
+    const totalSourced = Object.values(sourceByCategory).reduce((s, v) => s + v.count, 0);
+
+    // Contact composition
+    const catCounts: Record<string, number> = {};
+    for (const c of allContacts) {
+      const cat = (c.category || "other").toLowerCase();
+      catCounts[cat] = (catCounts[cat] ?? 0) + 1;
+    }
+
+    // Developer contacts
+    const developerCount = catCounts["developer"] ?? 0;
+
+    // Contact growth by month (last 12 months)
+    const now = new Date();
+    const growthByMonth: { label: string; count: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const label = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      const count = allContacts.filter(c => {
+        const ca = new Date(c.created_at);
+        return ca >= monthStart && ca < monthEnd;
+      }).length;
+      growthByMonth.push({ label, count });
+    }
+
+    return {
+      closedGci, projectedGci, closedCount, activeCount,
+      buyers, sellers, avgClosePrice,
+      priceBuckets, neighborhoods,
+      sourceByCategory, totalSourced, noSource,
+      catCounts, developerCount, growthByMonth,
+    };
+  }, [allDeals, allContacts, timeframe]);
+
+  // ── Quick insights (accountability-focused, no day-gating) ───────────────────
   const quickInsights = useMemo(() => {
-    const items: Array<{ text: string; urgent: boolean }> = [];
+    const items: Array<{ text: string; rec: string; urgent: boolean }> = [];
 
     if (aClientsVeryOverdue > 0) {
-      items.push({ text: `${aClientsVeryOverdue} A-client${aClientsVeryOverdue !== 1 ? "s are" : " is"} 14+ days past cadence — contact immediately`, urgent: true });
+      items.push({
+        text: `${aClientsVeryOverdue} A-client${aClientsVeryOverdue !== 1 ? "s are" : " is"} 14+ days past cadence`,
+        rec: "Open Morning page and prioritize these contacts today",
+        urgent: true,
+      });
     }
     const aOverduePct = aClientsTotal > 0 ? Math.round((aClientsDueOrOverdue / aClientsTotal) * 100) : 0;
     if (aOverduePct >= 50 && aClientsVeryOverdue === 0) {
-      items.push({ text: `${aOverduePct}% of your A-clients are due or overdue for outreach`, urgent: true });
+      items.push({
+        text: `${aOverduePct}% of your A-clients are due or overdue for outreach`,
+        rec: "Block 30 minutes today to work through your A-client list",
+        urgent: true,
+      });
     }
-    if (wtdReferralAsks === 0 && wdElapsed >= 3) {
-      items.push({ text: `No referral asks logged this week — ${wdElapsed} days in with none`, urgent: true });
+    if (wtdReferralAsks === 0) {
+      items.push({
+        text: `No referral asks logged this week`,
+        rec: "Add a referral ask intent to your next 1–2 touches today",
+        urgent: wdElapsed >= 3,
+      });
     } else if (wtdReferralAsks < 5 && wdElapsed >= 4) {
-      items.push({ text: `${wtdReferralAsks}/5 referral asks this week — ${5 - wtdReferralAsks} more to hit goal`, urgent: false });
+      items.push({
+        text: `${wtdReferralAsks}/5 referral asks this week — ${5 - wtdReferralAsks} more to hit goal`,
+        rec: "Check the Referral Ask Opportunities section below",
+        urgent: false,
+      });
     }
     const agentPct = wtdOutbound > 0 ? Math.round((wtdAgents / wtdOutbound) * 100) : 0;
-    if (agentPct < 30 && wtdOutbound >= 5) {
-      items.push({ text: `Agent touches are ${agentPct}% of your outreach this week (target: 40%+)`, urgent: false });
+    if (agentPct < 30 && wtdOutbound >= 3) {
+      items.push({
+        text: `Agent touches are ${agentPct}% of your outreach this week (target 40%+)`,
+        rec: "Text or call 2–3 agents in your network before end of week",
+        urgent: false,
+      });
     }
     if (wow <= -30 && out7Prev > 0) {
-      items.push({ text: `Outreach dropped ${Math.abs(wow)}% this week vs last — ${out7} vs ${out7Prev} touches`, urgent: true });
-    }
-    const topSource = refSources[0];
-    if (topSource && topSource.deals_closed === 0 && topSource.deals_total >= 2) {
-      items.push({ text: `${topSource.display_name} has ${topSource.deals_total} deals in your pipeline but none closed yet`, urgent: false });
+      items.push({
+        text: `Outreach dropped ${Math.abs(wow)}% this week vs last (${out7} vs ${out7Prev} touches)`,
+        rec: "Identify what changed and block focused outreach time tomorrow",
+        urgent: true,
+      });
     }
 
-    return items.slice(0, 5);
-  }, [aClientsVeryOverdue, aClientsTotal, aClientsDueOrOverdue, wtdReferralAsks, wdElapsed, wtdAgents, wtdOutbound, wow, out7, out7Prev, refSources]);
+    // Business intelligence insights
+    const { sourceByCategory, totalSourced, activeCount, closedGci } = bizMetrics;
+    const agentSrc = sourceByCategory["Agent"];
+    if (totalSourced > 0 && agentSrc) {
+      const agentSharePct = Math.round((agentSrc.count / totalSourced) * 100);
+      if (agentSharePct < 25) {
+        items.push({
+          text: `Only ${agentSharePct}% of your deals are coming from agent referrals`,
+          rec: "Increase agent outreach — target 2 new agent touches this week",
+          urgent: false,
+        });
+      }
+    }
+    if (activeCount === 0) {
+      items.push({
+        text: "No active deals in your pipeline",
+        rec: "Focus prospecting efforts on buyer and seller conversations",
+        urgent: true,
+      });
+    } else if (activeCount <= 2) {
+      items.push({
+        text: `Only ${activeCount} active deal${activeCount !== 1 ? "s" : ""} in your pipeline`,
+        rec: "Pipeline is thin — prioritize converting warm conversations into active opps",
+        urgent: false,
+      });
+    }
+
+    return items.slice(0, 6);
+  }, [aClientsVeryOverdue, aClientsTotal, aClientsDueOrOverdue, wtdReferralAsks, wdElapsed, wtdAgents, wtdOutbound, wow, out7, out7Prev, bizMetrics]);
+
+  // ── Data fetch ───────────────────────────────────────────────────────────────
 
   async function fetchAll() {
     setError(null);
@@ -290,10 +492,8 @@ export default function InsightsPage() {
       .limit(20000);
     if (cErr) { setError(`Contacts fetch: ${cErr.message}`); return; }
     const cs = (cRaw ?? []) as Contact[];
-
+    setAllContacts(cs);
     setContactsTotal(cs.length);
-    setAgentsTotal(cs.filter(c => (c.category || "").toLowerCase() === "agent").length);
-    setClientsTotal(cs.filter(c => (c.category || "").toLowerCase() === "client").length);
 
     const catById = new Map<string, string>();
     cs.forEach(c => catById.set(c.id, c.category));
@@ -361,30 +561,39 @@ export default function InsightsPage() {
     }
     setCatCompliance(comp);
 
-    // Referral source ROI — use pipeline_status (not legacy status)
-    const pipelineRes = await fetch("/api/pipeline?include_closed=1");
+    // Fetch all deals (all time for business intelligence)
+    const pipelineRes = await fetch("/api/pipeline?include_all=1");
     if (pipelineRes.ok) {
       const pj = await pipelineRes.json().catch(() => ({}));
-      const allDeals: any[] = pj.deals ?? [];
+      const deals: Deal[] = pj.deals ?? [];
+      setAllDeals(deals);
+
+      // Referral source ROI
       const sourceMap = new Map<string, RefSourceRow>();
-      for (const d of allDeals) {
+      for (const d of deals) {
         const src = d.referral_source as any;
         if (!src?.id) continue;
-        const existing = sourceMap.get(src.id) ?? { contact_id: src.id, display_name: src.display_name, deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0 };
+        const existing = sourceMap.get(src.id) ?? {
+          contact_id: src.id, display_name: src.display_name, category: src.category ?? null,
+          deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0,
+          closed_gci: 0, pipeline_gci: 0,
+        };
         existing.deals_total++;
+        const gci = dealGci(d);
         if (d.pipeline_status === "past_client") {
           existing.deals_closed++;
           existing.closed_value += d.price ?? 0;
+          existing.closed_gci += gci;
         } else {
-          existing.pipeline_value += d.price ?? d.budget_max ?? d.list_price ?? 0;
+          existing.pipeline_value += dealProjectedValue(d);
+          existing.pipeline_gci += gci;
         }
         sourceMap.set(src.id, existing);
       }
-      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_value + b.pipeline_value) - (a.closed_value + a.pipeline_value));
+      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_gci + b.pipeline_gci) - (a.closed_gci + a.pipeline_gci));
       setRefSources(sorted);
     }
 
-    // Referral ask opportunities — also fix closed deal query
     const [refAskRaw, closedDealRaw] = await Promise.all([
       supabase.from("touches").select("contact_id, occurred_at")
         .eq("intent", "referral_ask").eq("direction", "outbound")
@@ -428,6 +637,46 @@ export default function InsightsPage() {
     setRefOpportunities(opps.slice(0, 5));
   }
 
+  async function generateBrief() {
+    setAiBriefLoading(true);
+    setAiBrief(null);
+    try {
+      const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, sourceByCategory, totalSourced, neighborhoods, developerCount, priceBuckets } = bizMetrics;
+
+      const tfLabel = timeframe === "ytd" ? "YTD" : timeframe === "trailing12" ? "trailing 12 months" : "trailing 3 months";
+
+      const srcLines = Object.entries(sourceByCategory)
+        .map(([k, v]) => `${k}: ${v.count} deals (${Math.round(v.count / Math.max(totalSourced, 1) * 100)}%, GCI ${fmt$(v.gci)})`)
+        .join("; ");
+
+      const geoLines = neighborhoods.slice(0, 5).map(n => `${n.name}: ${n.count}`).join(", ");
+
+      const priceLines = Object.entries(priceBuckets).map(([k, v]) => `${k}: ${v}`).join(", ");
+
+      const summary = `Timeframe: ${tfLabel}
+Active pipeline: ${activeCount} deals, projected GCI ${fmt$(projectedGci)}
+Closed deals: ${closedCount} (${buyers} buyers, ${sellers} sellers), closed GCI ${fmt$(closedGci)}, avg close price ${fmt$(avgClosePrice)}
+Referral sources: ${srcLines || "none tagged"}
+Geographic concentration: ${geoLines || "no neighborhoods tagged"}
+Price distribution: ${priceLines}
+Database: ${contactsTotal.toLocaleString()} contacts, ${developerCount} developers
+Weekly outreach: ${wtdOutbound} WTD (goal ${wtdPace}), ${wtdAgents} agent touches, ${wtdReferralAsks} referral asks
+A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
+
+      const res = await fetch("/api/insights/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary }),
+      });
+      const j = await res.json();
+      setAiBrief(j.brief ?? "No brief returned.");
+    } catch (e) {
+      setAiBrief("Failed to generate brief. Check API key.");
+    } finally {
+      setAiBriefLoading(false);
+    }
+  }
+
   async function logReferralAsk(contactId: string) {
     setLoggingAsk(contactId);
     await supabase.from("touches").insert({
@@ -466,7 +715,6 @@ export default function InsightsPage() {
   const today = localDateStr(new Date());
   const todayDone = todayCount >= dailyGoal;
 
-  // Weekly KPI targets (Jordan's model: 15 agent touches, 5 ref asks)
   const WTD_AGENT_TARGET = 15;
   const WTD_REF_ASK_TARGET = 5;
 
@@ -487,23 +735,258 @@ export default function InsightsPage() {
     );
   }
 
+  const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, priceBuckets, neighborhoods, sourceByCategory, totalSourced, catCounts, developerCount, growthByMonth } = bizMetrics;
+
+  const tfLabel = { ytd: "YTD", trailing12: "Trailing 12mo", trailing3: "Trailing Quarter" }[timeframe];
+
+  const maxGrowth = Math.max(...growthByMonth.map(m => m.count), 1);
+
   return (
     <div className="stack">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="rowBetween">
         <div>
-          <h1 className="h1">Accountability</h1>
+          <h1 className="h1">Business Intelligence</h1>
           <div className="subtle" style={{ marginTop: 6 }}>
             {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
           </div>
         </div>
         <div className="row">
-          <a className="btn" href="/morning" style={{ textDecoration: "none" }}>Morning</a>
-          <a className="btn" href="/contacts" style={{ textDecoration: "none" }}>Contacts</a>
+          {(["ytd", "trailing12", "trailing3"] as Timeframe[]).map(tf => (
+            <button
+              key={tf}
+              className={`btn${timeframe === tf ? " btnPrimary" : ""}`}
+              style={{ fontSize: 12 }}
+              onClick={() => { setTimeframe(tf); setAiBrief(null); }}
+            >
+              {{ ytd: "YTD", trailing12: "12mo", trailing3: "Quarter" }[tf]}
+            </button>
+          ))}
           <button className="btn" onClick={fetchAll}>Refresh</button>
         </div>
       </div>
 
       {error && <div className="alert alertError">{error}</div>}
+
+      {/* ── Pipeline Snapshot ────────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Pipeline snapshot — {tfLabel}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 16 }}>
+          {[
+            { label: "Active deals", value: activeCount.toString(), sub: "currently in pipeline" },
+            { label: "Projected GCI", value: fmt$(projectedGci), sub: "from active deals" },
+            { label: "Closed deals", value: closedCount.toString(), sub: `${buyers}B / ${sellers}S` },
+            { label: "Closed GCI", value: fmt$(closedGci), sub: tfLabel },
+            { label: "Avg close price", value: avgClosePrice > 0 ? fmt$(avgClosePrice) : "—", sub: "closed deals" },
+          ].map(item => (
+            <div key={item.label} style={{ textAlign: "center", padding: "12px 8px", background: "rgba(0,0,0,.025)", borderRadius: 8 }}>
+              <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1.1 }}>{item.value}</div>
+              <div style={{ fontWeight: 700, fontSize: 11, marginTop: 4, color: "rgba(18,18,18,.55)" }}>{item.label}</div>
+              <div style={{ fontSize: 11, color: "rgba(18,18,18,.38)", marginTop: 2 }}>{item.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Business Source ──────────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Business source — {tfLabel}</div>
+        <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Where your deals originate</div>
+        {totalSourced === 0 ? (
+          <div className="subtle" style={{ fontSize: 13 }}>No referral sources tagged yet — add referral source on deals to track this.</div>
+        ) : (
+          <div className="stack" style={{ gap: 10 }}>
+            {Object.entries(sourceByCategory)
+              .sort((a, b) => b[1].count - a[1].count)
+              .map(([cat, v]) => {
+                const pct = Math.round(v.count / totalSourced * 100);
+                const color = cat === "Agent" ? "#1a5fb4" : cat === "Client" ? "#0b6b2a" : cat === "Sphere" ? "#6a329f" : "rgba(18,18,18,.5)";
+                return (
+                  <div key={cat}>
+                    <div className="rowBetween" style={{ marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13 }}>{cat}</span>
+                      <span style={{ fontSize: 12, color: "rgba(18,18,18,.5)" }}>
+                        {v.count} deal{v.count !== 1 ? "s" : ""} · {pct}%{v.gci > 0 ? ` · ${fmt$(v.gci)} GCI` : ""}
+                      </span>
+                    </div>
+                    <div style={{ height: 8, borderRadius: 4, background: "rgba(0,0,0,.07)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 4 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            {bizMetrics.noSource > 0 && (
+              <div style={{ fontSize: 12, color: "rgba(18,18,18,.4)", marginTop: 4 }}>
+                {bizMetrics.noSource} deal{bizMetrics.noSource !== 1 ? "s" : ""} with no referral source tagged
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Top individual referral sources */}
+        {refSources.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "rgba(18,18,18,.6)" }}>Top sources by GCI</div>
+            <div className="stack" style={{ gap: 0 }}>
+              {refSources.slice(0, 5).map((s, i) => (
+                <div key={s.contact_id} style={{ padding: "9px 0", borderBottom: i < Math.min(refSources.length, 5) - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8, alignItems: "baseline" }}>
+                      <a href={`/contacts/${s.contact_id}`} style={{ fontWeight: 800, fontSize: 13 }}>{s.display_name}</a>
+                      {s.category && <span className="badge" style={{ fontSize: 11 }}>{s.category}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "rgba(18,18,18,.45)", marginTop: 2 }}>
+                      {s.deals_total} deal{s.deals_total !== 1 ? "s" : ""} · {s.deals_closed} closed
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    {s.closed_gci > 0 && <div style={{ fontWeight: 900, fontSize: 15, color: "#0b6b2a" }}>{fmt$(s.closed_gci)}</div>}
+                    {s.pipeline_gci > 0 && <div style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>{fmt$(s.pipeline_gci)} pipeline</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Geographic Distribution ──────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Geographic distribution</div>
+        <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Active + closed deals by neighborhood (auto-extracted from address)</div>
+        {neighborhoods.length === 0 ? (
+          <div className="subtle" style={{ fontSize: 13 }}>No neighborhood data yet — neighborhoods are captured when you select an address via autocomplete on deals.</div>
+        ) : (
+          <div className="stack" style={{ gap: 8 }}>
+            {neighborhoods.map((n, i) => {
+              const maxCount = neighborhoods[0].count;
+              const pct = Math.round(n.count / maxCount * 100);
+              return (
+                <div key={n.name}>
+                  <div className="rowBetween" style={{ marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{n.name}</span>
+                    <span style={{ fontSize: 12, color: "rgba(18,18,18,.5)" }}>
+                      {n.count} deal{n.count !== 1 ? "s" : ""}{n.gci > 0 ? ` · ${fmt$(n.gci)} GCI` : ""}
+                    </span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: "rgba(0,0,0,.07)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: i === 0 ? "var(--ink)" : "rgba(18,18,18,.35)", borderRadius: 3 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Price Distribution ───────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Price distribution — closed deals, {tfLabel}</div>
+        <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>How your transactions are distributed across price points</div>
+        {closedCount === 0 ? (
+          <div className="subtle" style={{ fontSize: 13 }}>No closed deals in this timeframe.</div>
+        ) : (
+          <div className="stack" style={{ gap: 10 }}>
+            {Object.entries(priceBuckets).map(([label, count]) => {
+              const pct = closedCount > 0 ? Math.round(count / closedCount * 100) : 0;
+              return (
+                <div key={label}>
+                  <div className="rowBetween" style={{ marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{label}</span>
+                    <span style={{ fontSize: 12, color: "rgba(18,18,18,.5)" }}>{count} deal{count !== 1 ? "s" : ""} · {pct}%</span>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 4, background: "rgba(0,0,0,.07)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: "rgba(18,18,18,.5)", borderRadius: 4 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Database Composition ─────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 14 }}>Database composition</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          {/* Category breakdown */}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "rgba(18,18,18,.6)" }}>By category</div>
+            <div className="stack" style={{ gap: 6 }}>
+              {Object.entries(catCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, count]) => (
+                  <div key={cat} className="rowBetween">
+                    <span style={{ fontSize: 13, textTransform: "capitalize", fontWeight: 600 }}>{cat}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800 }}>{count.toLocaleString()}</span>
+                  </div>
+                ))}
+              <div className="rowBetween" style={{ borderTop: "1px solid rgba(0,0,0,.08)", paddingTop: 6, marginTop: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>Total</span>
+                <span style={{ fontSize: 13, fontWeight: 900 }}>{contactsTotal.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Contact growth */}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "rgba(18,18,18,.6)" }}>Monthly additions (12mo)</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 60 }}>
+              {growthByMonth.map((m, i) => {
+                const h = maxGrowth > 0 ? Math.max(2, Math.round((m.count / maxGrowth) * 60)) : 2;
+                return (
+                  <div
+                    key={m.label}
+                    title={`${m.label}: ${m.count}`}
+                    style={{
+                      flex: 1,
+                      height: h,
+                      background: i === growthByMonth.length - 1 ? "var(--ink)" : "rgba(18,18,18,.25)",
+                      borderRadius: "2px 2px 0 0",
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+              <span style={{ fontSize: 10, color: "rgba(18,18,18,.35)" }}>{growthByMonth[0]?.label}</span>
+              <span style={{ fontSize: 10, color: "rgba(18,18,18,.35)" }}>{growthByMonth[growthByMonth.length - 1]?.label}</span>
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(18,18,18,.45)", marginTop: 8 }}>
+              {developerCount} developer relationship{developerCount !== 1 ? "s" : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── AI Business Brief ─────────────────────────────────────────────────── */}
+      <div className="card cardPad">
+        <div className="rowBetween" style={{ marginBottom: aiBrief ? 14 : 0 }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>AI business brief</div>
+            {!aiBrief && <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>Claude analyzes your pipeline, sources, and outreach patterns</div>}
+          </div>
+          <button
+            className="btn btnPrimary"
+            style={{ fontSize: 12, flexShrink: 0 }}
+            disabled={aiBriefLoading}
+            onClick={generateBrief}
+          >
+            {aiBriefLoading ? "Generating…" : aiBrief ? "Regenerate" : "Generate brief"}
+          </button>
+        </div>
+        {aiBrief && (
+          <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--ink)", borderTop: "1px solid rgba(0,0,0,.07)", paddingTop: 14 }}>
+            {aiBrief}
+          </div>
+        )}
+      </div>
+
+      {/* ──────────────────────────────────────────────────────────────────────── */}
+      <div style={{ borderTop: "2px solid rgba(0,0,0,.08)", paddingTop: 4 }}>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 4 }}>Accountability</div>
+        <div className="subtle" style={{ fontSize: 13 }}>Outreach tracking, cadence health, and referral asks</div>
+      </div>
 
       {/* ── Status Hero ─────────────────────────────────────────────────────── */}
       <div className="card cardPad">
@@ -549,13 +1032,16 @@ export default function InsightsPage() {
       {quickInsights.length > 0 && (
         <div className="card cardPad">
           <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 12 }}>Insights</div>
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack" style={{ gap: 10 }}>
             {quickInsights.map((ins, i) => (
-              <div key={i} className="row" style={{ gap: 10, alignItems: "flex-start" }}>
-                <span style={{ fontSize: 13, flexShrink: 0 }}>{ins.urgent ? "⚠" : "→"}</span>
-                <span style={{ fontSize: 13, fontWeight: ins.urgent ? 700 : 500, color: ins.urgent ? "#8a0000" : "var(--ink)" }}>
-                  {ins.text}
-                </span>
+              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span style={{ fontSize: 13, flexShrink: 0, marginTop: 1 }}>{ins.urgent ? "⚠" : "→"}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: ins.urgent ? 700 : 600, color: ins.urgent ? "#8a0000" : "var(--ink)" }}>
+                    {ins.text}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(18,18,18,.5)", marginTop: 2 }}>{ins.rec}</div>
+                </div>
               </div>
             ))}
           </div>
@@ -616,13 +1102,16 @@ export default function InsightsPage() {
       {/* ── Referral Source ROI ─────────────────────────────────────────────── */}
       {refSources.length > 0 && (
         <div className="card cardPad">
-          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral source ROI</div>
-          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Who's driving your deal flow — sorted by total value</div>
+          <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Referral source ROI — all time</div>
+          <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Who's driving your deal flow — sorted by total GCI</div>
           <div className="stack" style={{ gap: 0 }}>
             {refSources.map((s, i) => (
               <div key={s.contact_id} style={{ padding: "10px 0", borderBottom: i < refSources.length - 1 ? "1px solid rgba(0,0,0,.05)" : undefined, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <a href={`/contacts/${s.contact_id}`} style={{ fontWeight: 800, fontSize: 14 }}>{s.display_name}</a>
+                  <div className="row" style={{ gap: 8, alignItems: "baseline" }}>
+                    <a href={`/contacts/${s.contact_id}`} style={{ fontWeight: 800, fontSize: 14 }}>{s.display_name}</a>
+                    {s.category && <span className="badge" style={{ fontSize: 11 }}>{s.category}</span>}
+                  </div>
                   <div className="row" style={{ marginTop: 4, gap: 6, flexWrap: "wrap" }}>
                     <span className="badge">{s.deals_total} deal{s.deals_total !== 1 ? "s" : ""} referred</span>
                     {s.deals_closed > 0 && (
@@ -635,8 +1124,9 @@ export default function InsightsPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ fontWeight: 900, fontSize: 18, flexShrink: 0, color: s.closed_value > 0 ? "#0b6b2a" : "var(--ink)" }}>
-                  ${(s.closed_value + s.pipeline_value).toLocaleString()}
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  {s.closed_gci > 0 && <div style={{ fontWeight: 900, fontSize: 18, color: "#0b6b2a" }}>{fmt$(s.closed_gci)}</div>}
+                  {s.pipeline_gci > 0 && <div style={{ fontSize: 12, color: "rgba(18,18,18,.45)" }}>{fmt$(s.pipeline_gci)} projected</div>}
                 </div>
               </div>
             ))}

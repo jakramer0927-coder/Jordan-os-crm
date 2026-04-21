@@ -5,13 +5,13 @@ import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server
 export const runtime = "nodejs";
 
 const DEAL_SELECT = `
-  id, address, role, status, price, close_date, notes, created_at,
+  id, address, neighborhood, role, status, price, close_date, notes, created_at,
   contact_id, opp_type, buyer_stage, seller_stage, pipeline_status,
   budget_min, budget_max, target_areas, pre_approval_amount, pre_approval_lender,
   motivation, timeline_notes, list_price, estimated_value, market_notes, cma_link,
   target_list_date, commission_pct, referral_fee_pct,
   contacts!contact_id ( id, display_name, category, tier, phone, email ),
-  referral_source:referral_source_contact_id ( id, display_name ),
+  referral_source:referral_source_contact_id ( id, display_name, category ),
   referral_fee_contact:referral_fee_contact_id ( id, display_name ),
   co_agent:co_agent_contact_id ( id, display_name )
 `;
