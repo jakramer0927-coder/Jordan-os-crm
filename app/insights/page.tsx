@@ -139,6 +139,7 @@ export default function InsightsPage() {
   const [streak, setStreak] = useState(0);
   const [weeklyHistory, setWeeklyHistory] = useState<WeekSummary[]>([]);
   const [avoidedContacts, setAvoidedContacts] = useState<AvoidedContact[]>([]);
+  const [slippingOpen, setSlippingOpen] = useState(false);
   const [catCompliance, setCatCompliance] = useState<Record<string, CatCompliance>>({});
   const [refOpportunities, setRefOpportunities] = useState<RefAskOpportunity[]>([]);
   const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
@@ -562,15 +563,31 @@ export default function InsightsPage() {
       )}
 
       {/* ── Contacts Slipping ───────────────────────────────────────────────── */}
-      {avoidedContacts.length > 0 ? (
-        <div className="card cardPad stack">
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Contacts slipping — {avoidedContacts.length} need attention</div>
-            <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>
-              2× past cadence or never touched — these people have been waiting
+      <div className="card cardPad">
+        <button
+          onClick={() => setSlippingOpen(v => !v)}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: "100%", textAlign: "left" }}
+        >
+          <div className="rowBetween" style={{ alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>
+                Contacts slipping
+                {avoidedContacts.length > 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 700, color: "#8a0000" }}>
+                    {avoidedContacts.length} need attention
+                  </span>
+                )}
+                {avoidedContacts.length === 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 600, color: "#0b6b2a" }}>✓ clean</span>
+                )}
+              </div>
+              <div className="subtle" style={{ fontSize: 12, marginTop: 2 }}>2× past cadence or never touched</div>
             </div>
+            <span style={{ fontSize: 13, color: "rgba(18,18,18,.4)", flexShrink: 0 }}>{slippingOpen ? "▲" : "▼"}</span>
           </div>
-          <div className="stack" style={{ gap: 0 }}>
+        </button>
+        {slippingOpen && avoidedContacts.length > 0 && (
+          <div className="stack" style={{ gap: 0, marginTop: 14 }}>
             {avoidedContacts.map((c, i) => (
               <div key={c.id} className="rowBetween" style={{ padding: "10px 0", borderBottom: i < avoidedContacts.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined, alignItems: "center", gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
@@ -590,13 +607,11 @@ export default function InsightsPage() {
               </div>
             ))}
           </div>
-        </div>
-      ) : (
-        <div className="card cardPad">
-          <div style={{ fontWeight: 900, fontSize: 15 }}>Contacts slipping</div>
-          <div className="subtle" style={{ marginTop: 6 }}>✓ No contacts 2× past cadence — clean slate.</div>
-        </div>
-      )}
+        )}
+        {slippingOpen && avoidedContacts.length === 0 && (
+          <div className="subtle" style={{ marginTop: 12, fontSize: 13 }}>✓ No contacts 2× past cadence — clean slate.</div>
+        )}
+      </div>
 
       {/* ── Referral Source ROI ─────────────────────────────────────────────── */}
       {refSources.length > 0 && (
