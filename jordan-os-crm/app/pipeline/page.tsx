@@ -1184,111 +1184,266 @@ export default function PipelinePage() {
             {saveError && <div className="alert alertError" style={{ marginBottom: 12 }}>{saveError}</div>}
 
             {/* ── Details tab ── */}
-            {modalTab === "details" && (
+            {modalTab === "details" && (() => {
+              const isClosed = editPipelineStatus === "past_client";
+
+              // Shared sub-components
+              const gciCalc = editCommissionPct && (editPrice || editListPrice || editEstValue || editBudgetMax) && (() => {
+                const base = editPrice || editListPrice || editEstValue || editBudgetMax;
+                const gross = Number(base) * (Number(editCommissionPct) / 100);
+                const refFee = editRefFeePct ? gross * (Number(editRefFeePct) / 100) : 0;
+                return (
+                  <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)", fontSize: 13 }}>
+                    <span className="subtle">Net GCI: </span>
+                    <strong style={{ color: "#0b6b2a" }}>{fmt(gross - refFee)}</strong>
+                    {refFee > 0 && <span className="subtle"> (after {fmt(refFee)} referral fee)</span>}
+                  </div>
+                );
+              })();
+
+              const refFeeField = (
+                <div className="field">
+                  <div className="label">Referral fee — paying to</div>
+                  <input className="input" value={editRefFeeQuery}
+                    onChange={e => { setEditRefFeeQuery(e.target.value); searchContacts(e.target.value, setEditRefFeeResults); }}
+                    placeholder="Search contacts…" />
+                  {editRefFeeResults.length > 0 && (
+                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {editRefFeeResults.map(c => (
+                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
+                          onClick={() => { setEditRefFeeId(c.id); setEditRefFeeName(c.display_name); setEditRefFeeQuery(c.display_name); setEditRefFeeResults([]); }}>
+                          {c.display_name} <span className="subtle">{c.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {editRefFeeId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editRefFeeName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditRefFeeId(""); setEditRefFeeName(""); setEditRefFeeQuery(""); }}>remove</button></div>}
+                </div>
+              );
+
+              const coAgentField = (
+                <div className="field">
+                  <div className="label">Co-agent</div>
+                  <input className="input" value={editCoAgentQuery}
+                    onChange={e => { setEditCoAgentQuery(e.target.value); searchContacts(e.target.value, setEditCoAgentResults); }}
+                    placeholder="Search contacts…" />
+                  {editCoAgentResults.length > 0 && (
+                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
+                      {editCoAgentResults.map(c => (
+                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
+                          onClick={() => { setEditCoAgentId(c.id); setEditCoAgentName(c.display_name); setEditCoAgentQuery(c.display_name); setEditCoAgentResults([]); }}>
+                          {c.display_name} <span className="subtle">{c.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {editCoAgentId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editCoAgentName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditCoAgentId(""); setEditCoAgentName(""); setEditCoAgentQuery(""); }}>remove</button></div>}
+                </div>
+              );
+
+              return (
               <div className="stack">
+              {isClosed ? (
+                /* ── CLOSED DEAL LAYOUT ── financials first, active fields hidden ── */
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 99, background: "rgba(11,107,42,.1)", color: "#0b6b2a", border: "1px solid rgba(11,107,42,.2)" }}>Closed</span>
+                    <button className="btn" style={{ fontSize: 11, padding: "2px 10px" }} onClick={() => setEditPipelineStatus("active")}>Reactivate</button>
+                  </div>
 
-                {/* Stage selector — primary action */}
-                <div>
-                  <div className="label" style={{ marginBottom: 6 }}>Stage</div>
-                  {isBuyer && (
-                    <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                      {BUYER_STAGES.map(s => (
-                        <button key={s.value} className="btn"
-                          style={{ fontSize: 12, fontWeight: editBuyerStage === s.value ? 900 : 400,
-                            background: editBuyerStage === s.value ? s.bg : undefined,
-                            color: editBuyerStage === s.value ? s.color : undefined,
-                            borderColor: editBuyerStage === s.value ? s.color + "55" : undefined }}
-                          onClick={() => setEditBuyerStage(s.value)}>
-                          {s.label}
-                        </button>
-                      ))}
+                  <div className="field">
+                    <div className="label">Property address</div>
+                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
+                  </div>
+
+                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                    <div className="field" style={{ minWidth: 150 }}>
+                      <div className="label">Close price</div>
+                      <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
+                    </div>
+                    <div className="field" style={{ minWidth: 140 }}>
+                      <div className="label">Close date</div>
+                      <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
+                    </div>
+                    <div className="field" style={{ minWidth: 110 }}>
+                      <div className="label">Commission %</div>
+                      <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                    </div>
+                    <div className="field" style={{ minWidth: 110 }}>
+                      <div className="label">Referral fee %</div>
+                      <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />
+                    </div>
+                  </div>
+
+                  {gciCalc}
+
+                  <div className="field">
+                    <div className="label">Referred by</div>
+                    <ContactSearchInput
+                      selectedId={editRefSourceId}
+                      selectedName={editRefSourceName}
+                      onSelect={(id, name) => { setEditRefSourceId(id); setEditRefSourceName(name); }}
+                      placeholder="Who sent you this client?"
+                    />
+                  </div>
+
+                  {refFeeField}
+                  {coAgentField}
+
+                  <div className="field">
+                    <div className="label">Notes</div>
+                    <textarea className="textarea" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context, updates, or key details…" style={{ minHeight: 64 }} />
+                  </div>
+
+                  {/* Collapsed context from when deal was active */}
+                  <button
+                    style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.4)", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }}
+                    onClick={() => setDetailsExpanded(v => !v)}
+                  >
+                    <span style={{ fontSize: 10 }}>{detailsExpanded ? "▲" : "▼"}</span>
+                    {detailsExpanded ? "Hide deal context" : "Deal context — motivation, budget, timeline…"}
+                  </button>
+
+                  {detailsExpanded && (
+                    <>
+                      {isSeller && (
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ minWidth: 140 }}>
+                            <div className="label">List price</div>
+                            <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
+                          </div>
+                          <div className="field" style={{ minWidth: 140 }}>
+                            <div className="label">Estimated value</div>
+                            <input className="input" value={editEstValue} onChange={e => setEditEstValue(e.target.value)} placeholder="2,000,000" />
+                          </div>
+                        </div>
+                      )}
+                      {(isBuyer || isInvestor) && (
+                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                          <div className="field" style={{ minWidth: 140 }}>
+                            <div className="label">Budget</div>
+                            <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="max" />
+                          </div>
+                          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                            <div className="label">Target areas</div>
+                            <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} />
+                          </div>
+                        </div>
+                      )}
+                      <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Motivation</div>
+                          <input className="input" value={editMotivation} onChange={e => setEditMotivation(e.target.value)} />
+                        </div>
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Timeline notes</div>
+                          <input className="input" value={editTimelineNotes} onChange={e => setEditTimelineNotes(e.target.value)} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                /* ── ACTIVE DEAL LAYOUT ── stage + searching context first ── */
+                <>
+                  {/* Stage selector — primary action */}
+                  <div>
+                    <div className="label" style={{ marginBottom: 6 }}>Stage</div>
+                    {isBuyer && (
+                      <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                        {BUYER_STAGES.map(s => (
+                          <button key={s.value} className="btn"
+                            style={{ fontSize: 12, fontWeight: editBuyerStage === s.value ? 900 : 400,
+                              background: editBuyerStage === s.value ? s.bg : undefined,
+                              color: editBuyerStage === s.value ? s.color : undefined,
+                              borderColor: editBuyerStage === s.value ? s.color + "55" : undefined }}
+                            onClick={() => setEditBuyerStage(s.value)}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {isSeller && (
+                      <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                        {SELLER_STAGES.map(s => (
+                          <button key={s.value} className="btn"
+                            style={{ fontSize: 12, fontWeight: editSellerStage === s.value ? 900 : 400,
+                              background: editSellerStage === s.value ? s.bg : undefined,
+                              color: editSellerStage === s.value ? s.color : undefined,
+                              borderColor: editSellerStage === s.value ? s.color + "55" : undefined }}
+                            onClick={() => setEditSellerStage(s.value)}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <div className="label">Notes</div>
+                    <textarea className="textarea" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context, updates, or key details…" style={{ minHeight: 64 }} />
+                  </div>
+
+                  <div className="field">
+                    <div className="label">Property address</div>
+                    <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
+                  </div>
+
+                  {(isBuyer || isInvestor) && (
+                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                      <div className="field" style={{ minWidth: 140 }}>
+                        <div className="label">Budget max</div>
+                        <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="1,500,000" />
+                      </div>
+                      <div className="field" style={{ minWidth: 100 }}>
+                        <div className="label">Commission %</div>
+                        <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                      </div>
+                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                        <div className="label">Target areas</div>
+                        <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
+                      </div>
                     </div>
                   )}
+
                   {isSeller && (
-                    <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-                      {SELLER_STAGES.map(s => (
-                        <button key={s.value} className="btn"
-                          style={{ fontSize: 12, fontWeight: editSellerStage === s.value ? 900 : 400,
-                            background: editSellerStage === s.value ? s.bg : undefined,
-                            color: editSellerStage === s.value ? s.color : undefined,
-                            borderColor: editSellerStage === s.value ? s.color + "55" : undefined }}
-                          onClick={() => setEditSellerStage(s.value)}>
-                          {s.label}
-                        </button>
-                      ))}
+                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                      <div className="field" style={{ minWidth: 140 }}>
+                        <div className="label">List price</div>
+                        <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
+                      </div>
+                      <div className="field" style={{ minWidth: 100 }}>
+                        <div className="label">Commission %</div>
+                        <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                      </div>
+                      <div className="field" style={{ minWidth: 140 }}>
+                        <div className="label">Target list date</div>
+                        <input className="input" type="date" value={editTargetListDate} onChange={e => setEditTargetListDate(e.target.value)} />
+                      </div>
                     </div>
                   )}
-                </div>
 
-                {/* Notes — quick capture right up top */}
-                <div className="field">
-                  <div className="label">Notes</div>
-                  <textarea className="textarea" value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any context, updates, or key details…" style={{ minHeight: 64 }} />
-                </div>
+                  {/* More details expander */}
+                  <button
+                    style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.45)", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }}
+                    onClick={() => setDetailsExpanded(v => !v)}
+                  >
+                    <span style={{ fontSize: 10 }}>{detailsExpanded ? "▲" : "▼"}</span>
+                    {detailsExpanded ? "Hide details" : "More details — financials, pre-approval, comps, co-agent…"}
+                  </button>
 
-                {/* Core fields — always visible */}
-                <div className="field">
-                  <div className="label">Property address</div>
-                  <AddressAutocomplete value={editAddress} onChange={setEditAddress} placeholder="123 Main St, LA, CA 90001" />
-                </div>
+                  {detailsExpanded && (
+                    <>
+                      <div className="field">
+                        <div className="label">Pipeline status</div>
+                        <select className="select" value={editPipelineStatus} onChange={e => setEditPipelineStatus(e.target.value as PipelineStatus)} style={{ maxWidth: 200 }}>
+                          <option value="active">Active</option>
+                          <option value="past_client">Past client / Closed</option>
+                          <option value="lost">Lost</option>
+                        </select>
+                      </div>
 
-                {(isBuyer || isInvestor) && (
-                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                    <div className="field" style={{ minWidth: 140 }}>
-                      <div className="label">Budget max</div>
-                      <input className="input" value={editBudgetMax} onChange={e => setEditBudgetMax(e.target.value)} placeholder="1,500,000" />
-                    </div>
-                    <div className="field" style={{ minWidth: 100 }}>
-                      <div className="label">Commission %</div>
-                      <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
-                    </div>
-                    <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                      <div className="label">Target areas</div>
-                      <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
-                    </div>
-                  </div>
-                )}
-
-                {isSeller && (
-                  <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                    <div className="field" style={{ minWidth: 140 }}>
-                      <div className="label">List price</div>
-                      <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,949,000" />
-                    </div>
-                    <div className="field" style={{ minWidth: 100 }}>
-                      <div className="label">Commission %</div>
-                      <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
-                    </div>
-                    <div className="field" style={{ minWidth: 140 }}>
-                      <div className="label">Target list date</div>
-                      <input className="input" type="date" value={editTargetListDate} onChange={e => setEditTargetListDate(e.target.value)} />
-                    </div>
-                  </div>
-                )}
-
-                {/* More details expander */}
-                <button
-                  style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.45)", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }}
-                  onClick={() => setDetailsExpanded(v => !v)}
-                >
-                  <span style={{ fontSize: 10 }}>{detailsExpanded ? "▲" : "▼"}</span>
-                  {detailsExpanded ? "Hide details" : "More details — financials, pre-approval, comps, co-agent…"}
-                </button>
-
-                {detailsExpanded && (
-                  <>
-                    {/* Pipeline status */}
-                    <div className="field">
-                      <div className="label">Pipeline status</div>
-                      <select className="select" value={editPipelineStatus} onChange={e => setEditPipelineStatus(e.target.value as PipelineStatus)} style={{ maxWidth: 200 }}>
-                        <option value="active">Active</option>
-                        <option value="past_client">Past client</option>
-                        <option value="lost">Lost</option>
-                      </select>
-                    </div>
-
-                    {(isBuyer || isInvestor) && (
-                      <>
+                      {(isBuyer || isInvestor) && (
                         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
                           <div className="field" style={{ minWidth: 140 }}>
                             <div className="label">Budget min</div>
@@ -1303,129 +1458,87 @@ export default function PipelinePage() {
                             <input className="input" value={editPreApprovalLender} onChange={e => setEditPreApprovalLender(e.target.value)} placeholder="Bank / broker name" />
                           </div>
                         </div>
-                      </>
-                    )}
+                      )}
 
-                    {isSeller && (
-                      <>
-                        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                          <div className="field" style={{ minWidth: 140 }}>
-                            <div className="label">Estimated value</div>
-                            <input className="input" value={editEstValue} onChange={e => setEditEstValue(e.target.value)} placeholder="2,000,000" />
+                      {isSeller && (
+                        <>
+                          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                            <div className="field" style={{ minWidth: 140 }}>
+                              <div className="label">Estimated value</div>
+                              <input className="input" value={editEstValue} onChange={e => setEditEstValue(e.target.value)} placeholder="2,000,000" />
+                            </div>
                           </div>
-                        </div>
-                        <div className="field">
-                          <div className="label">Market notes / comps</div>
-                          <textarea className="textarea" value={editMarketNotes} onChange={e => setEditMarketNotes(e.target.value)} placeholder="3 recent comps in $1.8–2.1M range…" style={{ minHeight: 60 }} />
-                        </div>
-                        <div className="field">
-                          <div className="label">CMA link (Compass)</div>
-                          <input className="input" value={editCmaLink} onChange={e => setEditCmaLink(e.target.value)} placeholder="https://…" />
-                        </div>
-                      </>
-                    )}
-
-                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                        <div className="label">Motivation</div>
-                        <input className="input" value={editMotivation} onChange={e => setEditMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
-                      </div>
-                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                        <div className="label">Timeline notes</div>
-                        <input className="input" value={editTimelineNotes} onChange={e => setEditTimelineNotes(e.target.value)} placeholder="Want to be in by summer…" />
-                      </div>
-                    </div>
-
-                    <div style={{ fontWeight: 700, fontSize: 12, color: "rgba(18,18,18,.45)", paddingTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Financials</div>
-                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                      <div className="field" style={{ minWidth: 150 }}>
-                        <div className="label">Sale / close price</div>
-                        <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
-                      </div>
-                      <div className="field" style={{ minWidth: 140 }}>
-                        <div className="label">Close date</div>
-                        <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
-                      </div>
-                      <div className="field" style={{ minWidth: 110 }}>
-                        <div className="label">Commission %</div>
-                        <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
-                      </div>
-                      <div className="field" style={{ minWidth: 110 }}>
-                        <div className="label">Referral fee %</div>
-                        <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />
-                      </div>
-                    </div>
-
-                    {editCommissionPct && (editPrice || editListPrice || editEstValue || editBudgetMax) && (() => {
-                      const base = editPrice || editListPrice || editEstValue || editBudgetMax;
-                      const gross = Number(base) * (Number(editCommissionPct) / 100);
-                      const refFee = editRefFeePct ? gross * (Number(editRefFeePct) / 100) : 0;
-                      return (
-                        <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)", fontSize: 13 }}>
-                          <span className="subtle">Est. net GCI: </span>
-                          <strong style={{ color: "#0b6b2a" }}>{fmt(gross - refFee)}</strong>
-                          {refFee > 0 && <span className="subtle"> (after {fmt(refFee)} referral fee)</span>}
-                        </div>
-                      );
-                    })()}
-
-                    <div className="field">
-                      <div className="label">Referred by</div>
-                      <ContactSearchInput
-                        selectedId={editRefSourceId}
-                        selectedName={editRefSourceName}
-                        onSelect={(id, name) => { setEditRefSourceId(id); setEditRefSourceName(name); }}
-                        placeholder="Who sent you this client?"
-                      />
-                    </div>
-
-                    <div className="field">
-                      <div className="label">Referral fee — paying to</div>
-                      <input className="input" value={editRefFeeQuery}
-                        onChange={e => { setEditRefFeeQuery(e.target.value); searchContacts(e.target.value, setEditRefFeeResults); }}
-                        placeholder="Search contacts…" />
-                      {editRefFeeResults.length > 0 && (
-                        <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                          {editRefFeeResults.map(c => (
-                            <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                              onClick={() => { setEditRefFeeId(c.id); setEditRefFeeName(c.display_name); setEditRefFeeQuery(c.display_name); setEditRefFeeResults([]); }}>
-                              {c.display_name} <span className="subtle">{c.category}</span>
-                            </button>
-                          ))}
-                        </div>
+                          <div className="field">
+                            <div className="label">Market notes / comps</div>
+                            <textarea className="textarea" value={editMarketNotes} onChange={e => setEditMarketNotes(e.target.value)} placeholder="3 recent comps in $1.8–2.1M range…" style={{ minHeight: 60 }} />
+                          </div>
+                          <div className="field">
+                            <div className="label">CMA link (Compass)</div>
+                            <input className="input" value={editCmaLink} onChange={e => setEditCmaLink(e.target.value)} placeholder="https://…" />
+                          </div>
+                        </>
                       )}
-                      {editRefFeeId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editRefFeeName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditRefFeeId(""); setEditRefFeeName(""); setEditRefFeeQuery(""); }}>remove</button></div>}
-                    </div>
 
-                    <div className="field">
-                      <div className="label">Co-agent</div>
-                      <input className="input" value={editCoAgentQuery}
-                        onChange={e => { setEditCoAgentQuery(e.target.value); searchContacts(e.target.value, setEditCoAgentResults); }}
-                        placeholder="Search contacts…" />
-                      {editCoAgentResults.length > 0 && (
-                        <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                          {editCoAgentResults.map(c => (
-                            <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                              onClick={() => { setEditCoAgentId(c.id); setEditCoAgentName(c.display_name); setEditCoAgentQuery(c.display_name); setEditCoAgentResults([]); }}>
-                              {c.display_name} <span className="subtle">{c.category}</span>
-                            </button>
-                          ))}
+                      <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Motivation</div>
+                          <input className="input" value={editMotivation} onChange={e => setEditMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
                         </div>
-                      )}
-                      {editCoAgentId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editCoAgentName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditCoAgentId(""); setEditCoAgentName(""); setEditCoAgentQuery(""); }}>remove</button></div>}
-                    </div>
-                  </>
-                )}
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Timeline notes</div>
+                          <input className="input" value={editTimelineNotes} onChange={e => setEditTimelineNotes(e.target.value)} placeholder="Want to be in by summer…" />
+                        </div>
+                      </div>
 
-                {/* Sticky save footer */}
-                <div style={{ position: "sticky", bottom: 0, background: "var(--paper)", paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)", marginTop: 4 }}>
-                  <div className="row" style={{ gap: 8 }}>
-                    <button className="btn btnPrimary" onClick={saveDeal} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
-                    <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.2)", marginLeft: "auto" }} onClick={deleteDeal}>Delete</button>
-                  </div>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: "rgba(18,18,18,.45)", paddingTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Financials</div>
+                      <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div className="field" style={{ minWidth: 150 }}>
+                          <div className="label">Sale / close price</div>
+                          <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
+                        </div>
+                        <div className="field" style={{ minWidth: 140 }}>
+                          <div className="label">Close date</div>
+                          <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
+                        </div>
+                        <div className="field" style={{ minWidth: 110 }}>
+                          <div className="label">Commission %</div>
+                          <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                        </div>
+                        <div className="field" style={{ minWidth: 110 }}>
+                          <div className="label">Referral fee %</div>
+                          <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />
+                        </div>
+                      </div>
+
+                      {gciCalc}
+
+                      <div className="field">
+                        <div className="label">Referred by</div>
+                        <ContactSearchInput
+                          selectedId={editRefSourceId}
+                          selectedName={editRefSourceName}
+                          onSelect={(id, name) => { setEditRefSourceId(id); setEditRefSourceName(name); }}
+                          placeholder="Who sent you this client?"
+                        />
+                      </div>
+
+                      {refFeeField}
+                      {coAgentField}
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Sticky save footer */}
+              <div style={{ position: "sticky", bottom: 0, background: "var(--paper)", paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.08)", marginTop: 4 }}>
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn btnPrimary" onClick={saveDeal} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+                  <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.2)", marginLeft: "auto" }} onClick={deleteDeal}>Delete</button>
                 </div>
               </div>
-            )}
+              </div>
+              );
+            })()}
 
             {/* ── Offers tab (buyers + investors) ── */}
             {modalTab === "offers" && (
