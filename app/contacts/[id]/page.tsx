@@ -158,7 +158,20 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       if (!res.ok) {
         setErr(j?.error || "Import failed");
       } else {
-        setMsg(`Imported ✅ Messages inserted: ${j.inserted_messages ?? "?"}`);
+        // Auto-log a touch so the import shows up in outreach history
+        await fetch("/api/touches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contact_id: contactId,
+            channel: "text",
+            direction: "outbound",
+            occurred_at: new Date().toISOString(),
+            summary: title.trim() ? `Text thread: ${title.trim()}` : "Text thread imported",
+            source: "text_import",
+          }),
+        });
+        setMsg(`Imported ✅ Touch logged automatically.`);
         setTitle("");
         setRaw("");
       }
