@@ -822,8 +822,8 @@ export default function PipelinePage() {
       notes: newNotes || null,
       motivation: newMotivation || null,
     };
+    body.address = newAddress || null;
     if (newType === "seller") {
-      body.address = newAddress || null;
       body.estimated_value = newEstValue ? Number(newEstValue) : null;
     } else {
       body.budget_min = newBudgetMin ? Number(newBudgetMin) : null;
