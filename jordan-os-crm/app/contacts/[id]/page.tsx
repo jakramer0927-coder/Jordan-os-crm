@@ -158,7 +158,21 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
       if (!res.ok) {
         setErr(j?.error || "Import failed");
       } else {
-        // Auto-log a touch so the import shows up in outreach history
+        // Parse summary from the tail of the thread (most recent messages)
+        const tail = raw.trim().slice(-800);
+        let summary = title.trim() ? `Text thread: ${title.trim()}` : "Text thread imported";
+        try {
+          const parseRes = await fetch("/api/touches/parse", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: tail }),
+          });
+          if (parseRes.ok) {
+            const pj = await parseRes.json();
+            if (pj?.summary) summary = pj.summary;
+          }
+        } catch { /* fallback to static summary */ }
+
         await fetch("/api/touches", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -167,11 +181,11 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
             channel: "text",
             direction: "outbound",
             occurred_at: new Date().toISOString(),
-            summary: title.trim() ? `Text thread: ${title.trim()}` : "Text thread imported",
+            summary,
             source: "text_import",
           }),
         });
-        setMsg(`Imported ✅ Touch logged automatically.`);
+        setMsg(`Imported ✅ Touch logged.`);
         setTitle("");
         setRaw("");
       }
