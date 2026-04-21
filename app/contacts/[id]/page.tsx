@@ -649,6 +649,17 @@ export default function ContactDetailPage() {
         ...d,
         referral_source_name: (d.referral_source as any)?.display_name ?? null,
       })));
+
+      // Auto-sync milestone dates from most recent closed deal if not yet on contact
+      const closedWithDate = rawDeals.find((d: any) => d.status === "closed_won" && d.close_date);
+      if (closedWithDate) {
+        const syncUpdates: Record<string, string> = {};
+        if (!c.close_anniversary) { syncUpdates.close_anniversary = closedWithDate.close_date; setCloseAnniversary(closedWithDate.close_date); }
+        if (!c.move_in_date) { syncUpdates.move_in_date = closedWithDate.close_date; setMoveInDate(closedWithDate.close_date); }
+        if (Object.keys(syncUpdates).length > 0) {
+          await supabase.from("contacts").update(syncUpdates).eq("id", id);
+        }
+      }
     }
   }
 
@@ -1460,28 +1471,6 @@ export default function ContactDetailPage() {
                   <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Context for AI drafts, relationship notes, key details…" style={{ minHeight: 80 }} />
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Milestones</div>
-                {mostRecentClosedDeal && mostRecentClosedDeal.close_date && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(11,60,140,.05)", border: "1px solid rgba(11,60,140,.12)", flexWrap: "wrap" }}>
-                    <span className="subtle" style={{ fontSize: 12, flex: 1, minWidth: 180 }}>
-                      From pipeline: <strong>{mostRecentClosedDeal.address}</strong> · closed {mostRecentClosedDeal.close_date}
-                    </span>
-                    {!closeAnniversary && (
-                      <button className="btn" style={{ fontSize: 11, padding: "2px 10px" }}
-                        onClick={() => setCloseAnniversary(mostRecentClosedDeal.close_date!)}>
-                        Use as close anniversary
-                      </button>
-                    )}
-                    {!moveInDate && (
-                      <button className="btn" style={{ fontSize: 11, padding: "2px 10px" }}
-                        onClick={() => setMoveInDate(mostRecentClosedDeal.close_date!)}>
-                        Use as move-in date
-                      </button>
-                    )}
-                    {(closeAnniversary || moveInDate) && (
-                      <span style={{ fontSize: 11, color: "#0b6b2a", fontWeight: 700 }}>✓ Synced</span>
-                    )}
-                  </div>
-                )}
                 <div className="fieldGridMobile">
                   <div className="field">
                     <div className="label">Birthday</div>

@@ -240,6 +240,8 @@ export default function PipelinePage() {
   const [editPrice, setEditPrice] = useState("");
   const [editCloseDate, setEditCloseDate] = useState("");
   const [editCommissionPct, setEditCommissionPct] = useState("");
+  const [editRefSourceId, setEditRefSourceId] = useState("");
+  const [editRefSourceName, setEditRefSourceName] = useState("");
   const [editRefFeePct, setEditRefFeePct] = useState("");
   const [editRefFeeQuery, setEditRefFeeQuery] = useState("");
   const [editRefFeeResults, setEditRefFeeResults] = useState<ContactInfo[]>([]);
@@ -333,6 +335,8 @@ export default function PipelinePage() {
   const [newBudgetMax, setNewBudgetMax] = useState("");
   const [newTargetAreas, setNewTargetAreas] = useState("");
   const [newEstValue, setNewEstValue] = useState("");
+  const [newRefSourceId, setNewRefSourceId] = useState("");
+  const [newRefSourceName, setNewRefSourceName] = useState("");
   const [newCommissionPct, setNewCommissionPct] = useState("");
   const [newMotivation, setNewMotivation] = useState("");
   const [newNotes, setNewNotes] = useState("");
@@ -416,6 +420,8 @@ export default function PipelinePage() {
     setEditPrice(deal.price != null ? String(deal.price) : "");
     setEditCloseDate(deal.close_date ?? "");
     setEditCommissionPct(deal.commission_pct != null ? String(deal.commission_pct) : "");
+    setEditRefSourceId(deal.referral_source?.id ?? "");
+    setEditRefSourceName(deal.referral_source?.display_name ?? "");
     setEditRefFeePct(deal.referral_fee_pct != null ? String(deal.referral_fee_pct) : "");
     setEditRefFeeId(deal.referral_fee_contact?.id ?? "");
     setEditRefFeeName(deal.referral_fee_contact?.display_name ?? "");
@@ -430,7 +436,7 @@ export default function PipelinePage() {
       deal.pre_approval_amount || deal.pre_approval_lender ||
       deal.estimated_value || deal.target_list_date || deal.market_notes || deal.cma_link ||
       deal.price || deal.close_date || deal.commission_pct || deal.referral_fee_pct ||
-      deal.referral_fee_contact || deal.co_agent
+      deal.referral_source || deal.referral_fee_contact || deal.co_agent
     ));
   }
 
@@ -536,6 +542,7 @@ export default function PipelinePage() {
         price: editPrice ? Number(editPrice) : null,
         close_date: editCloseDate || null,
         commission_pct: editCommissionPct ? Number(editCommissionPct) : null,
+        referral_source_contact_id: editRefSourceId || null,
         referral_fee_pct: editRefFeePct ? Number(editRefFeePct) : null,
         referral_fee_contact_id: editRefFeeId || null,
         co_agent_contact_id: editCoAgentId || null,
@@ -575,6 +582,7 @@ export default function PipelinePage() {
         price: editPrice ? Number(editPrice) : null,
         close_date: editCloseDate || null,
         commission_pct: editCommissionPct ? Number(editCommissionPct) : null,
+        referral_source: editRefSourceId ? { id: editRefSourceId, display_name: editRefSourceName } : null,
         referral_fee_pct: editRefFeePct ? Number(editRefFeePct) : null,
       } : d));
       setSelectedDeal(null);
@@ -819,6 +827,7 @@ export default function PipelinePage() {
       body.target_areas = newTargetAreas || null;
     }
     body.commission_pct = newCommissionPct ? Number(newCommissionPct) : null;
+    body.referral_source_contact_id = newRefSourceId || null;
     const res = await fetch("/api/pipeline", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -844,6 +853,7 @@ export default function PipelinePage() {
     setNewTargetAreas(""); setNewEstValue(""); setNewMotivation(""); setNewNotes("");
     setNewCommissionPct("");
     setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
+    setNewRefSourceId(""); setNewRefSourceName("");
     setNewSaving(false);
   }
 
@@ -1144,6 +1154,11 @@ export default function PipelinePage() {
                   <span style={{ fontSize: 12, fontWeight: 700, textTransform: "capitalize", color: "rgba(18,18,18,.5)" }}>{selectedDeal.opp_type}</span>
                   <StageChip label={stageConf.label} color={stageConf.color} bg={stageConf.bg} />
                   <GciChip value={estGci(selectedDeal)} />
+                  {selectedDeal.referral_source && (
+                    <span className="badge" style={{ fontSize: 11 }}>
+                      Ref: <a href={`/contacts/${selectedDeal.referral_source.id}`} style={{ fontWeight: 700, color: "inherit" }}>{selectedDeal.referral_source.display_name}</a>
+                    </span>
+                  )}
                 </div>
               </div>
               <button className="btn" style={{ fontSize: 12 }} onClick={() => setSelectedDeal(null)}>Close</button>
@@ -1353,6 +1368,16 @@ export default function PipelinePage() {
                         </div>
                       );
                     })()}
+
+                    <div className="field">
+                      <div className="label">Referred by</div>
+                      <ContactSearchInput
+                        selectedId={editRefSourceId}
+                        selectedName={editRefSourceName}
+                        onSelect={(id, name) => { setEditRefSourceId(id); setEditRefSourceName(name); }}
+                        placeholder="Who sent you this client?"
+                      />
+                    </div>
 
                     <div className="field">
                       <div className="label">Referral fee — paying to</div>
@@ -1886,6 +1911,15 @@ export default function PipelinePage() {
               </>
             )}
 
+            <div className="field">
+              <div className="label">Referred by (optional)</div>
+              <ContactSearchInput
+                selectedId={newRefSourceId}
+                selectedName={newRefSourceName}
+                onSelect={(id, name) => { setNewRefSourceId(id); setNewRefSourceName(name); }}
+                placeholder="Who sent you this client?"
+              />
+            </div>
             <div className="field">
               <div className="label">Motivation (optional)</div>
               <input className="input" value={newMotivation} onChange={e => setNewMotivation(e.target.value)} placeholder="Relocation, upgrade, investment…" />
