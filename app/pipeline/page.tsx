@@ -2027,6 +2027,10 @@ export default function PipelinePage() {
               </>
             ) : (
               <>
+                <div className="field">
+                  <div className="label">Property address</div>
+                  <AddressAutocomplete value={newAddress} onChange={setNewAddress} placeholder="123 Main St, LA, CA 90001" />
+                </div>
                 {newPipelineStatus === "active" && (
                   <>
                     <div className="row" style={{ gap: 10 }}>
