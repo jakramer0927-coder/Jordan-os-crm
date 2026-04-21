@@ -32,13 +32,15 @@ export async function POST(req: Request) {
       .order("occurred_at", { ascending: false })
       .limit(20);
 
-    // Fetch active deals
-    const { data: deals } = await supabaseAdmin
+    // Fetch all deals (active + closed) for full context
+    const { data: allDeals } = await supabaseAdmin
       .from("deals")
       .select("address, role, status, price, close_date, notes")
       .eq("contact_id", contact_id)
       .eq("user_id", uid)
-      .not("status", "in", "(closed_won,closed_lost)");
+      .order("close_date", { ascending: false, nullsFirst: false });
+    const activeDeals = (allDeals ?? []).filter((d: any) => !["closed_won", "closed_lost"].includes(d.status));
+    const closedDeals = (allDeals ?? []).filter((d: any) => ["closed_won", "closed_lost"].includes(d.status));
 
     // Fetch upcoming follow-ups
     const today = new Date().toISOString().slice(0, 10);
@@ -61,9 +63,10 @@ export async function POST(req: Request) {
       })
       .join("\n");
 
-    const dealContext = (deals ?? [])
-      .map((d: any) => `${d.role} at ${d.address} (${d.status}${d.price ? `, $${Number(d.price).toLocaleString()}` : ""}${d.close_date ? `, closes ${d.close_date}` : ""})${d.notes ? ` — ${d.notes}` : ""}`)
-      .join("\n");
+    const dealContext = [
+      ...activeDeals.map((d: any) => `Active: ${d.role} at ${d.address} (${d.status}${d.price ? `, $${Number(d.price).toLocaleString()}` : ""}${d.close_date ? `, closes ${d.close_date}` : ""})${d.notes ? ` — ${d.notes}` : ""}`),
+      ...closedDeals.map((d: any) => `Past: ${d.role} at ${d.address}${d.close_date ? `, closed ${d.close_date}` : ""}${d.price ? `, $${Number(d.price).toLocaleString()}` : ""}`),
+    ].join("\n");
 
     const fuContext = (followUps ?? [])
       .map((f: any) => `${f.due_date}${f.note ? `: ${f.note}` : ""}`)
@@ -99,7 +102,7 @@ Be direct and practical. Focus on what's actionable right now.`;
     const userMsg = [
       "Contact profile:",
       contactBlock,
-      dealContext ? `\nActive deals:\n${dealContext}` : "",
+      dealContext ? `\nDeals:\n${dealContext}` : "",
       touchSummaries ? `\nRecent touches:\n${touchSummaries}` : "\nNo touch history yet.",
       fuContext ? `\nUpcoming follow-ups: ${fuContext}` : "",
     ].filter(Boolean).join("\n");

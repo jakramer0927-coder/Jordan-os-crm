@@ -199,6 +199,24 @@ export async function PATCH(req: Request) {
       .from("deals").update(updates).eq("id", id).eq("user_id", uid);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // When a deal closes, sync close_anniversary + move_in_date to the contact (if not already set)
+    if (updates.buyer_stage === "closed" || updates.seller_stage === "sold") {
+      const { data: dealRow } = await supabaseAdmin
+        .from("deals").select("contact_id, close_date, address").eq("id", id).single();
+      if (dealRow?.contact_id && dealRow?.close_date) {
+        const { data: existingContact } = await supabaseAdmin
+          .from("contacts").select("close_anniversary, move_in_date").eq("id", dealRow.contact_id).single();
+        const contactUpdates: Record<string, string> = {};
+        if (!existingContact?.close_anniversary) contactUpdates.close_anniversary = dealRow.close_date;
+        if (!existingContact?.move_in_date) contactUpdates.move_in_date = dealRow.close_date;
+        if (Object.keys(contactUpdates).length > 0) {
+          await supabaseAdmin.from("contacts").update(contactUpdates)
+            .eq("id", dealRow.contact_id).eq("user_id", uid);
+        }
+      }
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     return serverError("PIPELINE_PATCH_CRASH", e);

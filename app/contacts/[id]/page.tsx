@@ -1038,6 +1038,7 @@ export default function ContactDetailPage() {
 
   const activeDeals = deals.filter((d) => d.status !== "closed_won" && d.status !== "closed_lost");
   const closedDeals = deals.filter((d) => d.status === "closed_won" || d.status === "closed_lost");
+  const mostRecentClosedDeal = closedDeals.find((d) => d.close_date) ?? closedDeals[0] ?? null;
   const overdueFollowUps = followUps.filter((f) => f.due_date < new Date().toISOString().slice(0, 10));
 
   // Milestone check helper
@@ -1106,6 +1107,16 @@ export default function ContactDetailPage() {
                 {contact.email && <a href={`mailto:${contact.email}`} style={{ color: "inherit" }}>{contact.email}</a>}
                 {contact.email && contact.phone && <span> · </span>}
                 {contact.phone && <a href={`tel:${contact.phone}`} style={{ color: "inherit" }}>{contact.phone}</a>}
+              </div>
+            )}
+            {/* Property address from most recent closed deal */}
+            {mostRecentClosedDeal && (
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: "var(--ink)" }}>Property: </span>
+                {mostRecentClosedDeal.address}
+                {mostRecentClosedDeal.close_date && (
+                  <span> · closed {new Date(mostRecentClosedDeal.close_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>
+                )}
               </div>
             )}
           </div>
@@ -1449,6 +1460,28 @@ export default function ContactDetailPage() {
                   <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Context for AI drafts, relationship notes, key details…" style={{ minHeight: 80 }} />
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Milestones</div>
+                {mostRecentClosedDeal && mostRecentClosedDeal.close_date && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(11,60,140,.05)", border: "1px solid rgba(11,60,140,.12)", flexWrap: "wrap" }}>
+                    <span className="subtle" style={{ fontSize: 12, flex: 1, minWidth: 180 }}>
+                      From pipeline: <strong>{mostRecentClosedDeal.address}</strong> · closed {mostRecentClosedDeal.close_date}
+                    </span>
+                    {!closeAnniversary && (
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 10px" }}
+                        onClick={() => setCloseAnniversary(mostRecentClosedDeal.close_date!)}>
+                        Use as close anniversary
+                      </button>
+                    )}
+                    {!moveInDate && (
+                      <button className="btn" style={{ fontSize: 11, padding: "2px 10px" }}
+                        onClick={() => setMoveInDate(mostRecentClosedDeal.close_date!)}>
+                        Use as move-in date
+                      </button>
+                    )}
+                    {(closeAnniversary || moveInDate) && (
+                      <span style={{ fontSize: 11, color: "#0b6b2a", fontWeight: 700 }}>✓ Synced</span>
+                    )}
+                  </div>
+                )}
                 <div className="fieldGridMobile">
                   <div className="field">
                     <div className="label">Birthday</div>
