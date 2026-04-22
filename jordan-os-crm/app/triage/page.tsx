@@ -142,7 +142,7 @@ export default function TriagePage() {
 
     const { error: err } = await supabase
       .from("contacts")
-      .update({ category: cat.toLowerCase(), tier })
+      .update({ category: cat, tier })
       .eq("id", current.id);
 
     setSaving(false);
