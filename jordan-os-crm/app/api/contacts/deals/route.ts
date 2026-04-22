@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabaseAdmin
     .from("deals")
-    .select("id, address, role, status, price, close_date, notes, created_at")
+    .select("id, address, role, status, price, close_date, notes, created_at, opp_type, buyer_stage, seller_stage, pipeline_status, list_price, listing_link")
     .eq("contact_id", contact_id)
     .eq("user_id", uid)
     .order("close_date", { ascending: false, nullsFirst: false });

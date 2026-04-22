@@ -68,6 +68,12 @@ type Deal = {
   created_at: string;
   referral_source_contact_id: string | null;
   referral_source_name?: string | null;
+  opp_type: string | null;
+  buyer_stage: string | null;
+  seller_stage: string | null;
+  pipeline_status: string | null;
+  list_price: number | null;
+  listing_link: string | null;
 };
 
 type Touch = {
@@ -1081,6 +1087,9 @@ export default function ContactDetailPage() {
   const activeDeals = deals.filter((d) => d.status !== "closed_won" && d.status !== "closed_lost");
   const closedDeals = deals.filter((d) => d.status === "closed_won" || d.status === "closed_lost");
   const mostRecentClosedDeal = closedDeals.find((d) => d.close_date) ?? closedDeals[0] ?? null;
+  const investorDeals = deals.filter((d) => d.opp_type === "investor");
+  const currentEscrows = investorDeals.filter((d) => d.buyer_stage === "offer" || d.buyer_stage === "under_contract");
+  const pastInvestorProjects = investorDeals.filter((d) => d.buyer_stage === "closed" || d.pipeline_status === "past_client");
   const overdueFollowUps = followUps.filter((f) => f.due_date < new Date().toISOString().slice(0, 10));
 
   // Milestone check helper
@@ -1714,6 +1723,71 @@ export default function ContactDetailPage() {
                 <div className="subtle" style={{ fontSize: 13 }}>No deals yet.</div>
               )}
             </div>
+
+            {investorDeals.length > 0 && (
+              <>
+                <div className="hr" />
+                <div>
+                  <div className="rowBetween" style={{ alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Investor Activity</div>
+                    <a href={`/pipeline?deal=${investorDeals[0].id}`} className="subtle" style={{ fontSize: 12 }}>Manage in Pipeline →</a>
+                  </div>
+
+                  {currentEscrows.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.45)", marginBottom: 6 }}>Current Escrows</div>
+                      <div className="stack" style={{ gap: 0 }}>
+                        {currentEscrows.map((d, i) => (
+                          <div key={d.id} style={{ padding: "8px 0", borderBottom: i < currentEscrows.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>
+                              {d.listing_link ? (
+                                <a href={d.listing_link} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{d.address || "No address"}</a>
+                              ) : (d.address || "No address")}
+                            </div>
+                            <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                              <span className="badge" style={{ color: "#5b21b6", background: "rgba(91,33,182,.06)", border: "1px solid rgba(91,33,182,.2)" }}>
+                                {d.buyer_stage === "under_contract" ? "Under Contract" : "Offer"}
+                              </span>
+                              {d.list_price != null && <span className="badge">Ask: ${Number(d.list_price).toLocaleString()}</span>}
+                              {d.price != null && <span className="badge">Offer: ${Number(d.price).toLocaleString()}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {pastInvestorProjects.length > 0 && (
+                    <details>
+                      <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+                        {pastInvestorProjects.length} past project{pastInvestorProjects.length !== 1 ? "s" : ""}
+                      </summary>
+                      <div className="stack" style={{ gap: 0, marginTop: 6 }}>
+                        {pastInvestorProjects.map((d, i) => (
+                          <div key={d.id} style={{ padding: "8px 0", borderBottom: i < pastInvestorProjects.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>
+                              {d.listing_link ? (
+                                <a href={d.listing_link} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{d.address || "No address"}</a>
+                              ) : (d.address || "No address")}
+                            </div>
+                            <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                              <span className="badge" style={{ color: "#0b6b2a", background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.2)" }}>Closed</span>
+                              {d.list_price != null && <span className="badge">Listed: ${Number(d.list_price).toLocaleString()}</span>}
+                              {d.price != null && <span className="badge">Sold: ${Number(d.price).toLocaleString()}</span>}
+                              {d.close_date && <span className="badge">{new Date(d.close_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+
+                  {currentEscrows.length === 0 && pastInvestorProjects.length === 0 && (
+                    <div className="subtle" style={{ fontSize: 13 }}>No active escrows or past projects yet.</div>
+                  )}
+                </div>
+              </>
+            )}
 
             <div className="hr" />
 

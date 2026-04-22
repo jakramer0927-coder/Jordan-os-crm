@@ -43,6 +43,7 @@ type Deal = {
   estimated_value: number | null;
   market_notes: string | null;
   cma_link: string | null;
+  listing_link: string | null;
   target_list_date: string | null;
   // Financial
   commission_pct: number | null;
@@ -239,6 +240,7 @@ export default function PipelinePage() {
   const [editTargetListDate, setEditTargetListDate] = useState("");
   const [editMarketNotes, setEditMarketNotes] = useState("");
   const [editCmaLink, setEditCmaLink] = useState("");
+  const [editListingLink, setEditListingLink] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editCloseDate, setEditCloseDate] = useState("");
   const [editCommissionPct, setEditCommissionPct] = useState("");
@@ -425,6 +427,7 @@ export default function PipelinePage() {
     setEditTargetListDate(deal.target_list_date ?? "");
     setEditMarketNotes(deal.market_notes ?? "");
     setEditCmaLink(deal.cma_link ?? "");
+    setEditListingLink(deal.listing_link ?? "");
     setEditPrice(deal.price != null ? String(deal.price) : "");
     setEditCloseDate(deal.close_date ?? "");
     setEditCommissionPct(deal.commission_pct != null ? String(deal.commission_pct) : "");
@@ -442,7 +445,7 @@ export default function PipelinePage() {
       deal.pipeline_status !== "active" ||
       deal.motivation || deal.timeline_notes ||
       deal.pre_approval_amount || deal.pre_approval_lender ||
-      deal.estimated_value || deal.target_list_date || deal.market_notes || deal.cma_link ||
+      deal.estimated_value || deal.target_list_date || deal.market_notes || deal.cma_link || deal.listing_link ||
       deal.price || deal.close_date || deal.commission_pct || deal.referral_fee_pct ||
       deal.referral_source || deal.referral_fee_contact || deal.co_agent
     ));
@@ -548,6 +551,7 @@ export default function PipelinePage() {
         target_list_date: editTargetListDate || null,
         market_notes: editMarketNotes || null,
         cma_link: editCmaLink || null,
+        listing_link: editListingLink || null,
         price: editPrice ? Number(editPrice) : null,
         close_date: editCloseDate || null,
         commission_pct: editCommissionPct ? Number(editCommissionPct) : null,
@@ -588,6 +592,7 @@ export default function PipelinePage() {
         target_list_date: editTargetListDate || null,
         market_notes: editMarketNotes || null,
         cma_link: editCmaLink || null,
+        listing_link: editListingLink || null,
         price: editPrice ? Number(editPrice) : null,
         close_date: editCloseDate || null,
         commission_pct: editCommissionPct ? Number(editCommissionPct) : null,
@@ -1273,9 +1278,22 @@ export default function PipelinePage() {
                     <AddressAutocomplete value={editAddress} onChange={setEditAddress} onPlaceSelect={(p) => { setEditAddress(p.formatted_address); setEditNeighborhood(p.neighborhood); }} placeholder="123 Main St, LA, CA 90001" />
                   </div>
 
+                  {isInvestor && (
+                    <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                      <div className="field" style={{ minWidth: 140 }}>
+                        <div className="label">Asking price</div>
+                        <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,800,000" />
+                      </div>
+                      <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                        <div className="label">Listing link</div>
+                        <input className="input" value={editListingLink} onChange={e => setEditListingLink(e.target.value)} placeholder="https://…" />
+                      </div>
+                    </div>
+                  )}
+
                   <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
                     <div className="field" style={{ minWidth: 150 }}>
-                      <div className="label">Close price</div>
+                      <div className="label">{isInvestor ? "Purchase price" : "Close price"}</div>
                       <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
                     </div>
                     <div className="field" style={{ minWidth: 140 }}>
@@ -1366,9 +1384,23 @@ export default function PipelinePage() {
                   {/* Stage selector — primary action */}
                   <div>
                     <div className="label" style={{ marginBottom: 6 }}>Stage</div>
-                    {isBuyer && (
+                    {isBuyer && !isInvestor && (
                       <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
                         {BUYER_STAGES.map(s => (
+                          <button key={s.value} className="btn"
+                            style={{ fontSize: 12, fontWeight: editBuyerStage === s.value ? 900 : 400,
+                              background: editBuyerStage === s.value ? s.bg : undefined,
+                              color: editBuyerStage === s.value ? s.color : undefined,
+                              borderColor: editBuyerStage === s.value ? s.color + "55" : undefined }}
+                            onClick={() => { setEditBuyerStage(s.value); if (s.value === "closed") setEditPipelineStatus("past_client"); }}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {isInvestor && (
+                      <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+                        {INVESTOR_STAGES.map(s => (
                           <button key={s.value} className="btn"
                             style={{ fontSize: 12, fontWeight: editBuyerStage === s.value ? 900 : 400,
                               background: editBuyerStage === s.value ? s.bg : undefined,
@@ -1416,11 +1448,38 @@ export default function PipelinePage() {
                         <div className="label">Commission %</div>
                         <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
                       </div>
-                      <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                        <div className="label">Target areas</div>
-                        <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
-                      </div>
+                      {!isInvestor && (
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Target areas</div>
+                          <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Silver Lake, Los Feliz…" />
+                        </div>
+                      )}
                     </div>
+                  )}
+
+                  {isInvestor && (
+                    <>
+                      <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                          <div className="label">Target areas</div>
+                          <input className="input" value={editTargetAreas} onChange={e => setEditTargetAreas(e.target.value)} placeholder="Studio City, Brentwood…" />
+                        </div>
+                      </div>
+                      <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+                        <div className="field" style={{ minWidth: 140 }}>
+                          <div className="label">Asking price</div>
+                          <input className="input" value={editListPrice} onChange={e => setEditListPrice(e.target.value)} placeholder="1,800,000" />
+                        </div>
+                        <div className="field" style={{ minWidth: 140 }}>
+                          <div className="label">Offer price</div>
+                          <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,750,000" />
+                        </div>
+                      </div>
+                      <div className="field">
+                        <div className="label">Listing link</div>
+                        <input className="input" value={editListingLink} onChange={e => setEditListingLink(e.target.value)} placeholder="https://…" />
+                      </div>
+                    </>
                   )}
 
                   {isSeller && (
@@ -1509,18 +1568,22 @@ export default function PipelinePage() {
 
                       <div style={{ fontWeight: 700, fontSize: 12, color: "rgba(18,18,18,.45)", paddingTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Financials</div>
                       <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-                        <div className="field" style={{ minWidth: 150 }}>
-                          <div className="label">Sale / close price</div>
-                          <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
-                        </div>
+                        {!isInvestor && (
+                          <div className="field" style={{ minWidth: 150 }}>
+                            <div className="label">Sale / close price</div>
+                            <input className="input" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="1,800,000" />
+                          </div>
+                        )}
                         <div className="field" style={{ minWidth: 140 }}>
                           <div className="label">Close date</div>
                           <input className="input" type="date" value={editCloseDate} onChange={e => setEditCloseDate(e.target.value)} />
                         </div>
-                        <div className="field" style={{ minWidth: 110 }}>
-                          <div className="label">Commission %</div>
-                          <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
-                        </div>
+                        {!isInvestor && (
+                          <div className="field" style={{ minWidth: 110 }}>
+                            <div className="label">Commission %</div>
+                            <input className="input" value={editCommissionPct} onChange={e => setEditCommissionPct(e.target.value)} placeholder="2.5" />
+                          </div>
+                        )}
                         <div className="field" style={{ minWidth: 110 }}>
                           <div className="label">Referral fee %</div>
                           <input className="input" value={editRefFeePct} onChange={e => setEditRefFeePct(e.target.value)} placeholder="25" />

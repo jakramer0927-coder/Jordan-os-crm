@@ -9,7 +9,7 @@ const DEAL_SELECT = `
   contact_id, opp_type, buyer_stage, seller_stage, pipeline_status,
   budget_min, budget_max, target_areas, pre_approval_amount, pre_approval_lender,
   motivation, timeline_notes, list_price, estimated_value, market_notes, cma_link,
-  target_list_date, commission_pct, referral_fee_pct,
+  target_list_date, commission_pct, referral_fee_pct, listing_link,
   contacts!contact_id ( id, display_name, category, tier, phone, email ),
   referral_source:referral_source_contact_id ( id, display_name, category ),
   referral_fee_contact:referral_fee_contact_id ( id, display_name ),
@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       // Financial
       price, close_date, commission_pct, referral_fee_pct,
       referral_source_contact_id, referral_fee_contact_id, co_agent_contact_id,
+      listing_link,
     } = body;
 
     const isClosed = rawPipelineStatus === "past_client";
@@ -129,6 +130,7 @@ export async function POST(req: Request) {
     if (market_notes) insert.market_notes = market_notes;
     if (cma_link) insert.cma_link = cma_link;
     if (target_list_date) insert.target_list_date = target_list_date;
+    if (listing_link) insert.listing_link = listing_link;
 
     // Financial
     if (price != null) insert.price = price;
@@ -178,6 +180,7 @@ export async function PATCH(req: Request) {
       "list_price", "estimated_value", "market_notes", "cma_link", "target_list_date",
       "price", "close_date", "commission_pct", "referral_fee_pct",
       "referral_source_contact_id", "referral_fee_contact_id", "co_agent_contact_id",
+      "listing_link",
       // Legacy compat
       "status",
     ];
