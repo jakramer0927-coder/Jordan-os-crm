@@ -731,7 +731,7 @@ export default function ContactDetailPage() {
     }
 
     setSavingContact(false);
-    setEditing(false);
+    setAdvancedOpen(false);
     await fetchAll();
   }
 

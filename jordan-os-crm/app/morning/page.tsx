@@ -1024,12 +1024,14 @@ export default function MorningPage() {
     const overdue = contacts.filter((c) => isOverdue(c)).length;
     const overdueA = contacts.filter((c) => isAClient(c) && isOverdue(c)).length;
     const agents = contacts.filter((c) => (c.category || "").toLowerCase() === "agent").length;
-    return { total, overdue, overdueA, agents };
+    const unclassified = contacts.filter((c) => !c.tier).length;
+    return { total, overdue, overdueA, agents, unclassified };
   }, [contacts]);
 
   if (!ready) return <div className="page">Loading…</div>;
 
   const weekday = isWeekdayLocal();
+  const showTriageBanner = stats.unclassified >= 10;
   const lateNudge = (() => {
     if (!weekday) return false;
     if (todayCount >= rules.totalRecs) return false;
@@ -1094,6 +1096,20 @@ export default function MorningPage() {
           </button>
         </div>
       </div>
+
+      {showTriageBanner && (
+        <div className="card cardPad" style={{ borderColor: "rgba(180,120,0,0.3)", background: "rgba(255,180,0,0.06)", marginBottom: 8 }}>
+          <div className="rowBetween" style={{ alignItems: "center" }}>
+            <div>
+              <span style={{ fontWeight: 800 }}>{stats.unclassified} contacts</span>
+              <span className="muted"> need a tier — your Morning coaching won't be accurate until they're classified.</span>
+            </div>
+            <a className="btn btnPrimary" href="/triage" style={{ flexShrink: 0, marginLeft: 12 }}>
+              Classify now →
+            </a>
+          </div>
+        </div>
+      )}
 
       {(error || msg) && (
         <div

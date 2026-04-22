@@ -28,6 +28,72 @@ const CATEGORY_OPTIONS = ["client", "agent", "developer", "vendor", "sphere", "o
 const TIER_OPTIONS = ["", "A", "B", "C"];
 const CLIENT_TYPE_OPTIONS = ["", "buyer", "seller", "both", "past_client", "investor"];
 
+// ── Compass CSV support ───────────────────────────────────────────────────────
+
+function isCompassFormat(headers: string[]): boolean {
+  return (
+    headers.includes("First Name") &&
+    (headers.includes("Groups") || headers.includes("Primary Mobile Phone"))
+  );
+}
+
+function compassGroupsToCategory(groups: string): string {
+  const parts = groups.split(",").map((s) => s.trim().toLowerCase());
+  if (parts.some((x) => x === "active clients" || x === "past clients")) return "client";
+  if (parts.some((x) => x === "agents")) return "agent";
+  if (parts.some((x) => x === "sphere of influence")) return "sphere";
+  if (parts.some((x) => x === "vendors")) return "vendor";
+  return "other";
+}
+
+function compassStatusToTier(status: string): string {
+  const s = (status || "").toLowerCase().trim();
+  if (s === "engaged") return "A";
+  if (s === "new" || s === "nurture" || s === "non-client") return "B";
+  if (s === "inactive" || s === "closed") return "C";
+  return "";
+}
+
+const COMPASS_PHONE_COLS = [
+  "Primary Mobile Phone", "Mobile Phone", "Phone", "Primary Phone",
+  "Primary Work Phone", "Primary Home Phone", "Primary Other Phone",
+];
+const COMPASS_EMAIL_COLS = [
+  "Primary Email", "Email", "Primary Work Email",
+  "Primary Personal Email", "Primary personal Email", "Email 2", "other Email",
+];
+
+function normalizeCompassRows(headers: string[], rows: string[][]): string[][] {
+  return rows.map((cells) => {
+    const get = (col: string) => {
+      const i = headers.indexOf(col);
+      return i >= 0 ? (cells[i] || "").trim() : "";
+    };
+    const display_name =
+      [get("First Name"), get("Last Name")].filter(Boolean).join(" ").trim() ||
+      get("Name");
+    const category = compassGroupsToCategory(get("Groups"));
+    const tier = compassStatusToTier(get("Status"));
+    const phone = COMPASS_PHONE_COLS.map((c) => get(c)).find((v) => v) || "";
+    const email =
+      COMPASS_EMAIL_COLS.map((c) => get(c)).find((v) => v && v.includes("@")) || "";
+    const company = get("Company");
+    const notesParts = [
+      get("Notes"),
+      get("Key Background Info"),
+      get("Tags") ? `Tags: ${get("Tags")}` : "",
+    ].filter(Boolean);
+    const notes = notesParts.join("\n\n").slice(0, 1000);
+    return [display_name, category, tier, email, phone, company, notes];
+  });
+}
+
+const COMPASS_NORMALIZED_HEADERS = [
+  "display_name", "category", "tier", "email", "phone", "company", "notes",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Map common column header aliases to our field names
 const ALIASES: Record<string, keyof ContactRow> = {
   name: "display_name",
@@ -160,6 +226,7 @@ export default function ImportPage() {
   const [parsed, setParsed] = useState<ParsedRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [isCompassDetected, setIsCompassDetected] = useState(false);
 
   // Editable rows (user can fix before importing)
   const [rows, setRows] = useState<ParsedRow[]>([]);
@@ -190,8 +257,15 @@ export default function ImportPage() {
     try {
       const { headers: h, rows: r } = parseCSV(text);
       if (h.length === 0) { setParseError("No columns found — is this a valid CSV?"); return; }
-      setHeaders(h);
-      const built = buildRows(h, r);
+
+      const compass = isCompassFormat(h);
+      setIsCompassDetected(compass);
+
+      const effectiveHeaders = compass ? COMPASS_NORMALIZED_HEADERS : h;
+      const effectiveRows = compass ? normalizeCompassRows(h, r) : r;
+
+      setHeaders(effectiveHeaders);
+      const built = buildRows(effectiveHeaders, effectiveRows);
       setParsed(built);
       setRows(built);
     } catch (e: any) {
@@ -238,7 +312,6 @@ export default function ImportPage() {
 
     setResult(j as ImportResult);
     if ((j as ImportResult).inserted > 0) {
-      // Clear the parsed state so they can start fresh
       setRows([]);
       setParsed([]);
       setRawText("");
@@ -330,8 +403,18 @@ export default function ImportPage() {
               ))}
             </div>
           )}
+          {result.inserted > 0 && (
+            <div style={{ marginTop: 16, padding: "12px 16px", background: "rgba(0,0,0,0.04)", borderRadius: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>Next step: classify your contacts</div>
+              <div className="muted small" style={{ marginBottom: 10 }}>
+                Set a tier (A/B/C) for each contact so your Morning page can start coaching you.
+                AI will pre-fill suggestions — you just confirm or adjust.
+              </div>
+              <a className="btn btnPrimary" href="/triage">Classify contacts →</a>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
-            <a className="btn btnPrimary" href="/contacts">View contacts →</a>
+            <a className="btn" href="/contacts">View contacts</a>
           </div>
         </div>
       )}
@@ -341,9 +424,17 @@ export default function ImportPage() {
         <div className="section" style={{ marginTop: 12 }}>
           <div className="rowBetween" style={{ marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
             <div>
-              <div className="sectionTitle">Preview — {rows.length} rows</div>
+              <div className="sectionTitle">
+                Preview — {rows.length} rows
+                {isCompassDetected && (
+                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: "#0b6b2a", background: "rgba(11,107,42,0.1)", padding: "2px 8px", borderRadius: 4 }}>
+                    Compass CSV detected ✓
+                  </span>
+                )}
+              </div>
               <div className="muted small" style={{ marginTop: 2 }}>
                 {validCount} ready to import{errorCount > 0 ? ` • ${errorCount} with errors (fix or remove)` : ""}
+                {isCompassDetected && " • Category mapped from Groups · Tier mapped from Status"}
               </div>
             </div>
             <div className="row" style={{ gap: 8 }}>
