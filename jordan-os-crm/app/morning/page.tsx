@@ -218,10 +218,12 @@ function cadenceDays(category: string, tier: string | null): number {
     if (t === "A") return 30;
     if (t === "B") return 60;
     if (t === "C") return 90;
+    if (t === "D") return 150;
     return 60;
   }
   if (cat === "agent") {
     if (t === "A") return 30;
+    if (t === "D") return 150;
     return 60;
   }
   if (cat === "developer") return 60;
@@ -229,6 +231,7 @@ function cadenceDays(category: string, tier: string | null): number {
   if (cat === "sphere") {
     if (t === "A") return 30;
     if (t === "B") return 60;
+    if (t === "D") return 150;
     return 90;
   }
   return 60;

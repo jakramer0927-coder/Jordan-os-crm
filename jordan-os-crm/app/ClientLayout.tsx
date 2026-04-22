@@ -255,6 +255,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                     <option value="A">A</option>
                     <option value="B">B</option>
                     <option value="C">C</option>
+                    <option value="D">D</option>
                     <option value="">—</option>
                   </select>
                 </div>

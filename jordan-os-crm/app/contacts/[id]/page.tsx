@@ -476,7 +476,7 @@ export default function ContactDetailPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Client");
-  const [tier, setTier] = useState<"A" | "B" | "C">("A");
+  const [tier, setTier] = useState<"A" | "B" | "C" | "D">("A");
   const [clientType, setClientType] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -1541,6 +1541,7 @@ export default function ContactDetailPage() {
                       <option value="A">A</option>
                       <option value="B">B</option>
                       <option value="C">C</option>
+                      <option value="D">D</option>
                     </select>
                   </div>
                 </div>

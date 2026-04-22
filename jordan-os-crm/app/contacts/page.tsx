@@ -349,7 +349,7 @@ export default function ContactsPage() {
             <div className="field" style={{ width: 100 }}>
               <div className="label">Tier</div>
               <select className="select" value={addTier} onChange={(e) => setAddTier(e.target.value as any)}>
-                <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
               </select>
             </div>
           </div>

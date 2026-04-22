@@ -319,7 +319,7 @@ export default function TriagePage() {
             </div>
 
             <div className="muted small">
-              Tier A = monthly · Tier B = every 60 days · Tier C = every 90 days
+              Tier A = monthly · Tier B = every 60 days · Tier C = every 90 days · Tier D = every 4–6 months
             </div>
           </div>
 

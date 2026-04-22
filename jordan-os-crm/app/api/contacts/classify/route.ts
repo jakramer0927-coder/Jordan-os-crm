@@ -60,6 +60,7 @@ TIERS (pick one):
 - A: Monthly contact — best clients, closest referral agents, top sphere (family, close friends)
 - B: Every 60 days — solid agents, past clients, good sphere connections
 - C: Every 90 days — dormant contacts, one-time interactions, low-priority relationships
+- D: Every 4–6 months — very peripheral contacts, minimal relationship, keep in loop but rarely
 
 KEY SIGNALS:
 - compass.com / theagencyre.com / elliman.com etc. email → Agent
@@ -67,7 +68,7 @@ KEY SIGNALS:
 - notes mention "COE", "purchase", "sold", "buyer", "listing" → Client
 - notes mention "family", "friend", "sister", "brother" → Sphere tier A or B
 - company is a brokerage → Agent
-- Compass status "Engaged" → tier A or B; "Inactive" → tier C
+- Compass status "Engaged" → tier A or B; "Inactive" → tier C or D
 - existing_category provided → strongly prefer to keep it, just assign tier
 - No touch history, unclear context → tier B or C
 
