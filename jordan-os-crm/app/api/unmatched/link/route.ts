@@ -8,14 +8,8 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-async function insertContactEmail(contactId: string, email: string) {
-  const { error } = await supabaseAdmin.from("contact_emails").insert({
-    contact_id: contactId,
-    email,
-    is_primary: false,
-    source: "unmatched_link",
-  });
-  if (error && !String(error.message || "").toLowerCase().includes("duplicate")) throw error;
+function isPhone(s: string): boolean {
+  return s.startsWith("+") && !s.includes("@");
 }
 
 export async function POST(req: Request) {
@@ -23,10 +17,11 @@ export async function POST(req: Request) {
   if (!uid) return unauthorized();
 
   const body = await req.json().catch(() => ({}));
-  const email = String(body.email || "").toLowerCase().trim();
+  const raw = String(body.email || "").trim();
+  const email = isPhone(raw) ? raw : raw.toLowerCase();
   const contactId = String(body.contact_id || "");
 
-  if (!email) return NextResponse.json({ error: "Missing email" }, { status: 400 });
+  if (!email) return NextResponse.json({ error: "Missing email or phone" }, { status: 400 });
   if (!isUuid(contactId)) return NextResponse.json({ error: "Invalid contact_id" }, { status: 400 });
 
   // Verify the contact belongs to this user
@@ -34,7 +29,21 @@ export async function POST(req: Request) {
     .from("contacts").select("id").eq("id", contactId).eq("user_id", uid).single();
   if (!owned) return NextResponse.json({ error: "Contact not found" }, { status: 404 });
 
-  await insertContactEmail(contactId, email);
+  if (isPhone(email)) {
+    // Store phone on the contact row directly
+    const { error } = await supabaseAdmin
+      .from("contacts").update({ phone: email }).eq("id", contactId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  } else {
+    const { error } = await supabaseAdmin.from("contact_emails").insert({
+      contact_id: contactId,
+      email,
+      is_primary: false,
+      source: "unmatched_link",
+    });
+    if (error && !String(error.message || "").toLowerCase().includes("duplicate"))
+      return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   const { error } = await supabaseAdmin
     .from("unmatched_recipients")

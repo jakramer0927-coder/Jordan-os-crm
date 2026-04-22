@@ -12,7 +12,12 @@ function normEmail(s: string): string {
   return (s || "").toLowerCase().trim();
 }
 
+function isPhone(s: string): boolean {
+  return s.startsWith("+") && !s.includes("@");
+}
+
 function displayFromEmail(email: string): string {
+  if (isPhone(email)) return "";
   const local = email.split("@")[0] || email;
   const cleaned = local.replace(/[._-]+/g, " ").trim();
   const words = cleaned.split(" ").filter(Boolean);
@@ -34,41 +39,39 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Body;
 
-    const email = normEmail(body?.email || "");
+    const raw = (body?.email || "").trim();
+    const email = isPhone(raw) ? raw : normEmail(raw);
 
-    if (!email || !email.includes("@"))
-      return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+    if (!email)
+      return NextResponse.json({ error: "Missing email or phone" }, { status: 400 });
 
-    // 1) Check if a contact with this email already exists for this user
-    const { data: existing } = await supabaseAdmin
-      .from("contacts")
-      .select("id, display_name")
-      .eq("user_id", uid)
-      .eq("email", email)
-      .maybeSingle();
+    const phone = isPhone(email);
+
+    // 1) Check if a contact with this identifier already exists
+    const existingQuery = phone
+      ? supabaseAdmin.from("contacts").select("id, display_name").eq("user_id", uid).eq("phone", email).maybeSingle()
+      : supabaseAdmin.from("contacts").select("id, display_name").eq("user_id", uid).eq("email", email).maybeSingle();
+
+    const { data: existing } = await existingQuery;
 
     let contactId: string;
     let display_name: string;
 
     if (existing) {
-      // Already exists — just link it
       contactId = String(existing.id);
       display_name = String(existing.display_name);
     } else {
-      // Create new contact
       display_name = (body?.display_name || "").trim() || displayFromEmail(email);
       const category = body?.category || "Agent";
       const tier = body?.tier ?? null;
 
+      const newContact: Record<string, unknown> = { user_id: uid, display_name, category, tier };
+      if (phone) newContact.phone = email;
+      else newContact.email = email;
+
       const { data: insC, error: insCErr } = await supabaseAdmin
         .from("contacts")
-        .insert({
-          user_id: uid,
-          display_name,
-          category,
-          tier,
-          email,
-        })
+        .insert(newContact)
         .select("id, display_name")
         .single();
 
@@ -82,19 +85,19 @@ export async function POST(req: Request) {
       contactId = String((insC as { id: string }).id);
     }
 
-    // 2) Add email to contact_emails (dedupe handled by constraint if you created one)
-    const { error: ceErr } = await supabaseAdmin.from("contact_emails").insert({
-      contact_id: contactId,
-      email,
-      created_at: new Date().toISOString(),
-    });
-
-    // If it errors due to duplicate, ignore
-    if (ceErr && !/duplicate key/i.test(ceErr.message)) {
-      return NextResponse.json(
-        { error: `contact_emails insert failed: ${ceErr.message}` },
-        { status: 500 },
-      );
+    // 2) For emails: add to contact_emails. For phones: phone is already on the contact row.
+    if (!phone) {
+      const { error: ceErr } = await supabaseAdmin.from("contact_emails").insert({
+        contact_id: contactId,
+        email,
+        created_at: new Date().toISOString(),
+      });
+      if (ceErr && !/duplicate key/i.test(ceErr.message)) {
+        return NextResponse.json(
+          { error: `contact_emails insert failed: ${ceErr.message}` },
+          { status: 500 },
+        );
+      }
     }
 
     // 3) Mark unmatched row as auto_created + attach created_contact_id

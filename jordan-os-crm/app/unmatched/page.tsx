@@ -36,7 +36,12 @@ function domainOf(email: string) {
   return (email.split("@")[1] || "").toLowerCase().trim();
 }
 
+function isPhone(s: string): boolean {
+  return s.startsWith("+") && !s.includes("@");
+}
+
 function displayFromEmail(email: string): string {
+  if (isPhone(email)) return "";
   const local = email.split("@")[0] || email;
   return local
     .replace(/[._-]+/g, " ")
@@ -281,7 +286,7 @@ export default function UnmatchedPage() {
                   <div className="row" style={{ marginTop: 10 }}>
                     <span className="badge">Seen {r.seen_count}</span>
                     <span className="badge">Last {new Date(r.last_seen_at).toLocaleString()}</span>
-                    <span className="badge">{rec.label} ({Math.round(rec.confidence * 100)}%)</span>
+                    {!isPhone(r.email) && <span className="badge">{rec.label} ({Math.round(rec.confidence * 100)}%)</span>}
                   </div>
 
                   {r.last_subject && (
