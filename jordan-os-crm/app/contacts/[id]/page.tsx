@@ -1460,16 +1460,62 @@ export default function ContactDetailPage() {
         {activeTab === "details" && (
           <div className="stack">
 
-            {/* Edit contact */}
-            <div>
-              <button
-                className="btn"
-                style={{ fontSize: 13, fontWeight: 700 }}
-                onClick={() => setAdvancedOpen((v) => !v)}
-              >
-                {advancedOpen ? "Close edit ▲" : "Edit contact ▾"}
-              </button>
-            </div>
+            {/* Read-only summary — shown when not editing */}
+            {!advancedOpen && (
+              <div className="stack" style={{ gap: 10 }}>
+                {contact.notes && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 4 }}>Notes</div>
+                    <div style={{ fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{contact.notes}</div>
+                  </div>
+                )}
+                {(contact.birthday || contact.close_anniversary || contact.move_in_date) && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 6 }}>Milestones</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {contact.birthday && (
+                        <span className="badge">
+                          Birthday: {new Date(contact.birthday + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                      {contact.close_anniversary && (
+                        <span className="badge">
+                          Close anniversary: {new Date(contact.close_anniversary + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      )}
+                      {contact.move_in_date && (
+                        <span className="badge">
+                          Move-in: {new Date(contact.move_in_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {(contact.buyer_budget_min || contact.buyer_budget_max || contact.buyer_target_areas) && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 6 }}>Buyer profile</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {(contact.buyer_budget_min || contact.buyer_budget_max) && (
+                        <span className="badge">
+                          Budget: {contact.buyer_budget_min ? `$${Number(contact.buyer_budget_min).toLocaleString()}` : "—"} – {contact.buyer_budget_max ? `$${Number(contact.buyer_budget_max).toLocaleString()}` : "—"}
+                        </span>
+                      )}
+                      {contact.buyer_target_areas && <span className="badge">{contact.buyer_target_areas}</span>}
+                    </div>
+                  </div>
+                )}
+                {!contact.notes && !contact.birthday && !contact.close_anniversary && !contact.move_in_date && (
+                  <div className="subtle" style={{ fontSize: 13 }}>No details on file yet.</div>
+                )}
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, alignSelf: "flex-start" }}
+                  onClick={() => setAdvancedOpen(true)}
+                >
+                  Edit contact ▾
+                </button>
+              </div>
+            )}
 
             {advancedOpen && (
               <>
@@ -1535,10 +1581,11 @@ export default function ContactDetailPage() {
                     <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
                   </div>
                 </div>
-                <div>
+                <div className="row" style={{ gap: 8 }}>
                   <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
                     {savingContact ? "Saving…" : "Save changes"}
                   </button>
+                  <button className="btn" onClick={() => setAdvancedOpen(false)} disabled={savingContact}>Cancel</button>
                 </div>
               </>
             )}
