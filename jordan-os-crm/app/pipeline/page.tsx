@@ -109,6 +109,7 @@ const SELLER_STAGES: { value: SellerStage; label: string; color: string; bg: str
 ];
 
 const INVESTOR_STAGES: { value: BuyerStage; label: string; color: string; bg: string }[] = [
+  { value: "initial_meeting",    label: "Initial Meeting", color: "rgba(18,18,18,.55)", bg: "rgba(0,0,0,.03)" },
   { value: "actively_searching", label: "Searching",       color: "#1a3f8a",            bg: "rgba(11,60,140,.06)" },
   { value: "offer",              label: "Offer",           color: "rgba(120,60,0,.9)",  bg: "rgba(120,60,0,.06)" },
   { value: "under_contract",     label: "Under Contract",  color: "#5b21b6",            bg: "rgba(91,33,182,.06)" },

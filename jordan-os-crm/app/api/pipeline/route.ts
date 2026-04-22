@@ -83,7 +83,8 @@ export async function POST(req: Request) {
     } = body;
 
     const isClosed = rawPipelineStatus === "past_client";
-    const buyer_stage = isClosed ? "closed" : (rawBuyerStage || "initial_meeting");
+    const defaultBuyerStage = opp_type === "investor" ? "actively_searching" : "initial_meeting";
+    const buyer_stage = isClosed ? "closed" : (rawBuyerStage || defaultBuyerStage);
     const seller_stage = isClosed ? "sold" : (rawSellerStage || "initial_meeting");
     const pipeline_status = isClosed ? "past_client" : "active";
 
