@@ -86,7 +86,7 @@ type RefAskOpportunity = {
   reason: string;
 };
 
-type Timeframe = "ytd" | "trailing12" | "trailing3";
+type Timeframe = "quarter" | "ytd" | "trailing12" | "trailing24" | "all";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -203,11 +203,14 @@ function dealProjectedValue(d: Deal): number {
   return d.budget_max ?? d.price ?? 0;
 }
 
-function timeframeCutoff(tf: Timeframe): Date {
+function timeframeCutoff(tf: Timeframe): Date | null {
   const now = new Date();
+  if (tf === "all") return null;
   if (tf === "ytd") return new Date(now.getFullYear(), 0, 1);
+  if (tf === "quarter") { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }
   if (tf === "trailing12") { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d; }
-  const d = new Date(now); d.setMonth(d.getMonth() - 3); return d;
+  if (tf === "trailing24") { const d = new Date(now); d.setFullYear(d.getFullYear() - 2); return d; }
+  return null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -219,6 +222,9 @@ export default function InsightsPage() {
   const [backfillResult, setBackfillResult] = useState<string | null>(null);
   const [dailyGoal, setDailyGoal] = useState(5);
   const [timeframe, setTimeframe] = useState<Timeframe>("ytd");
+  const TF_LABELS: Record<Timeframe, string> = {
+    quarter: "Quarter", ytd: "YTD", trailing12: "Last 12 Months", trailing24: "Last 2 Years", all: "All Time",
+  };
 
   // Accountability state
   const [out7, setOut7] = useState(0);
@@ -274,6 +280,7 @@ export default function InsightsPage() {
     // Closed deals: filter by close_date; fall back to created_at if close_date missing
     const closed = allDeals.filter(d => {
       if (d.pipeline_status !== "past_client") return false;
+      if (!cutoff) return true;
       const dateStr = d.close_date || d.created_at;
       return new Date(dateStr) >= cutoff;
     });
@@ -695,7 +702,7 @@ export default function InsightsPage() {
     try {
       const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, sourceByCategory, totalSourced, neighborhoods, developerCount, priceBuckets } = bizMetrics;
 
-      const tfLabel = timeframe === "ytd" ? "YTD" : timeframe === "trailing12" ? "trailing 12 months" : "trailing 3 months";
+      const tfLabel = TF_LABELS[timeframe];
 
       const srcLines = Object.entries(sourceByCategory)
         .map(([k, v]) => `${k}: ${v.count} deals (${Math.round(v.count / Math.max(totalSourced, 1) * 100)}%, GCI ${fmt$(v.gci)})`)
@@ -789,7 +796,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
 
   const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, priceBuckets, neighborhoods, sourceByCategory, totalSourced, catCounts, developerCount, growthByMonth } = bizMetrics;
 
-  const tfLabel = { ytd: "YTD", trailing12: "Trailing 12mo", trailing3: "Trailing Quarter" }[timeframe];
+  const tfLabel = TF_LABELS[timeframe];
 
   const maxGrowth = Math.max(...growthByMonth.map(m => m.count), 1);
 
@@ -804,14 +811,14 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
           </div>
         </div>
         <div className="row">
-          {(["ytd", "trailing12", "trailing3"] as Timeframe[]).map(tf => (
+          {(["quarter", "ytd", "trailing12", "trailing24", "all"] as Timeframe[]).map(tf => (
             <button
               key={tf}
               className={`btn${timeframe === tf ? " btnPrimary" : ""}`}
               style={{ fontSize: 12 }}
               onClick={() => { setTimeframe(tf); setAiBrief(null); }}
             >
-              {{ ytd: "YTD", trailing12: "12mo", trailing3: "Quarter" }[tf]}
+              {TF_LABELS[tf]}
             </button>
           ))}
           <button className="btn" onClick={fetchAll}>Refresh</button>
