@@ -23,7 +23,7 @@ type Suggestion = {
 };
 
 const CATEGORIES = ["Agent", "Client", "Developer", "Vendor", "Sphere", "Other"] as const;
-const TIERS = ["A", "B", "C"] as const;
+const TIERS = ["A", "B", "C", "D"] as const;
 
 const CAT_KEYS: Record<string, typeof CATEGORIES[number]> = {
   "1": "Agent", "2": "Client", "3": "Developer", "4": "Vendor", "5": "Sphere", "6": "Other",
