@@ -36,6 +36,7 @@ type Contact = {
   close_anniversary: string | null;
   move_in_date: string | null;
   home_address: string | null;
+  archived: boolean;
 };
 
 type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
@@ -616,7 +617,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -1842,9 +1843,26 @@ export default function ContactDetailPage() {
             {/* Danger zone */}
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
-              <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
-                {deleting ? "Deleting…" : "Delete contact"}
-              </button>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }}
+                  disabled={deleting}
+                  onClick={async () => {
+                    const newVal = !contact.archived;
+                    await supabase.from("contacts").update({ archived: newVal }).eq("id", contact.id);
+                    await fetchAll();
+                  }}
+                >
+                  {contact.archived ? "Unarchive contact" : "Archive contact"}
+                </button>
+                <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete contact"}
+                </button>
+              </div>
+              {contact.archived && (
+                <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>This contact is archived — they won't appear in Morning or Triage.</div>
+              )}
             </div>
           </div>
         )}

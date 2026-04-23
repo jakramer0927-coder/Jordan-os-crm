@@ -41,6 +41,7 @@ export default function TriagePage() {
   const [saving, setSaving] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [archivedCount, setArchivedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const classifyBatchRef = useRef<Set<number>>(new Set());
 
@@ -152,6 +153,20 @@ export default function TriagePage() {
     advance();
   }
 
+  async function archiveAndAdvance() {
+    if (!current || saving) return;
+    setSaving(true);
+    setError(null);
+    const { error: err } = await supabase
+      .from("contacts")
+      .update({ archived: true })
+      .eq("id", current.id);
+    setSaving(false);
+    if (err) { setError(`Archive failed: ${err.message}`); return; }
+    setArchivedCount((n) => n + 1);
+    advance();
+  }
+
   function skip() {
     setSkippedCount((n) => n + 1);
     advance();
@@ -176,6 +191,8 @@ export default function TriagePage() {
       if (e.key === "a" || e.key === "A") { saveAndAdvance(selectedCat || "Other", "A"); return; }
       if (e.key === "b" || e.key === "B") { saveAndAdvance(selectedCat || "Other", "B"); return; }
       if (e.key === "c" || e.key === "C") { saveAndAdvance(selectedCat || "Other", "C"); return; }
+      if (e.key === "d" || e.key === "D") { saveAndAdvance(selectedCat || "Other", "D"); return; }
+      if (e.key === "x" || e.key === "X") { archiveAndAdvance(); return; }
       if (e.key === "s" || e.key === " ") { e.preventDefault(); skip(); return; }
     },
     [current, saving, selectedCat]
@@ -215,7 +232,7 @@ export default function TriagePage() {
       <div style={{ marginBottom: 20 }}>
         <div className="rowBetween" style={{ marginBottom: 6 }}>
           <span className="muted small">
-            {savedCount} classified · {skippedCount} skipped · {Math.max(0, totalUnclassified - savedCount - skippedCount)} remaining
+            {savedCount} classified · {archivedCount > 0 ? `${archivedCount} archived · ` : ""}{skippedCount} skipped · {Math.max(0, totalUnclassified - savedCount - skippedCount - archivedCount)} remaining
           </span>
           <span className="muted small">{progress}%</span>
         </div>
@@ -293,9 +310,9 @@ export default function TriagePage() {
             {/* Tier selection — clicking saves + advances */}
             <div style={{ marginBottom: 16 }}>
               <div className="label" style={{ marginBottom: 6 }}>
-                Tier — click to save &amp; next <span className="muted small">(keys A / B / C)</span>
+                Tier — click to save &amp; next <span className="muted small">(keys A / B / C / D)</span>
               </div>
-              <div className="row" style={{ gap: 8 }}>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 {TIERS.map((tier) => (
                   <button
                     key={tier}
@@ -309,7 +326,16 @@ export default function TriagePage() {
                 ))}
                 <button
                   className="btn"
-                  style={{ fontSize: 13, marginLeft: 8 }}
+                  style={{ fontSize: 13, color: "#8a0000", borderColor: "rgba(200,0,0,.2)" }}
+                  onClick={archiveAndAdvance}
+                  disabled={saving}
+                  title="Archive — removes from outreach queue (X)"
+                >
+                  Archive (X)
+                </button>
+                <button
+                  className="btn"
+                  style={{ fontSize: 13 }}
                   onClick={skip}
                   disabled={saving}
                 >
@@ -319,7 +345,7 @@ export default function TriagePage() {
             </div>
 
             <div className="muted small">
-              Tier A = monthly · Tier B = every 60 days · Tier C = every 90 days · Tier D = every 4–6 months
+              Tier A = monthly · B = 60 days · C = 90 days · D = 4–6 months · Archive = remove from outreach queue
             </div>
           </div>
 
