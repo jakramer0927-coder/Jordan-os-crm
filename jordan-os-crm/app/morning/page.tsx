@@ -501,6 +501,7 @@ export default function MorningPage() {
 
   // stable list + completed tracking — persisted per calendar day (loaded after uid is known)
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
+  const [lockedIdsLoaded, setLockedIdsLoaded] = useState(false);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   // AI-generated drafts keyed by contact ID
@@ -782,6 +783,7 @@ export default function MorningPage() {
       // Load uid-scoped localStorage values now that we have the uid
       setRules(loadRules(user.id));
       setLockedIds(loadLockedIds(user.id));
+      setLockedIdsLoaded(true);
 
       setReady(true);
       await load();
@@ -944,13 +946,14 @@ export default function MorningPage() {
   }, [rules]);
 
   useEffect(() => {
+    if (!lockedIdsLoaded) return; // wait until localStorage has been checked
     if (lockedIds === null && recs.length > 0) {
       const ids = recs.map((r) => r.id);
       setLockedIds(ids);
       if (uid) saveLockedIds(uid, ids);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recs, lockedIds]);
+  }, [recs, lockedIds, lockedIdsLoaded]);
 
   async function generateDrafts(contacts: Recommendation[]) {
     const pending = new Set(contacts.map((c) => c.id));
@@ -1014,13 +1017,29 @@ export default function MorningPage() {
     } catch { /* ignore */ }
   }
 
-  // Stable display list — always shows the same 5 contacts from first load
+  // Stable display list — always shows the same contacts from first load today.
+  // Falls back to the full contacts array for any locked contact that has since
+  // been touched (score = -999) and dropped out of the top-N recs.
   const displayRecs = useMemo<Recommendation[]>(() => {
     if (lockedIds === null) return recs;
     return lockedIds
-      .map((id) => recs.find((r) => r.id === id))
+      .map((id) => {
+        const fromRecs = recs.find((r) => r.id === id);
+        if (fromRecs) return fromRecs;
+        // Contact was touched today and fell out of recs — reconstruct from contacts
+        const c = contacts.find((c) => c.id === id);
+        if (!c) return null;
+        return {
+          ...c,
+          cadence: cadenceDays(c.category, c.tier),
+          overdue: false,
+          score: -999,
+          reasons: ["Recently contacted"],
+          suggested_channel: "text" as const,
+        } satisfies Recommendation;
+      })
       .filter((r): r is Recommendation => r != null);
-  }, [lockedIds, recs]);
+  }, [lockedIds, recs, contacts]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
