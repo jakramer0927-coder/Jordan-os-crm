@@ -489,6 +489,7 @@ export default function MorningPage() {
   // voice
   const [voice, setVoice] = useState<VoiceProfile | null>(null);
   const [voiceLoaded, setVoiceLoaded] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
@@ -1067,25 +1068,39 @@ export default function MorningPage() {
         <div>
           <h1 className="h1">Morning</h1>
           <div className="muted" style={{ marginTop: 8 }}>
-            <span className="badge">{weekday ? "Weekday focus" : "Weekend (view-only focus)"}</span>{" "}
-            <span className="badge">{stats.total} contacts</span>{" "}
-            <span className="badge">{stats.overdue} overdue</span>{" "}
-            <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
-            <span className="badge">{stats.agents} agents</span>
-            {voiceLoaded ? (
-              <span className="badge">
-                Voice: <strong>{voice?.count ?? 0}</strong> examples
-              </span>
+            {weekday ? (
+              <>
+                <span className="badge">{stats.total} contacts</span>{" "}
+                <span className="badge">{stats.overdue} overdue</span>{" "}
+                <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
+                <span className="badge">{stats.agents} agents</span>
+              </>
             ) : (
-              <span className="badge">Voice: loading…</span>
+              <span className="badge">Weekend — pipeline view only</span>
             )}
           </div>
 
-          {voice?.rules?.length ? (
-            <div className="muted small" style={{ marginTop: 10 }}>
-              <strong>Voice rules:</strong> {voice.rules.slice(0, 3).join(" • ")}
+          {weekday && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.4)", padding: 0 }}
+                onClick={() => setVoiceSettingsOpen(v => !v)}
+              >
+                Voice settings {voiceSettingsOpen ? "▲" : "▾"}
+              </button>
+              {voiceSettingsOpen && (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {voiceLoaded
+                    ? <>
+                        <strong>{voice?.count ?? 0}</strong> examples loaded
+                        {voice?.rules?.length ? <> · <strong>Rules:</strong> {voice.rules.slice(0, 3).join(" • ")}</> : null}
+                      </>
+                    : "Loading…"
+                  }
+                </div>
+              )}
             </div>
-          ) : null}
+          )}
 
           {(syncGmail !== undefined || syncCalendar !== undefined) && (() => {
             const g = syncAgo(syncGmail);
