@@ -244,7 +244,7 @@ export default function InsightsPage() {
   const [refOpportunities, setRefOpportunities] = useState<RefAskOpportunity[]>([]);
   const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
   const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
-  const [refSources, setRefSources] = useState<RefSourceRow[]>([]);
+  // refSources is derived via useMemo below (timeframe-aware)
   const [contactsTotal, setContactsTotal] = useState(0);
   const [aClientsTotal, setAClientsTotal] = useState(0);
   const [aClientsDueOrOverdue, setAClientsDueOrOverdue] = useState(0);
@@ -379,6 +379,38 @@ export default function InsightsPage() {
       catCounts, developerCount, growthByMonth,
     };
   }, [allDeals, allContacts, timeframe]);
+
+  // ── Top referral sources — timeframe-filtered ────────────────────────────────
+  const refSources = useMemo(() => {
+    const cutoff = timeframeCutoff(timeframe);
+    const sourceMap = new Map<string, RefSourceRow>();
+    for (const d of allDeals) {
+      const src = d.referral_source as any;
+      if (!src?.id) continue;
+      const isPastClient = d.pipeline_status === "past_client";
+      if (isPastClient && cutoff) {
+        const dateStr = d.close_date || d.created_at;
+        if (new Date(dateStr) < cutoff) continue;
+      }
+      const existing = sourceMap.get(src.id) ?? {
+        contact_id: src.id, display_name: src.display_name, category: src.category ?? null,
+        deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0,
+        closed_gci: 0, pipeline_gci: 0,
+      };
+      existing.deals_total++;
+      const gci = dealGci(d);
+      if (isPastClient) {
+        existing.deals_closed++;
+        existing.closed_value += d.price ?? 0;
+        existing.closed_gci += gci;
+      } else {
+        existing.pipeline_value += dealProjectedValue(d);
+        existing.pipeline_gci += gci;
+      }
+      sourceMap.set(src.id, existing);
+    }
+    return [...sourceMap.values()].sort((a, b) => (b.closed_gci + b.pipeline_gci) - (a.closed_gci + a.pipeline_gci));
+  }, [allDeals, timeframe]);
 
   // ── Quick insights (accountability-focused, no day-gating) ───────────────────
   const quickInsights = useMemo(() => {
@@ -627,30 +659,7 @@ export default function InsightsPage() {
       const deals: Deal[] = pj.deals ?? [];
       setAllDeals(deals);
 
-      // Referral source ROI
-      const sourceMap = new Map<string, RefSourceRow>();
-      for (const d of deals) {
-        const src = d.referral_source as any;
-        if (!src?.id) continue;
-        const existing = sourceMap.get(src.id) ?? {
-          contact_id: src.id, display_name: src.display_name, category: src.category ?? null,
-          deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0,
-          closed_gci: 0, pipeline_gci: 0,
-        };
-        existing.deals_total++;
-        const gci = dealGci(d);
-        if (d.pipeline_status === "past_client") {
-          existing.deals_closed++;
-          existing.closed_value += d.price ?? 0;
-          existing.closed_gci += gci;
-        } else {
-          existing.pipeline_value += dealProjectedValue(d);
-          existing.pipeline_gci += gci;
-        }
-        sourceMap.set(src.id, existing);
-      }
-      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_gci + b.pipeline_gci) - (a.closed_gci + a.pipeline_gci));
-      setRefSources(sorted);
+      // refSources is now a useMemo derived from allDeals + timeframe
     }
 
     const [refAskRaw, closedDealRaw] = await Promise.all([

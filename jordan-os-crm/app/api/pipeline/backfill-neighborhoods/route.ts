@@ -18,12 +18,15 @@ async function geocodeNeighborhood(address: string): Promise<string | null> {
   if (!res.ok) return null;
   const j = await res.json();
   const comps: any[] = j.results?.[0]?.address_components ?? [];
-  return (
+  const neighborhood =
     extractComponent(comps, "neighborhood") ??
     extractComponent(comps, "sublocality_level_1") ??
     extractComponent(comps, "sublocality") ??
-    null
-  );
+    extractComponent(comps, "locality") ??
+    null;
+  // Skip generic "Los Angeles" — not useful as a neighborhood label
+  if (neighborhood === "Los Angeles") return null;
+  return neighborhood;
 }
 
 // POST /api/pipeline/backfill-neighborhoods
