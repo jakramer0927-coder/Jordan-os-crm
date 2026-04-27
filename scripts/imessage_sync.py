@@ -12,6 +12,8 @@ Usage:
     python scripts/imessage_sync.py --dry-run     # preview, no writes
 """
 
+from __future__ import annotations
+
 import argparse
 import glob
 import os
@@ -74,7 +76,12 @@ def open_copy(path: Path) -> tuple[sqlite3.Connection, str]:
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
         shutil.copy2(str(path), tmp.name)
-        return sqlite3.connect(f"file:{tmp.name}?mode=ro", uri=True), tmp.name
+        if os.path.getsize(tmp.name) == 0:
+            os.unlink(tmp.name)
+            raise PermissionError
+        con = sqlite3.connect(tmp.name)
+        con.execute("SELECT 1")  # force actual file open — connect() is lazy
+        return con, tmp.name
     except PermissionError:
         print(f"\nERROR: Cannot read {path}")
         print("Grant Full Disk Access to Terminal:")
@@ -83,6 +90,8 @@ def open_copy(path: Path) -> tuple[sqlite3.Connection, str]:
     except FileNotFoundError:
         print(f"\nERROR: {path} not found.")
         sys.exit(1)
+    except sqlite3.OperationalError:
+        raise  # let caller decide: fatal for chat.db, warning for AddressBook
 
 
 # ── Address Book ──────────────────────────────────────────────────────────────
@@ -100,7 +109,8 @@ def load_address_book() -> dict[str, str]:
 
     for ab_path in paths:
         try:
-            con, tmp = open_copy(Path(ab_path))
+            con = sqlite3.connect(f"file:{ab_path}?immutable=1", uri=True)
+            con.execute("SELECT 1")
             cur = con.cursor()
 
             # Build pk → display_name map
@@ -134,7 +144,6 @@ def load_address_book() -> dict[str, str]:
                     result[email.lower().strip()] = names[owner]
 
             con.close()
-            os.unlink(tmp)
 
         except Exception as e:
             print(f"  Warning: could not read {ab_path}: {e}")
@@ -236,7 +245,18 @@ def sync(days: int, dry_run: bool) -> None:
     print(f"  {len(ab)} phone/email entries loaded")
 
     print("Opening chat.db...")
-    con, tmp_chat = open_copy(CHAT_DB)
+    if not CHAT_DB.exists():
+        print(f"\nERROR: {CHAT_DB} not found.")
+        sys.exit(1)
+    try:
+        con = sqlite3.connect(f"file:{CHAT_DB}?immutable=1", uri=True)
+        con.execute("SELECT 1")
+        tmp_chat = None
+    except sqlite3.OperationalError as e:
+        print(f"\nERROR: Could not open chat.db: {e}")
+        print("Grant Full Disk Access to Terminal:")
+        print("  System Settings → Privacy & Security → Full Disk Access → add Terminal.app")
+        sys.exit(1)
     cur = con.cursor()
 
     cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
@@ -331,7 +351,7 @@ def sync(days: int, dry_run: bool) -> None:
                             "last_snippet": (last_text or "")[:200],
                             "status": "pending",
                         },
-                        count="exact",
+                        on_conflict="email",
                     ).execute()
                 except Exception as e:
                     print(f"  Warning: unmatched upsert failed for {handle_id}: {e}")
@@ -393,7 +413,7 @@ def sync(days: int, dry_run: bool) -> None:
                             "direction": "outbound" if is_from_me else "inbound",
                             "occurred_at": mac_ts_to_dt(mac_date).isoformat(),
                             "body": text or "",
-                            "sender": "me" if is_from_me else handle_id,
+                            "sender": "me" if is_from_me else "them",
                             "source": SOURCE,
                             "source_message_id": guid,
                         },
@@ -430,7 +450,8 @@ def sync(days: int, dry_run: bool) -> None:
         print(f"  [synced]     {display:<35}  +{len(new_msgs)} msg(s)")
 
     con.close()
-    os.unlink(tmp_chat)
+    if tmp_chat:
+        os.unlink(tmp_chat)
 
     prefix = "[DRY RUN] " if dry_run else ""
     print()

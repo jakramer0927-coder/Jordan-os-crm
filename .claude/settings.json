@@ -23,12 +23,23 @@
       "Bash(xxd)",
       "Bash(cp /tmp/contacts_page_trimmed.tsx /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx)",
       "Bash(tail -5 /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(vercel env *)",
+      "Bash(python3 -c \"import sys,json; [print\\(x.get\\('requestPath',''\\), x.get\\('responseStatusCode',''\\), x.get\\('message',''\\)[:200]\\) for line in sys.stdin for x in [json.loads\\(line\\)] if 'offer' in x.get\\('requestPath',''\\)]\")",
+      "Bash(python3 -c ' *)",
+      "Bash(cp ~/Library/Messages/chat.db /tmp/chat_probe.db)",
+      "Bash(echo \"exit: $?\")",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "Bash(launchctl load *)",
+      "Bash(launchctl list *)"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",
       "/Users/jordankramer/projects/jordan-os-crm/app/contacts/[id]",
-      "/tmp"
+      "/tmp",
+      "/Users/jordankramer/Library/LaunchAgents"
     ]
   }
 }
