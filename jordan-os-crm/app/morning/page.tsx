@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
@@ -528,6 +528,12 @@ export default function MorningPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
+  // mobile
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileLogContact, setMobileLogContact] = useState<Recommendation | null>(null);
+  const swipeTouchStartX = useRef(0);
+  const swipeTouchStartY = useRef(0);
+
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
   const [wtdCount, setWtdCount] = useState(0);
@@ -680,6 +686,27 @@ export default function MorningPage() {
     setTouchSummary("");
     setTouchSource("manual");
     setTouchLink("");
+    if (isMobile) setMobileLogContact(c);
+  }
+
+  function closeMobileSheet() {
+    setMobileLogContact(null);
+    setLoggingFor(null);
+    setTouchSummary("");
+    setRemindOpen(false);
+  }
+
+  const handleCardTouchStart = useCallback((e: React.TouchEvent) => {
+    swipeTouchStartX.current = e.touches[0].clientX;
+    swipeTouchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  function handleCardTouchEnd(e: React.TouchEvent, c: Recommendation) {
+    const dx = e.changedTouches[0].clientX - swipeTouchStartX.current;
+    const dy = e.changedTouches[0].clientY - swipeTouchStartY.current;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) openLog(c); // left swipe → log
+    }
   }
 
   async function saveTouch() {
@@ -802,6 +829,13 @@ export default function MorningPage() {
       sub.subscription.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
   const recs = useMemo<Recommendation[]>(() => {
@@ -1479,6 +1513,8 @@ export default function MorningPage() {
                 key={c.id}
                 className="card cardPad"
                 style={completed ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+                onTouchStart={handleCardTouchStart}
+                onTouchEnd={(e) => handleCardTouchEnd(e, c)}
               >
                 {completed && (
                   <div className="small bold" style={{ color: "#0b6b2a", marginBottom: 8 }}>
@@ -1632,13 +1668,31 @@ export default function MorningPage() {
                     })()}
                   </div>
 
-                  <div style={{ width: 280, display: "grid", gap: 10 }}>
-                    <a className="btn" href={`/contacts/${c.id}`}>
-                      Open contact
-                    </a>
-                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                      Log outbound touch
-                    </button>
+                  <div style={{ width: isMobile ? "100%" : 280, display: "grid", gap: 8 }}>
+                    {isMobile ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <a className="btn" href={`/contacts/${c.id}`} style={{ justifyContent: "center" }}>
+                          Open
+                        </a>
+                        <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                          Log touch
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <a className="btn" href={`/contacts/${c.id}`}>
+                          Open contact
+                        </a>
+                        <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                          Log outbound touch
+                        </button>
+                      </>
+                    )}
+                    {isMobile && !completed && (
+                      <div className="muted" style={{ fontSize: 11, textAlign: "center", marginTop: 2 }}>
+                        or swipe left to log
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1787,6 +1841,114 @@ export default function MorningPage() {
           ) : null}
         </div>
       </div>
+
+      {/* ── Mobile bottom sheet for logging ── */}
+      {mobileLogContact && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            background: "rgba(0,0,0,.45)",
+            display: "flex", alignItems: "flex-end",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeMobileSheet(); }}
+        >
+          <div style={{
+            width: "100%", background: "var(--paper)",
+            borderRadius: "20px 20px 0 0",
+            padding: "20px 16px 40px",
+            boxShadow: "0 -4px 32px rgba(0,0,0,.18)",
+            animation: "slideUp .22s ease",
+          }}>
+            {/* Handle */}
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: "rgba(0,0,0,.15)", margin: "0 auto 16px" }} />
+
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 17 }}>{mobileLogContact.display_name}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                  {mobileLogContact.category}{mobileLogContact.tier ? ` · Tier ${mobileLogContact.tier}` : ""}
+                </div>
+              </div>
+              <button onClick={closeMobileSheet} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)", padding: "4px 8px" }}>✕</button>
+            </div>
+
+            {/* Channel pills */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="label" style={{ marginBottom: 8 }}>Channel</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(["text", "call", "email", "in_person", "social_dm"] as Touch["channel"][]).map((ch) => (
+                  <button
+                    key={ch}
+                    onClick={() => setTouchChannel(ch)}
+                    style={{
+                      padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700,
+                      border: "1px solid",
+                      borderColor: touchChannel === ch ? "var(--accent)" : "var(--line)",
+                      background: touchChannel === ch ? "var(--accent)" : "var(--paper)",
+                      color: touchChannel === ch ? "#fff" : "var(--ink)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {ch === "in_person" ? "In Person" : ch === "social_dm" ? "DM" : ch.charAt(0).toUpperCase() + ch.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div style={{ marginBottom: 16 }}>
+              <div className="label" style={{ marginBottom: 6 }}>Notes (optional)</div>
+              <textarea
+                className="textarea"
+                autoFocus
+                value={touchSummary}
+                onChange={(e) => setTouchSummary(e.target.value)}
+                placeholder="Quick note — what you sent or what happened"
+                style={{ minHeight: 72, fontSize: 16 }}
+              />
+            </div>
+
+            {/* Follow-up reminder */}
+            <div style={{ marginBottom: 16 }}>
+              <button
+                className="btn"
+                style={{ fontSize: 13, width: "100%" }}
+                onClick={() => { setRemindOpen(v => !v); setRemindDate(""); setRemindNote(""); }}
+              >
+                {remindOpen ? "Cancel reminder" : "+ Set follow-up reminder"}
+              </button>
+              {remindOpen && (
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  <div className="field">
+                    <div className="label">Follow up on</div>
+                    <input className="input" type="date" value={remindDate} onChange={(e) => setRemindDate(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <div className="label">Context (optional)</div>
+                    <input className="input" value={remindNote} onChange={(e) => setRemindNote(e.target.value)} placeholder="e.g. Check if they made a decision" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Submit */}
+            <button
+              className="btn btnPrimary"
+              style={{ width: "100%", fontSize: 16, padding: "14px", justifyContent: "center" }}
+              disabled={savingTouch}
+              onClick={async () => {
+                const contactId = loggingFor;
+                await saveTouch();
+                if (remindOpen && remindDate && contactId) await saveReminder(contactId);
+                closeMobileSheet();
+              }}
+            >
+              {savingTouch ? "Logging…" : "Log touch"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

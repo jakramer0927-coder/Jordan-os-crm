@@ -1064,8 +1064,8 @@ export default function PipelinePage() {
 
   function BuyerKanban() {
     return (
-      <div style={{ overflowX: "auto", width: "100%" }}>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(180px, 1fr))`, gap: 10, minWidth: 700 }}>
+      <div className="kanbanScroll">
+        <div className="kanbanGrid" style={{ gridTemplateColumns: `repeat(${BUYER_STAGES.length}, minmax(180px, 1fr))` }}>
           {BUYER_STAGES.map(stage => (
             <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: buyers.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "buyer" })}</div>
           ))}
@@ -1076,8 +1076,8 @@ export default function PipelinePage() {
 
   function SellerKanban() {
     return (
-      <div style={{ overflowX: "auto", width: "100%" }}>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(150px, 1fr))`, gap: 10, minWidth: 700 }}>
+      <div className="kanbanScroll">
+        <div className="kanbanGrid" style={{ gridTemplateColumns: `repeat(${SELLER_STAGES.length}, minmax(150px, 1fr))` }}>
           {SELLER_STAGES.map(stage => (
             <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: sellers.filter(d => d.seller_stage === stage.value), oppType: "seller", singular: "seller" })}</div>
           ))}
@@ -1088,8 +1088,8 @@ export default function PipelinePage() {
 
   function InvestorKanban() {
     return (
-      <div style={{ overflowX: "auto", width: "100%" }}>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${INVESTOR_STAGES.length}, minmax(180px, 1fr))`, gap: 10, minWidth: 600 }}>
+      <div className="kanbanScroll">
+        <div className="kanbanGrid" style={{ gridTemplateColumns: `repeat(${INVESTOR_STAGES.length}, minmax(180px, 1fr))` }}>
           {INVESTOR_STAGES.map(stage => (
             <div key={stage.value} style={{ minWidth: 0 }}>{KanbanColumn({ stage, deals: investors.filter(d => d.buyer_stage === stage.value), oppType: "buyer", singular: "investor" })}</div>
           ))}
@@ -1101,7 +1101,7 @@ export default function PipelinePage() {
   function PastClientView() {
     if (pastClients.length === 0) return <div className="subtle">No past clients yet.</div>;
     return (
-      <div style={{ overflowX: "auto" }}>
+      <div className="pipelinePastTable">
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: "2px solid rgba(0,0,0,.08)" }}>
