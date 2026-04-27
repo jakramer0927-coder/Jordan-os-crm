@@ -428,53 +428,48 @@ const DEFAULT_RULES: MorningRules = {
   minSphere: 0,
 };
 
-// Keys are scoped to uid so multiple agents on the same browser don't share settings.
-// Fall back to legacy unscoped key so existing data migrates automatically on first use.
-const LEGACY_RULES_KEY = "morning_rules_v1";
-const LEGACY_LOCK_KEY = "morning_lock_v1";
-const rulesKey = (uid: string) => `morning_rules_v1_${uid}`;
-const lockKey = (uid: string) => `morning_lock_v1_${uid}`;
-
-function todayDateString(): string {
+function todayIsoDate(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function loadLockedIds(uid: string): string[] | null {
-  try {
-    const raw = localStorage.getItem(lockKey(uid)) ?? localStorage.getItem(LEGACY_LOCK_KEY);
-    if (!raw) return null;
-    const { date, ids } = JSON.parse(raw) as { date: string; ids: string[] };
-    if (date !== todayDateString()) return null;
-    return ids;
-  } catch {
-    return null;
-  }
+async function loadLockedIds(uid: string): Promise<string[] | null> {
+  const { data } = await supabase
+    .from("morning_locks")
+    .select("contact_ids")
+    .eq("user_id", uid)
+    .eq("lock_date", todayIsoDate())
+    .maybeSingle();
+  return (data?.contact_ids as string[] | null) ?? null;
 }
 
-function saveLockedIds(uid: string, ids: string[]) {
-  try {
-    localStorage.setItem(lockKey(uid), JSON.stringify({ date: todayDateString(), ids }));
-  } catch { /* ignore */ }
+async function saveLockedIds(uid: string, ids: string[]) {
+  await supabase.from("morning_locks").upsert(
+    { user_id: uid, lock_date: todayIsoDate(), contact_ids: ids, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,lock_date" }
+  );
 }
 
-function clearLockedIds(uid: string) {
-  try { localStorage.removeItem(lockKey(uid)); } catch { /* ignore */ }
+async function clearLockedIds(uid: string) {
+  await supabase.from("morning_locks").delete().eq("user_id", uid).eq("lock_date", todayIsoDate());
 }
 
-function loadRules(uid: string): MorningRules {
-  try {
-    const raw = localStorage.getItem(rulesKey(uid)) ?? localStorage.getItem(LEGACY_RULES_KEY);
-    if (!raw) return DEFAULT_RULES;
-    const parsed = JSON.parse(raw) as Partial<MorningRules>;
-    return { ...DEFAULT_RULES, ...parsed };
-  } catch {
-    return DEFAULT_RULES;
-  }
+async function loadRules(uid: string): Promise<MorningRules> {
+  const { data } = await supabase
+    .from("user_settings")
+    .select("value")
+    .eq("user_id", uid)
+    .eq("key", "morning_rules")
+    .maybeSingle();
+  if (!data?.value) return DEFAULT_RULES;
+  return { ...DEFAULT_RULES, ...(data.value as Partial<MorningRules>) };
 }
 
-function saveRules(uid: string, r: MorningRules) {
-  try { localStorage.setItem(rulesKey(uid), JSON.stringify(r)); } catch { /* ignore */ }
+async function saveRules(uid: string, r: MorningRules) {
+  await supabase.from("user_settings").upsert(
+    { user_id: uid, key: "morning_rules", value: r, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,key" }
+  );
 }
 
 export default function MorningPage() {
@@ -580,7 +575,7 @@ export default function MorningPage() {
 
     if (forceRefresh) {
       setLockedIds(null);
-      clearLockedIds(user.id);
+      await clearLockedIds(user.id);
     }
 
     // Fetch contacts+touches+counts, voice profile, sync status, follow-ups, and pipeline in parallel
@@ -781,9 +776,14 @@ export default function MorningPage() {
       if (!alive) return;
       if (!user) return;
 
-      // Load uid-scoped localStorage values now that we have the uid
-      setRules(loadRules(user.id));
-      setLockedIds(loadLockedIds(user.id));
+      // Load persisted settings + today's lock from Supabase (cross-device)
+      const [savedRules, savedLock] = await Promise.all([
+        loadRules(user.id),
+        loadLockedIds(user.id),
+      ]);
+      if (!alive) return;
+      setRules(savedRules);
+      setLockedIds(savedLock);
       setLockedIdsLoaded(true);
 
       setReady(true);
@@ -947,11 +947,11 @@ export default function MorningPage() {
   }, [rules]);
 
   useEffect(() => {
-    if (!lockedIdsLoaded) return; // wait until localStorage has been checked
+    if (!lockedIdsLoaded) return; // wait until Supabase lock has been checked
     if (lockedIds === null && recs.length > 0) {
       const ids = recs.map((r) => r.id);
       setLockedIds(ids);
-      if (uid) saveLockedIds(uid, ids);
+      if (uid) saveLockedIds(uid, ids); // fire-and-forget
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds, lockedIdsLoaded]);
