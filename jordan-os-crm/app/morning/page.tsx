@@ -454,18 +454,34 @@ async function clearLockedIds(uid: string) {
   await supabase.from("morning_locks").delete().eq("user_id", uid).eq("lock_date", todayIsoDate());
 }
 
+const rulesLsKey = (uid: string) => `morning_rules_v2_${uid}`;
+
 async function loadRules(uid: string): Promise<MorningRules> {
-  const { data } = await supabase
-    .from("user_settings")
-    .select("value")
-    .eq("user_id", uid)
-    .eq("key", "morning_rules")
-    .maybeSingle();
-  if (!data?.value) return DEFAULT_RULES;
-  return { ...DEFAULT_RULES, ...(data.value as Partial<MorningRules>) };
+  try {
+    const { data } = await supabase
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", uid)
+      .eq("key", "morning_rules")
+      .maybeSingle();
+    if (data?.value) {
+      const rules = { ...DEFAULT_RULES, ...(data.value as Partial<MorningRules>) };
+      try { localStorage.setItem(rulesLsKey(uid), JSON.stringify(rules)); } catch {}
+      return rules;
+    }
+  } catch {}
+  // Fallback: localStorage cache
+  try {
+    const raw = localStorage.getItem(rulesLsKey(uid));
+    if (raw) return { ...DEFAULT_RULES, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_RULES;
 }
 
 async function saveRules(uid: string, r: MorningRules) {
+  // Write to localStorage immediately — guarantees same-device persistence even if Supabase is slow
+  try { localStorage.setItem(rulesLsKey(uid), JSON.stringify(r)); } catch {}
+  // Write to Supabase for cross-device sync
   await supabase.from("user_settings").upsert(
     { user_id: uid, key: "morning_rules", value: r, updated_at: new Date().toISOString() },
     { onConflict: "user_id,key" }
@@ -527,6 +543,9 @@ export default function MorningPage() {
   const [bulkSummary, setBulkSummary] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+
+  // prevents rulesReady effect from clearing the Supabase lock when rules load on init
+  const rulesSetFromInit = useRef(false);
 
   // mobile
   const [isMobile, setIsMobile] = useState(false);
@@ -615,6 +634,16 @@ export default function MorningPage() {
     setContacts((merged ?? []) as ContactWithLastOutbound[]);
     setTodayCount(tc ?? 0);
     setWtdCount(wc ?? 0);
+
+    // Pre-populate completedIds from contacts touched today so ✓ survives navigation
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const touchedToday = new Set(
+      ((merged ?? []) as ContactWithLastOutbound[])
+        .filter(c => c.last_outbound_at && new Date(c.last_outbound_at) >= todayStart)
+        .map(c => c.id)
+    );
+    if (touchedToday.size > 0) setCompletedIds(prev => new Set([...prev, ...touchedToday]));
 
     if (pipelineRes.ok) {
       const pj = await pipelineRes.json().catch(() => ({}));
@@ -809,6 +838,7 @@ export default function MorningPage() {
         loadLockedIds(user.id),
       ]);
       if (!alive) return;
+      rulesSetFromInit.current = true; // prevent rulesReady effect from clearing the loaded lock
       setRules(savedRules);
       setLockedIds(savedLock);
       setLockedIdsLoaded(true);
@@ -973,9 +1003,10 @@ export default function MorningPage() {
     return top;
   }, [contacts, voice, rules]);
 
-  // Reset locked list when user explicitly changes rules (not on mount)
+  // Reset locked list when user explicitly changes rules — skip the init load from Supabase
   useEffect(() => {
     if (!rulesReady) { setRulesReady(true); return; }
+    if (rulesSetFromInit.current) { rulesSetFromInit.current = false; return; }
     setLockedIds(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);
