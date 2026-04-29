@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
-type Props = { contactId: string };
+type Props = { contactId: string; contactEmail?: string | null };
 
 type Intent =
     | "check_in"
@@ -37,7 +37,7 @@ function intentLabel(i: Intent) {
     }
 }
 
-export default function VoiceDraftPanel({ contactId }: Props) {
+export default function VoiceDraftPanel({ contactId, contactEmail }: Props) {
     const [uid, setUid] = useState<string | null>(null);
 
     // Primary controls
@@ -63,6 +63,12 @@ export default function VoiceDraftPanel({ contactId }: Props) {
     const [err, setErr] = useState<string | null>(null);
     const [draft, setDraft] = useState("");
     const [copied, setCopied] = useState(false);
+
+    // Send via Gmail
+    const [sendTo, setSendTo] = useState("");
+    const [sendSubject, setSendSubject] = useState("");
+    const [sending, setSending] = useState(false);
+    const [sendResult, setSendResult] = useState<"sent" | "error" | null>(null);
 
     useEffect(() => {
         supabase.auth.getSession().then(({ data }) => {
@@ -174,6 +180,9 @@ export default function VoiceDraftPanel({ contactId }: Props) {
                 setErr(j?.error || "Draft failed");
             } else {
                 setDraft(j?.draft || "");
+                setSendResult(null);
+                if (!sendTo && contactEmail) setSendTo(contactEmail);
+                if (!sendSubject) setSendSubject("Checking in");
             }
         } catch (e: any) {
             setErr(e?.message || "Draft failed");
@@ -187,6 +196,29 @@ export default function VoiceDraftPanel({ contactId }: Props) {
         await navigator.clipboard.writeText(draft);
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
+    }
+
+    async function sendEmail() {
+        if (!draft || !sendTo.trim()) return;
+        setSending(true);
+        setSendResult(null);
+        try {
+            const res = await fetch("/api/gmail/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ to: sendTo.trim(), subject: sendSubject.trim() || "(no subject)", body: draft }),
+            });
+            setSendResult(res.ok ? "sent" : "error");
+            if (!res.ok) {
+                const j = await res.json();
+                setErr(j?.error || "Send failed");
+            }
+        } catch (e: any) {
+            setErr(e?.message || "Send failed");
+            setSendResult("error");
+        } finally {
+            setSending(false);
+        }
     }
 
     return (
@@ -382,6 +414,47 @@ export default function VoiceDraftPanel({ contactId }: Props) {
                         </div>
 
                         <div className="previewBody">{draft}</div>
+
+                        {/* Send via Gmail — only for email channel */}
+                        {channel === "email" && (
+                            <div className="stack" style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                                {sendResult === "sent" ? (
+                                    <div style={{ fontWeight: 700, color: "#0b6b2a", fontSize: 13 }}>✓ Email sent via Gmail</div>
+                                ) : (
+                                    <>
+                                        <div className="rowResponsive" style={{ gap: 8 }}>
+                                            <div className="field" style={{ flex: 1 }}>
+                                                <div className="label">To</div>
+                                                <input
+                                                    className="input"
+                                                    value={sendTo}
+                                                    onChange={(e) => setSendTo(e.target.value)}
+                                                    placeholder="recipient@email.com"
+                                                    type="email"
+                                                />
+                                            </div>
+                                            <div className="field" style={{ flex: 2 }}>
+                                                <div className="label">Subject</div>
+                                                <input
+                                                    className="input"
+                                                    value={sendSubject}
+                                                    onChange={(e) => setSendSubject(e.target.value)}
+                                                    placeholder="Checking in"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button
+                                            className="btn btnPrimary btnFullMobile"
+                                            type="button"
+                                            onClick={sendEmail}
+                                            disabled={sending || !sendTo.trim()}
+                                        >
+                                            {sending ? "Sending…" : "Send via Gmail"}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="muted small" style={{ marginTop: 4 }}>

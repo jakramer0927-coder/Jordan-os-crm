@@ -5,6 +5,7 @@ import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { decryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
 
@@ -145,8 +146,8 @@ export async function POST(req: Request) {
 
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
-      access_token: tokenRow.access_token ?? undefined,
-      refresh_token: tokenRow.refresh_token ?? undefined,
+      access_token: tokenRow.access_token ? decryptToken(tokenRow.access_token) : undefined,
+      refresh_token: tokenRow.refresh_token ? decryptToken(tokenRow.refresh_token) : undefined,
       expiry_date: tokenRow.expiry_date ?? undefined,
     });
 

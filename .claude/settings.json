@@ -33,7 +33,11 @@
       "mcp__claude_ai_Supabase__list_projects",
       "mcp__claude_ai_Supabase__apply_migration",
       "Bash(launchctl load *)",
-      "Bash(launchctl list *)"
+      "Bash(launchctl list *)",
+      "Bash(mkdir -p /Users/jordankramer/projects/jordan-os-crm/app/contacts/\\\\[id\\\\])",
+      "Bash(cp /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/\\\\[id\\\\]/page.tsx /Users/jordankramer/projects/jordan-os-crm/app/contacts/\\\\[id\\\\]/page.tsx)",
+      "Bash(git fetch *)",
+      "Bash(rsync -a --delete /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ /Users/jordankramer/projects/jordan-os-crm/app/)"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",

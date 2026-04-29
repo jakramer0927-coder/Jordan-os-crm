@@ -156,7 +156,7 @@ export async function GET(req: Request) {
       const category = normCategory(r[iCategory]) || "Other";
 
       const tierRaw = safeStr(r[iTier]).toUpperCase();
-      const tier = tierRaw === "A" || tierRaw === "B" || tierRaw === "C" ? tierRaw : null;
+      const tier = tierRaw === "A" || tierRaw === "B" || tierRaw === "C" || tierRaw === "D" ? tierRaw : null;
 
       const clientType = iClientType !== -1 ? safeStr(r[iClientType]) : "";
 

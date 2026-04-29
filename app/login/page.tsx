@@ -24,6 +24,9 @@ export default function LoginPage() {
       setLoading(true);
       setError(null);
 
+      // Sign out any existing session first so Google always shows the account picker
+      await supabase.auth.signOut();
+
       // Determine base URL (works local + production)
       const base =
         process.env.NEXT_PUBLIC_APP_BASE_URL &&
@@ -35,6 +38,7 @@ export default function LoginPage() {
         provider: "google",
         options: {
           redirectTo: `${base}/auth/callback` as string,
+          queryParams: { prompt: "select_account" },
         },
       });
 

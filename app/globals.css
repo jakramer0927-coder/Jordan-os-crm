@@ -9,6 +9,10 @@
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
 
 /* ===== Reset ===== */
 * {
@@ -649,6 +653,39 @@ main a {
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+/* ===== Pipeline kanban ===== */
+.kanbanScroll {
+  overflow-x: auto;
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.kanbanGrid {
+  display: grid;
+  gap: 10px;
+  min-width: 700px;
+}
+
+@media (max-width: 768px) {
+  .kanbanScroll {
+    overflow-x: hidden;
+  }
+  .kanbanGrid {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    gap: 16px !important;
+  }
+  /* Past clients table — scroll horizontally on mobile */
+  .pipelinePastTable {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Prevent entire page from overflowing on mobile */
+  body {
+    overflow-x: hidden;
+  }
 }
 
 /* ===== Morning page recommendation card ===== */

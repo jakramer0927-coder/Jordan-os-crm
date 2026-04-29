@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,9 @@ export async function POST(req: Request) {
   try {
     const uid = await getVerifiedUid();
     if (!uid) return unauthorized();
+
+    const limited = await checkRateLimit(uid, "voice_coach", 5);
+    if (limited) return limited;
 
     // Pull a diverse sample of voice examples
     const { data, error } = await supabaseAdmin
@@ -35,9 +39,9 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY" }, { status: 500 });
-    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
     const sampleText = examples.slice(0, 30).map((t, i) => `--- Email ${i + 1} ---\n${t}`).join("\n\n");
 
@@ -75,25 +79,27 @@ Return a JSON object with exactly these fields:
 
 Provide 3-5 improvements. Be specific — reference actual patterns from the emails where possible.`;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        max_tokens: 2048,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
         temperature: 0.3,
-        system,
-        messages: [{ role: "user", content: user }],
+        response_format: { type: "json_object" },
       }),
     });
 
     const j = await res.json();
     if (!res.ok) {
-      return NextResponse.json({ error: j?.error?.message || `Anthropic error ${res.status}` }, { status: 500 });
+      return NextResponse.json({ error: j?.error?.message || `OpenAI error ${res.status}` }, { status: 500 });
     }
 
-    const raw = j?.content?.[0]?.text || "{}";
-    const coaching = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const raw = j?.choices?.[0]?.message?.content || "{}";
+    const coaching = JSON.parse(raw);
 
     // Persist full coaching result + style guide + tips
     await supabaseAdmin

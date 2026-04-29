@@ -4,6 +4,7 @@ import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { decryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
 
@@ -135,8 +136,8 @@ export async function GET(req: Request) {
 
     const oauth2 = getGoogleOAuthClient();
     oauth2.setCredentials({
-      access_token: tokenRow.access_token ?? undefined,
-      refresh_token: tokenRow.refresh_token ?? undefined,
+      access_token: tokenRow.access_token ? decryptToken(tokenRow.access_token) : undefined,
+      refresh_token: tokenRow.refresh_token ? decryptToken(tokenRow.refresh_token) : undefined,
       expiry_date: tokenRow.expiry_date ?? undefined,
     });
 
@@ -259,6 +260,10 @@ export async function GET(req: Request) {
         );
 
       for (const full of fulls) {
+
+        const msgLabelIds = full.data.labelIds ?? [];
+        const hasAnyConfiguredLabel = msgLabelIds.some((lid) => labelIds.includes(lid));
+
         messagesParsed += 1;
 
         const headers = full.data.payload?.headers ?? [];
@@ -311,6 +316,11 @@ export async function GET(req: Request) {
               unmatchedMeta.set(e, { subject: subject || null, snippet: snippet || null, threadLink });
             }
           }
+          continue;
+        }
+
+        // Only create touches for messages with the configured label
+        if (!hasAnyConfiguredLabel) {
           continue;
         }
 
@@ -438,101 +448,6 @@ export async function GET(req: Request) {
       }
     }
 
-    // ── Inbound sync (inbox messages from known contacts) ────────────────
-    let ownEmail = "";
-    try {
-      const profile = await gmail.users.getProfile({ userId: "me" });
-      ownEmail = (profile.data.emailAddress || "").toLowerCase();
-    } catch { /* ignore */ }
-
-    let inboundImported = 0;
-    let inboundSkipped = 0;
-    let inPageToken: string | undefined;
-    let inFetched = 0;
-    const IN_MAX = 500;
-
-    while (inFetched < IN_MAX) {
-      const listRes: gmail_v1.Schema$ListMessagesResponse = (
-        await gmail.users.messages.list({
-          userId: "me",
-          labelIds: ["INBOX"],
-          q: `after:${afterStr}`,
-          maxResults: Math.min(100, IN_MAX - inFetched),
-          pageToken: inPageToken,
-        })
-      ).data;
-
-      const inMsgs = listRes.messages ?? [];
-      inPageToken = listRes.nextPageToken ?? undefined;
-      if (inMsgs.length === 0) break;
-      inFetched += inMsgs.length;
-
-      for (let i = 0; i < inMsgs.length; i += BATCH) {
-        const batch = inMsgs.slice(i, i + BATCH).filter((m) => !!m.id);
-        const fulls = await Promise.all(
-          batch.map((m) =>
-            gmail.users.messages.get({
-              userId: "me",
-              id: m.id!,
-              format: "metadata",
-              metadataHeaders: ["From", "Subject", "Date"],
-            })
-          )
-        );
-
-        for (const full of fulls) {
-          const headers = full.data.payload?.headers ?? [];
-          const fromEmails = parseEmails(headerValue(headers, "From"));
-          const fromEmail = fromEmails[0];
-
-          if (!fromEmail) continue;
-          if (fromEmail === ownEmail) continue;
-          if (ignoreEmails.has(fromEmail)) continue;
-          const fromDomain = fromEmail.split("@")[1]?.toLowerCase() || "";
-          if (ignoreDomains.has(fromDomain)) continue;
-          if (shouldIgnoreForUnmatched(fromEmail)) continue;
-
-          const contactId = contactIdByEmail.get(fromEmail);
-          if (!contactId) continue;
-
-          const messageId = full.data.id ?? "";
-          const subject = headerValue(headers, "Subject") || "";
-          const snippet = (full.data.snippet || "").trim();
-          const internalDateMs = Number(full.data.internalDate || 0);
-          const occurredAt = internalDateMs ? new Date(internalDateMs).toISOString() : new Date().toISOString();
-          const threadId = full.data.threadId || "";
-          const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
-
-          const { data: exIn } = await supabaseAdmin
-            .from("touches")
-            .select("id")
-            .eq("contact_id", contactId)
-            .eq("source", "gmail")
-            .eq("source_message_id", messageId)
-            .limit(1);
-
-          if ((exIn ?? []).length > 0) { inboundSkipped++; continue; }
-
-          const { error: insErr } = await supabaseAdmin.from("touches").insert({
-            contact_id: contactId,
-            channel: "email",
-            direction: "inbound",
-            occurred_at: occurredAt,
-            intent: null,
-            summary: (snippet || subject).trim() || null,
-            source: "gmail",
-            source_link: link,
-            source_message_id: messageId,
-          });
-
-          if (insErr) inboundSkipped++;
-          else inboundImported++;
-        }
-      }
-
-      if (!inPageToken) break;
-    }
-
     // Save sync timestamp for incremental sync next run
     await supabaseAdmin
       .from("user_settings")
@@ -546,8 +461,6 @@ export async function GET(req: Request) {
     return NextResponse.json({
       imported,
       skipped,
-      inboundImported,
-      inboundSkipped,
       unmatched,
       unmatchedEmailsQueued: unmatchedCounts.size,
       unmatchedSaveError,
