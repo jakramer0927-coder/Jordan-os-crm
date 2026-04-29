@@ -137,6 +137,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     { href: "/unmatched", label: "Unmatched" },
     { href: "/triage", label: "Triage" },
     { href: "/insights", label: "Insights" },
+    { href: "/reports", label: "Reports" },
+    { href: "/linkedin", label: "LinkedIn" },
     { href: "/settings/integrations", label: "Integrations" },
   ];
 

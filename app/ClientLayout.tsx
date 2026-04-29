@@ -135,7 +135,10 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     { href: "/contacts", label: "Contacts" },
     { href: "/pipeline", label: "Pipeline" },
     { href: "/unmatched", label: "Unmatched" },
+    { href: "/triage", label: "Triage" },
     { href: "/insights", label: "Insights" },
+    { href: "/reports", label: "Reports" },
+    { href: "/linkedin", label: "LinkedIn" },
     { href: "/settings/integrations", label: "Integrations" },
   ];
 
@@ -254,6 +257,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                     <option value="A">A</option>
                     <option value="B">B</option>
                     <option value="C">C</option>
+                    <option value="D">D</option>
                     <option value="">—</option>
                   </select>
                 </div>
