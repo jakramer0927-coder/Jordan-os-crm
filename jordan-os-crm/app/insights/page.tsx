@@ -246,6 +246,7 @@ export default function InsightsPage() {
   const [refOpportunities, setRefOpportunities] = useState<RefAskOpportunity[]>([]);
   const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
   const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
+  const [refPotential, setRefPotential] = useState<{ profile_size: number; top_potential: Array<{ id: string; display_name: string; category: string; tier: string; referral_potential: number; match_reasons: string[]; days_since_contact: number | null }> } | null>(null);
   // refSources is derived via useMemo below (timeframe-aware)
   const [contactsTotal, setContactsTotal] = useState(0);
   const [aClientsTotal, setAClientsTotal] = useState(0);
@@ -705,6 +706,12 @@ export default function InsightsPage() {
     }
     opps.sort((a, b) => b.score - a.score);
     setRefOpportunities(opps.slice(0, 5));
+
+    // Load referral potential contacts
+    fetch("/api/insights/referral-potential")
+      .then(r => r.json())
+      .then(j => { if (j.top_potential) setRefPotential(j); })
+      .catch(() => {});
   }
 
   async function generateBrief() {
@@ -1380,6 +1387,55 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Untapped Referral Potential ──────────────────────────────────────── */}
+      {refPotential && refPotential.top_potential.length > 0 && (
+        <div className="card cardPad" style={{ marginTop: 16 }}>
+          <div className="rowBetween" style={{ marginBottom: 12 }}>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>Untapped referral potential</div>
+              <div className="muted small" style={{ marginTop: 2 }}>
+                Contacts matching the profile of your {refPotential.profile_size} known referral sources — never referred yet
+              </div>
+            </div>
+          </div>
+          <div className="stack">
+            {refPotential.top_potential.map((c) => (
+              <div key={c.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,.05)" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <a href={`/contacts/${c.id}`} style={{ fontWeight: 800, fontSize: 14, textDecoration: "none", color: "var(--ink)" }}>
+                      {c.display_name}
+                    </a>
+                    <span className="badge" style={{ fontSize: 11, color: "#7c3aed", borderColor: "rgba(124,58,237,.25)", background: "rgba(124,58,237,.05)" }}>
+                      Potential {c.referral_potential}
+                    </span>
+                    {c.category && <span className="badge" style={{ fontSize: 11 }}>{c.category}</span>}
+                    {c.tier && <span className="badge" style={{ fontSize: 11 }}>Tier {c.tier}</span>}
+                  </div>
+                  {c.match_reasons.length > 0 && (
+                    <div className="muted small" style={{ marginTop: 3 }}>
+                      Matches: {c.match_reasons.join(" · ")}
+                      {c.days_since_contact !== null && ` · last contact ${c.days_since_contact}d ago`}
+                    </div>
+                  )}
+                </div>
+                <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                  <a className="btn" href={`/contacts/${c.id}`} style={{ fontSize: 12, textDecoration: "none" }}>Open</a>
+                  <button
+                    className="btn btnPrimary"
+                    style={{ fontSize: 12 }}
+                    disabled={loggingAsk === c.id || loggedAskIds.has(c.id)}
+                    onClick={() => logReferralAsk(c.id)}
+                  >
+                    {loggedAskIds.has(c.id) ? "Logged ✓" : loggingAsk === c.id ? "…" : "Log ask"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -115,8 +115,77 @@ export async function GET() {
       };
     });
 
+    // ── Referral potential scoring ────────────────────────────────────────────
+    // Build a profile from contacts who have already sent referrals, then score
+    // every unactivated contact by similarity. Requires ≥3 known sources to be
+    // meaningful — below that threshold we skip to avoid misleading signals.
+    const sources = contactsWithDeals.filter((c: any) => (c.referral_gci ?? 0) > 0);
+
+    let contactsWithPotential = contactsWithDeals;
+
+    if (sources.length >= 3) {
+      // Compute profile
+      const catCounts: Record<string, number> = {};
+      const tierCounts: Record<string, number> = {};
+      let linkedinCount = 0;
+      let totalReplyRate = 0;
+      let replyRateN = 0;
+
+      for (const s of sources) {
+        const cat = (s.category || "other").toLowerCase();
+        catCounts[cat] = (catCounts[cat] ?? 0) + 1;
+        const tier = (s.tier || "none").toUpperCase();
+        tierCounts[tier] = (tierCounts[tier] ?? 0) + 1;
+        if (s.linkedin_connected_at) linkedinCount++;
+        const best = Math.max(s.gmail_reply_rate ?? 0, s.text_reply_rate ?? 0);
+        if (best > 0) { totalReplyRate += best; replyRateN++; }
+      }
+
+      const n = sources.length;
+      const catWeights: Record<string, number> = Object.fromEntries(
+        Object.entries(catCounts).map(([k, v]) => [k, (v as number) / n])
+      );
+      const tierWeights: Record<string, number> = Object.fromEntries(
+        Object.entries(tierCounts).map(([k, v]) => [k, (v as number) / n])
+      );
+      const linkedinRate = linkedinCount / n;
+      const avgReplyRate = replyRateN > 0 ? totalReplyRate / replyRateN : 0;
+
+      contactsWithPotential = contactsWithDeals.map((c: any) => {
+        // Already a referral source — no need to score
+        if ((c.referral_gci ?? 0) > 0) return { ...c, referral_potential: 0 };
+
+        let score = 0;
+        const cat = (c.category || "other").toLowerCase();
+        const tier = (c.tier || "none").toUpperCase();
+        const bestReplyRate = Math.max(c.gmail_reply_rate ?? 0, c.text_reply_rate ?? 0);
+
+        // Category match (0–30): strongest predictor
+        score += Math.round((catWeights[cat] ?? 0) * 30);
+
+        // Tier match (0–20)
+        score += Math.round((tierWeights[tier] ?? 0) * 20);
+
+        // LinkedIn match (0–10): if most sources are LinkedIn connections
+        if (c.linkedin_connected_at && linkedinRate >= 0.3) score += 10;
+
+        // Reply engagement (0–15)
+        if (bestReplyRate >= avgReplyRate && bestReplyRate > 0) score += 15;
+        else if (bestReplyRate > 0) score += 7;
+
+        // Tier A/B absolute bonus — high-value relationships are better bets
+        if (tier === "A") score += 10;
+        else if (tier === "B") score += 5;
+
+        return { ...c, referral_potential: Math.min(100, score) };
+      });
+    } else {
+      // Not enough source data — set 0 for all
+      contactsWithPotential = contactsWithDeals.map((c: any) => ({ ...c, referral_potential: 0 }));
+    }
+
     return NextResponse.json({
-      contacts: contactsWithDeals,
+      contacts: contactsWithPotential,
       todayCount: data?.today_count ?? 0,
       wtdCount: data?.wtd_count ?? 0,
     });

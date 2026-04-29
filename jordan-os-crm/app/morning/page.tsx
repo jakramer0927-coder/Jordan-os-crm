@@ -47,6 +47,7 @@ type ContactWithLastOutbound = Contact & {
   gmail_reply_rate: number | null;
   text_reply_rate: number | null;
   linkedin_connected_at: string | null;
+  referral_potential: number;
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
@@ -318,6 +319,10 @@ function contextTalkingPoint(c: Recommendation): string {
   }
   if (cat === "developer") {
     return "Ask about absorption, buyer feedback, and what's coming up — offer comp analysis if useful.";
+  }
+  if (c.referral_potential >= 70 && c.referral_gci === 0) {
+    const channelNote = channel ? ` Best channel: ${channel}.` : "";
+    return `Matches profile of your top referral sources — high potential, never referred.${channelNote} Genuine check-in first; plant the seed naturally.`;
   }
   if (cat === "sphere" && (c.days_since_outbound ?? 999) > 90) {
     return "Long overdue — genuine personal check-in, no agenda. Just reconnect.";
@@ -904,6 +909,10 @@ export default function MorningPage() {
 
       // LinkedIn connection: verified professional relationship
       if (c.linkedin_connected_at) score += 5;
+
+      // Referral potential: matches profile of proven referral sources
+      if (c.referral_potential >= 70) score += 12;
+      else if (c.referral_potential >= 50) score += 6;
 
       // Anniversary boost — strong reason to reach out even if recently touched
       if (anns.length > 0) {
@@ -1604,7 +1613,7 @@ export default function MorningPage() {
                             : c.last_outbound_summary}
                         </div>
                       )}
-                      {(c.referral_gci > 0 || c.gmail_reply_rate !== null || c.text_reply_rate !== null || c.linkedin_connected_at) && (
+                      {(c.referral_gci > 0 || c.referral_potential >= 50 || c.gmail_reply_rate !== null || c.text_reply_rate !== null || c.linkedin_connected_at) && (
                         <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
                           {c.referral_gci > 0 && (
                             <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
@@ -1623,6 +1632,11 @@ export default function MorningPage() {
                           )}
                           {c.linkedin_connected_at && (
                             <span className="badge" style={{ fontSize: 11 }}>LinkedIn</span>
+                          )}
+                          {c.referral_potential >= 70 && c.referral_gci === 0 && (
+                            <span className="badge" style={{ fontSize: 11, color: "#7c3aed", borderColor: "rgba(124,58,237,.25)", background: "rgba(124,58,237,.05)" }}>
+                              Referral potential {c.referral_potential}
+                            </span>
                           )}
                         </div>
                       )}
