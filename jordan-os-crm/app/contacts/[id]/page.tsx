@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
+import ContactSearchInput from "@/components/ContactSearchInput";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
@@ -512,8 +513,6 @@ export default function ContactDetailPage() {
   type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
   const [linkedContacts, setLinkedContacts] = useState<LinkedContact[]>([]);
   const [linkOpen, setLinkOpen] = useState(false);
-  const [linkQ, setLinkQ] = useState("");
-  const [linkResults, setLinkResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
   const [linkHouseholdName, setLinkHouseholdName] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkMsg, setLinkMsg] = useState<string | null>(null);
@@ -781,13 +780,6 @@ export default function ContactDetailPage() {
 
     setTouchSaved(true);
     await fetchAll();
-  }
-
-  async function searchLinkContacts(q: string) {
-    if (!uid || q.trim().length < 2) { setLinkResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json().catch(() => ({}));
-    setLinkResults((j.results || []).filter((r: any) => r.id !== id && !linkedContacts.some((l: LinkedContact) => l.contact.id === r.id)));
   }
 
   async function addLink(targetId: string) {
@@ -1607,22 +1599,18 @@ export default function ContactDetailPage() {
                   <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
                 </div>
               ))}
-              <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
+              <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => { setLinkOpen((v) => !v); setLinkMsg(null); }}>
                 {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "+ Add another" : "+ Link contact"}
               </button>
               {linkOpen && (
                 <div className="stack" style={{ marginTop: 4 }}>
-                  <input className="input" value={linkQ} onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }} placeholder="Type a name…" />
-                  {linkResults.length > 0 && (
-                    <div className="stack" style={{ gap: 4 }}>
-                      {linkResults.map((r) => (
-                        <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
-                          <span style={{ fontSize: 13 }}>{r.display_name} <span className="subtle">· {r.category}</span></span>
-                          <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <ContactSearchInput
+                    selectedId=""
+                    selectedName=""
+                    onSelect={(targetId) => addLink(targetId)}
+                    placeholder="Search or create a contact…"
+                    autoFocus
+                  />
                   <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="Household name (optional)" />
                 </div>
               )}

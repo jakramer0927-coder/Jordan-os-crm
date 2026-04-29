@@ -247,12 +247,8 @@ export default function PipelinePage() {
   const [editRefSourceId, setEditRefSourceId] = useState("");
   const [editRefSourceName, setEditRefSourceName] = useState("");
   const [editRefFeePct, setEditRefFeePct] = useState("");
-  const [editRefFeeQuery, setEditRefFeeQuery] = useState("");
-  const [editRefFeeResults, setEditRefFeeResults] = useState<ContactInfo[]>([]);
   const [editRefFeeId, setEditRefFeeId] = useState("");
   const [editRefFeeName, setEditRefFeeName] = useState("");
-  const [editCoAgentQuery, setEditCoAgentQuery] = useState("");
-  const [editCoAgentResults, setEditCoAgentResults] = useState<ContactInfo[]>([]);
   const [editCoAgentId, setEditCoAgentId] = useState("");
   const [editCoAgentName, setEditCoAgentName] = useState("");
 
@@ -353,8 +349,6 @@ export default function PipelinePage() {
   const [newError, setNewError] = useState<string | null>(null);
   // Additional contacts on new deal
   const [newCoContacts, setNewCoContacts] = useState<{ id: string; name: string; role: string }[]>([]);
-  const [newCoQuery, setNewCoQuery] = useState("");
-  const [newCoResults, setNewCoResults] = useState<ContactInfo[]>([]);
   const [newCoRole, setNewCoRole] = useState("co-buyer");
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -873,7 +867,7 @@ export default function PipelinePage() {
     setNewAddress(""); setNewNeighborhood(null); setNewBudgetMin(""); setNewBudgetMax("");
     setNewTargetAreas(""); setNewEstValue(""); setNewMotivation(""); setNewNotes("");
     setNewCommissionPct("");
-    setNewCoContacts([]); setNewCoQuery(""); setNewCoResults([]); setNewCoRole("co-buyer");
+    setNewCoContacts([]); setNewCoRole("co-buyer");
     setNewRefSourceId(""); setNewRefSourceName("");
     setNewPipelineStatus("active"); setNewClosePrice(""); setNewCloseDate(""); setNewRefFeePct("");
     setNewSaving(false);
@@ -1226,40 +1220,24 @@ export default function PipelinePage() {
               const refFeeField = (
                 <div className="field">
                   <div className="label">Referral fee — paying to</div>
-                  <input className="input" value={editRefFeeQuery}
-                    onChange={e => { setEditRefFeeQuery(e.target.value); searchContacts(e.target.value, setEditRefFeeResults); }}
-                    placeholder="Search contacts…" />
-                  {editRefFeeResults.length > 0 && (
-                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {editRefFeeResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                          onClick={() => { setEditRefFeeId(c.id); setEditRefFeeName(c.display_name); setEditRefFeeQuery(c.display_name); setEditRefFeeResults([]); }}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {editRefFeeId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editRefFeeName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditRefFeeId(""); setEditRefFeeName(""); setEditRefFeeQuery(""); }}>remove</button></div>}
+                  <ContactSearchInput
+                    selectedId={editRefFeeId}
+                    selectedName={editRefFeeName}
+                    onSelect={(id, name) => { setEditRefFeeId(id); setEditRefFeeName(name); }}
+                    placeholder="Search or create a contact…"
+                  />
                 </div>
               );
 
               const coAgentField = (
                 <div className="field">
                   <div className="label">Co-agent</div>
-                  <input className="input" value={editCoAgentQuery}
-                    onChange={e => { setEditCoAgentQuery(e.target.value); searchContacts(e.target.value, setEditCoAgentResults); }}
-                    placeholder="Search contacts…" />
-                  {editCoAgentResults.length > 0 && (
-                    <div className="stack" style={{ marginTop: 4, border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {editCoAgentResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13 }}
-                          onClick={() => { setEditCoAgentId(c.id); setEditCoAgentName(c.display_name); setEditCoAgentQuery(c.display_name); setEditCoAgentResults([]); }}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {editCoAgentId && <div style={{ fontSize: 12, marginTop: 4, color: "rgba(18,18,18,.5)" }}>→ {editCoAgentName} <button style={{ marginLeft: 6, fontSize: 11, color: "#8a0000", background: "none", border: "none", cursor: "pointer" }} onClick={() => { setEditCoAgentId(""); setEditCoAgentName(""); setEditCoAgentQuery(""); }}>remove</button></div>}
+                  <ContactSearchInput
+                    selectedId={editCoAgentId}
+                    selectedName={editCoAgentName}
+                    onSelect={(id, name) => { setEditCoAgentId(id); setEditCoAgentName(name); }}
+                    placeholder="Search or create a contact…"
+                  />
                 </div>
               );
 
@@ -2184,25 +2162,17 @@ export default function PipelinePage() {
                 </div>
               )}
               <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
-                <div style={{ flex: 1, minWidth: 160, position: "relative" }}>
-                  <input className="input" value={newCoQuery}
-                    onChange={e => { setNewCoQuery(e.target.value); searchContacts(e.target.value, setNewCoResults); }}
-                    placeholder="Search contacts…" />
-                  {newCoResults.length > 0 && (
-                    <div style={{ position: "absolute", zIndex: 10, left: 0, right: 0, background: "var(--paper)", border: "1px solid rgba(0,0,0,.1)", borderRadius: 6, overflow: "hidden" }}>
-                      {newCoResults.map(c => (
-                        <button key={c.id} className="btn" style={{ borderRadius: 0, textAlign: "left", fontSize: 13, width: "100%" }}
-                          onClick={() => {
-                            if (!newCoContacts.find(x => x.id === c.id) && c.id !== newContactId) {
-                              setNewCoContacts(prev => [...prev, { id: c.id, name: c.display_name, role: newCoRole }]);
-                            }
-                            setNewCoQuery(""); setNewCoResults([]);
-                          }}>
-                          {c.display_name} <span className="subtle">{c.category}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <ContactSearchInput
+                    selectedId=""
+                    selectedName=""
+                    onSelect={(id, name) => {
+                      if (!newCoContacts.find(x => x.id === id) && id !== newContactId) {
+                        setNewCoContacts(prev => [...prev, { id, name, role: newCoRole }]);
+                      }
+                    }}
+                    placeholder="Search or create a contact…"
+                  />
                 </div>
                 <select className="select" value={newCoRole} onChange={e => setNewCoRole(e.target.value)} style={{ minWidth: 120 }}>
                   <option value="co-buyer">Co-buyer</option>

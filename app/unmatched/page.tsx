@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ContactSearchInput from "@/components/ContactSearchInput";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
@@ -17,13 +18,6 @@ type UnmatchedRow = {
   created_contact_id: string | null;
 };
 
-type ContactLite = {
-  id: string;
-  display_name: string;
-  category: string;
-  tier: string | null;
-  email: string | null;
-};
 
 type CreateForm = {
   email: string;
@@ -36,7 +30,12 @@ function domainOf(email: string) {
   return (email.split("@")[1] || "").toLowerCase().trim();
 }
 
+function isPhone(s: string): boolean {
+  return s.startsWith("+") && !s.includes("@");
+}
+
 function displayFromEmail(email: string): string {
+  if (isPhone(email)) return "";
   const local = email.split("@")[0] || email;
   return local
     .replace(/[._-]+/g, " ")
@@ -101,9 +100,6 @@ export default function UnmatchedPage() {
 
   // Which row has link panel open (by email)
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
-  const [contactQuery, setContactQuery] = useState("");
-  const [contactResults, setContactResults] = useState<ContactLite[]>([]);
-  const [selectedContactId, setSelectedContactId] = useState<string>("");
 
   // Which row has create form open (by email)
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
@@ -151,9 +147,6 @@ export default function UnmatchedPage() {
   function openLinkPanel(email: string) {
     setSelectedEmail(email);
     setCreateForm(null);
-    setContactQuery("");
-    setContactResults([]);
-    setSelectedContactId("");
     setErr(null);
   }
 
@@ -205,14 +198,6 @@ export default function UnmatchedPage() {
     removeRow(email);
   }
 
-  async function searchContacts(q: string) {
-    const activeUid = uid;
-    if (!activeUid || !q.trim()) { setContactResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${activeUid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json();
-    setContactResults(res.ok ? (j.results || []) as ContactLite[] : []);
-  }
-
   async function linkEmail(email: string, contactId: string) {
     const activeUid = uid || await getUid();
     if (!activeUid) return;
@@ -232,9 +217,6 @@ export default function UnmatchedPage() {
     if (!res.ok) { setErr(j?.error || "Link failed"); return; }
 
     setSelectedEmail(null);
-    setSelectedContactId("");
-    setContactQuery("");
-    setContactResults([]);
     removeRow(email);
   }
 
@@ -281,7 +263,7 @@ export default function UnmatchedPage() {
                   <div className="row" style={{ marginTop: 10 }}>
                     <span className="badge">Seen {r.seen_count}</span>
                     <span className="badge">Last {new Date(r.last_seen_at).toLocaleString()}</span>
-                    <span className="badge">{rec.label} ({Math.round(rec.confidence * 100)}%)</span>
+                    {!isPhone(r.email) && <span className="badge">{rec.label} ({Math.round(rec.confidence * 100)}%)</span>}
                   </div>
 
                   {r.last_subject && (
@@ -328,37 +310,14 @@ export default function UnmatchedPage() {
               {/* Inline link panel */}
               {isLinking && (
                 <div className="stack" style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                  <div style={{ fontWeight: 800, fontSize: 14 }}>Link to existing contact</div>
-                  <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: 10 }}>
-                    <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                      <div className="label">Search contacts</div>
-                      <input
-                        className="input"
-                        value={contactQuery}
-                        onChange={(e) => { setContactQuery(e.target.value); setSelectedContactId(""); searchContacts(e.target.value); }}
-                        placeholder="Search by name"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="field" style={{ flex: 1, minWidth: 260 }}>
-                      <div className="label">Pick contact</div>
-                      <select className="select" value={selectedContactId} onChange={(e) => setSelectedContactId(e.target.value)}>
-                        <option value="">Select a contact…</option>
-                        {contactResults.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.display_name} • {c.category}{c.tier ? ` • ${c.tier}` : ""}{c.email ? ` • ${c.email}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      className="btn btnPrimary"
-                      onClick={() => linkEmail(r.email, selectedContactId)}
-                      disabled={busy || !selectedContactId}
-                    >
-                      {busy ? "Linking…" : "Link"}
-                    </button>
-                  </div>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>Link to contact</div>
+                  <ContactSearchInput
+                    selectedId=""
+                    selectedName=""
+                    onSelect={(id) => linkEmail(r.email, id)}
+                    placeholder="Search or create a contact…"
+                    autoFocus
+                  />
                 </div>
               )}
 
@@ -394,6 +353,7 @@ export default function UnmatchedPage() {
                         <option value="A">A</option>
                         <option value="B">B</option>
                         <option value="C">C</option>
+                        <option value="D">D</option>
                       </select>
                     </div>
                     <button

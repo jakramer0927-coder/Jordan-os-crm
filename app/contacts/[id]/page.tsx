@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
+import ContactSearchInput from "@/components/ContactSearchInput";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
@@ -36,6 +37,7 @@ type Contact = {
   close_anniversary: string | null;
   move_in_date: string | null;
   home_address: string | null;
+  archived: boolean;
 };
 
 type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
@@ -68,6 +70,12 @@ type Deal = {
   created_at: string;
   referral_source_contact_id: string | null;
   referral_source_name?: string | null;
+  opp_type: string | null;
+  buyer_stage: string | null;
+  seller_stage: string | null;
+  pipeline_status: string | null;
+  list_price: number | null;
+  listing_link: string | null;
 };
 
 type Touch = {
@@ -470,7 +478,7 @@ export default function ContactDetailPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Client");
-  const [tier, setTier] = useState<"A" | "B" | "C">("A");
+  const [tier, setTier] = useState<"A" | "B" | "C" | "D">("A");
   const [clientType, setClientType] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -505,8 +513,6 @@ export default function ContactDetailPage() {
   type LinkedContact = { link_id: string; household_name: string | null; contact: { id: string; display_name: string; category: string; tier: string | null } };
   const [linkedContacts, setLinkedContacts] = useState<LinkedContact[]>([]);
   const [linkOpen, setLinkOpen] = useState(false);
-  const [linkQ, setLinkQ] = useState("");
-  const [linkResults, setLinkResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
   const [linkHouseholdName, setLinkHouseholdName] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkMsg, setLinkMsg] = useState<string | null>(null);
@@ -610,7 +616,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -731,7 +737,7 @@ export default function ContactDetailPage() {
     }
 
     setSavingContact(false);
-    setEditing(false);
+    setAdvancedOpen(false);
     await fetchAll();
   }
 
@@ -774,13 +780,6 @@ export default function ContactDetailPage() {
 
     setTouchSaved(true);
     await fetchAll();
-  }
-
-  async function searchLinkContacts(q: string) {
-    if (!uid || q.trim().length < 2) { setLinkResults([]); return; }
-    const res = await fetch(`/api/contacts/search?uid=${uid}&q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json().catch(() => ({}));
-    setLinkResults((j.results || []).filter((r: any) => r.id !== id && !linkedContacts.some((l: LinkedContact) => l.contact.id === r.id)));
   }
 
   async function addLink(targetId: string) {
@@ -1081,6 +1080,9 @@ export default function ContactDetailPage() {
   const activeDeals = deals.filter((d) => d.status !== "closed_won" && d.status !== "closed_lost");
   const closedDeals = deals.filter((d) => d.status === "closed_won" || d.status === "closed_lost");
   const mostRecentClosedDeal = closedDeals.find((d) => d.close_date) ?? closedDeals[0] ?? null;
+  const investorDeals = deals.filter((d) => d.opp_type === "investor");
+  const currentEscrows = investorDeals.filter((d) => d.buyer_stage === "offer" || d.buyer_stage === "under_contract");
+  const pastInvestorProjects = investorDeals.filter((d) => d.buyer_stage === "closed" || d.pipeline_status === "past_client");
   const overdueFollowUps = followUps.filter((f) => f.due_date < new Date().toISOString().slice(0, 10));
 
   // Milestone check helper
@@ -1451,16 +1453,62 @@ export default function ContactDetailPage() {
         {activeTab === "details" && (
           <div className="stack">
 
-            {/* Edit contact */}
-            <div>
-              <button
-                className="btn"
-                style={{ fontSize: 13, fontWeight: 700 }}
-                onClick={() => setAdvancedOpen((v) => !v)}
-              >
-                {advancedOpen ? "Close edit ▲" : "Edit contact ▾"}
-              </button>
-            </div>
+            {/* Read-only summary — shown when not editing */}
+            {!advancedOpen && (
+              <div className="stack" style={{ gap: 10 }}>
+                {contact.notes && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 4 }}>Notes</div>
+                    <div style={{ fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{contact.notes}</div>
+                  </div>
+                )}
+                {(contact.birthday || contact.close_anniversary || contact.move_in_date) && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 6 }}>Milestones</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {contact.birthday && (
+                        <span className="badge">
+                          Birthday: {new Date(contact.birthday + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                      {contact.close_anniversary && (
+                        <span className="badge">
+                          Close anniversary: {new Date(contact.close_anniversary + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      )}
+                      {contact.move_in_date && (
+                        <span className="badge">
+                          Move-in: {new Date(contact.move_in_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {(contact.buyer_budget_min || contact.buyer_budget_max || contact.buyer_target_areas) && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.4)", marginBottom: 6 }}>Buyer profile</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {(contact.buyer_budget_min || contact.buyer_budget_max) && (
+                        <span className="badge">
+                          Budget: {contact.buyer_budget_min ? `$${Number(contact.buyer_budget_min).toLocaleString()}` : "—"} – {contact.buyer_budget_max ? `$${Number(contact.buyer_budget_max).toLocaleString()}` : "—"}
+                        </span>
+                      )}
+                      {contact.buyer_target_areas && <span className="badge">{contact.buyer_target_areas}</span>}
+                    </div>
+                  </div>
+                )}
+                {!contact.notes && !contact.birthday && !contact.close_anniversary && !contact.move_in_date && (
+                  <div className="subtle" style={{ fontSize: 13 }}>No details on file yet.</div>
+                )}
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, alignSelf: "flex-start" }}
+                  onClick={() => setAdvancedOpen(true)}
+                >
+                  Edit contact ▾
+                </button>
+              </div>
+            )}
 
             {advancedOpen && (
               <>
@@ -1486,6 +1534,7 @@ export default function ContactDetailPage() {
                       <option value="A">A</option>
                       <option value="B">B</option>
                       <option value="C">C</option>
+                      <option value="D">D</option>
                     </select>
                   </div>
                 </div>
@@ -1526,10 +1575,11 @@ export default function ContactDetailPage() {
                     <input className="input" type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
                   </div>
                 </div>
-                <div>
+                <div className="row" style={{ gap: 8 }}>
                   <button className="btn btnPrimary" onClick={saveContact} disabled={savingContact}>
                     {savingContact ? "Saving…" : "Save changes"}
                   </button>
+                  <button className="btn" onClick={() => setAdvancedOpen(false)} disabled={savingContact}>Cancel</button>
                 </div>
               </>
             )}
@@ -1549,22 +1599,18 @@ export default function ContactDetailPage() {
                   <button className="btn" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => removeLink(lc.link_id)} disabled={linkBusy}>Unlink</button>
                 </div>
               ))}
-              <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => { setLinkOpen((v) => !v); setLinkQ(""); setLinkResults([]); setLinkMsg(null); }}>
+              <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => { setLinkOpen((v) => !v); setLinkMsg(null); }}>
                 {linkOpen ? "Cancel" : linkedContacts.length > 0 ? "+ Add another" : "+ Link contact"}
               </button>
               {linkOpen && (
                 <div className="stack" style={{ marginTop: 4 }}>
-                  <input className="input" value={linkQ} onChange={(e) => { setLinkQ(e.target.value); searchLinkContacts(e.target.value); }} placeholder="Type a name…" />
-                  {linkResults.length > 0 && (
-                    <div className="stack" style={{ gap: 4 }}>
-                      {linkResults.map((r) => (
-                        <div key={r.id} className="rowBetween" style={{ alignItems: "center" }}>
-                          <span style={{ fontSize: 13 }}>{r.display_name} <span className="subtle">· {r.category}</span></span>
-                          <button className="btn btnPrimary" style={{ fontSize: 12, padding: "2px 8px" }} onClick={() => addLink(r.id)} disabled={linkBusy}>Link</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <ContactSearchInput
+                    selectedId=""
+                    selectedName=""
+                    onSelect={(targetId) => addLink(targetId)}
+                    placeholder="Search or create a contact…"
+                    autoFocus
+                  />
                   <input className="input" value={linkHouseholdName} onChange={(e) => setLinkHouseholdName(e.target.value)} placeholder="Household name (optional)" />
                 </div>
               )}
@@ -1715,14 +1761,96 @@ export default function ContactDetailPage() {
               )}
             </div>
 
+            {investorDeals.length > 0 && (
+              <>
+                <div className="hr" />
+                <div>
+                  <div className="rowBetween" style={{ alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>Investor Activity</div>
+                    <a href={`/pipeline?deal=${investorDeals[0].id}`} className="subtle" style={{ fontSize: 12 }}>Manage in Pipeline →</a>
+                  </div>
+
+                  {currentEscrows.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(18,18,18,.45)", marginBottom: 6 }}>Current Escrows</div>
+                      <div className="stack" style={{ gap: 0 }}>
+                        {currentEscrows.map((d, i) => (
+                          <div key={d.id} style={{ padding: "8px 0", borderBottom: i < currentEscrows.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>
+                              {d.listing_link ? (
+                                <a href={d.listing_link} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{d.address || "No address"}</a>
+                              ) : (d.address || "No address")}
+                            </div>
+                            <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                              <span className="badge" style={{ color: "#5b21b6", background: "rgba(91,33,182,.06)", border: "1px solid rgba(91,33,182,.2)" }}>
+                                {d.buyer_stage === "under_contract" ? "Under Contract" : "Offer"}
+                              </span>
+                              {d.list_price != null && <span className="badge">Ask: ${Number(d.list_price).toLocaleString()}</span>}
+                              {d.price != null && <span className="badge">Offer: ${Number(d.price).toLocaleString()}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {pastInvestorProjects.length > 0 && (
+                    <details>
+                      <summary className="subtle" style={{ fontSize: 12, cursor: "pointer", userSelect: "none" }}>
+                        {pastInvestorProjects.length} past project{pastInvestorProjects.length !== 1 ? "s" : ""}
+                      </summary>
+                      <div className="stack" style={{ gap: 0, marginTop: 6 }}>
+                        {pastInvestorProjects.map((d, i) => (
+                          <div key={d.id} style={{ padding: "8px 0", borderBottom: i < pastInvestorProjects.length - 1 ? "1px solid rgba(0,0,0,.06)" : undefined }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, wordBreak: "break-word" }}>
+                              {d.listing_link ? (
+                                <a href={d.listing_link} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{d.address || "No address"}</a>
+                              ) : (d.address || "No address")}
+                            </div>
+                            <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                              <span className="badge" style={{ color: "#0b6b2a", background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.2)" }}>Closed</span>
+                              {d.list_price != null && <span className="badge">Listed: ${Number(d.list_price).toLocaleString()}</span>}
+                              {d.price != null && <span className="badge">Sold: ${Number(d.price).toLocaleString()}</span>}
+                              {d.close_date && <span className="badge">{new Date(d.close_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+
+                  {currentEscrows.length === 0 && pastInvestorProjects.length === 0 && (
+                    <div className="subtle" style={{ fontSize: 13 }}>No active escrows or past projects yet.</div>
+                  )}
+                </div>
+              </>
+            )}
+
             <div className="hr" />
 
             {/* Danger zone */}
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#8a0000", marginBottom: 6 }}>Danger zone</div>
-              <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
-                {deleting ? "Deleting…" : "Delete contact"}
-              </button>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }}
+                  disabled={deleting}
+                  onClick={async () => {
+                    const newVal = !contact.archived;
+                    await supabase.from("contacts").update({ archived: newVal }).eq("id", contact.id);
+                    await fetchAll();
+                  }}
+                >
+                  {contact.archived ? "Unarchive contact" : "Archive contact"}
+                </button>
+                <button className="btn" style={{ fontSize: 12, color: "#8a0000", borderColor: "rgba(200,0,0,.25)" }} onClick={deleteContact} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete contact"}
+                </button>
+              </div>
+              {contact.archived && (
+                <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>This contact is archived — they won't appear in Morning or Triage.</div>
+              )}
             </div>
           </div>
         )}
