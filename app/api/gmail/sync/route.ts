@@ -419,12 +419,12 @@ export async function GET(req: Request) {
 
         const toUpdate = allEmails.filter((e) => existingEmailSet.has(e));
 
-        // Insert new rows
+        // Insert new rows (upsert with ignoreDuplicates to safely handle race conditions)
         if (toInsert.length > 0) {
           for (let i = 0; i < toInsert.length; i += 50) {
             const { error: insErr } = await supabaseAdmin
               .from("unmatched_recipients")
-              .insert(toInsert.slice(i, i + 50));
+              .upsert(toInsert.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: true });
             if (insErr) { unmatchedSaveError = insErr.message; console.error("UNMATCHED_INSERT_ERROR", insErr); }
           }
         }

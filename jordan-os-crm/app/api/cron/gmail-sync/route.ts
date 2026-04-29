@@ -328,7 +328,7 @@ async function syncUser(uid: string, tok: any): Promise<{
 
       if (toInsert.length > 0) {
         for (let i = 0; i < toInsert.length; i += 50) {
-          await supabaseAdmin.from("unmatched_recipients").insert(toInsert.slice(i, i + 50));
+          await supabaseAdmin.from("unmatched_recipients").upsert(toInsert.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: true });
         }
         result.unmatched.inserted += toInsert.length;
       }
