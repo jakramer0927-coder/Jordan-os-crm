@@ -247,6 +247,16 @@ export default function InsightsPage() {
   const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
   const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
   const [refPotential, setRefPotential] = useState<{ profile_size: number; top_potential: Array<{ id: string; display_name: string; category: string; tier: string; referral_potential: number; match_reasons: string[]; days_since_contact: number | null }> } | null>(null);
+  const [commPatterns, setCommPatterns] = useState<{
+    total_outbound: number;
+    total_outbound_prior: number;
+    channel_stats: Array<{ channel: string; outbound: number; inbound: number; reply_rate: number | null }>;
+    category_stats: Array<{ category: string; touches_this: number; touches_prior: number; reply_rate: number | null }>;
+    intent_counts: Record<string, number>;
+    referral_outcomes: { total: number; referred: number; no_referral: number; pending: number };
+    weekly_trend: Array<{ week: string; count: number }>;
+    coaching: string[];
+  } | null>(null);
   // refSources is derived via useMemo below (timeframe-aware)
   const [contactsTotal, setContactsTotal] = useState(0);
   const [aClientsTotal, setAClientsTotal] = useState(0);
@@ -711,6 +721,12 @@ export default function InsightsPage() {
     fetch("/api/insights/referral-potential")
       .then(r => r.json())
       .then(j => { if (j.top_potential) setRefPotential(j); })
+      .catch(() => {});
+
+    // Load communication patterns
+    fetch("/api/voice/patterns")
+      .then(r => r.json())
+      .then(j => { if (j.channel_stats) setCommPatterns(j); })
       .catch(() => {});
   }
 
@@ -1388,6 +1404,127 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── Communication Intelligence ──────────────────────────────────────── */}
+      {commPatterns && (
+        <div className="card cardPad" style={{ marginTop: 16 }}>
+          <div className="rowBetween" style={{ marginBottom: 14 }}>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 15 }}>Communication intelligence</div>
+              <div className="muted small" style={{ marginTop: 2 }}>Last 90 days · reply rates require ≥3 outbound touches per channel</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{commPatterns.total_outbound}</div>
+              <div className="muted small">
+                outbound touches
+                {commPatterns.total_outbound_prior > 0 && (
+                  <span style={{ marginLeft: 6, color: commPatterns.total_outbound >= commPatterns.total_outbound_prior ? "#0b6b2a" : "#8a0000", fontWeight: 700 }}>
+                    {commPatterns.total_outbound >= commPatterns.total_outbound_prior ? "+" : ""}
+                    {commPatterns.total_outbound - commPatterns.total_outbound_prior} vs prior
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Channel reply rates */}
+          {commPatterns.channel_stats.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="label" style={{ marginBottom: 8 }}>Channel reply rates</div>
+              <div className="stack" style={{ gap: 6 }}>
+                {commPatterns.channel_stats.map((ch) => (
+                  <div key={ch.channel}>
+                    <div className="rowBetween" style={{ marginBottom: 3 }}>
+                      <span style={{ fontSize: 13, textTransform: "capitalize" }}>{ch.channel.replace("_", " ")}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>
+                        {ch.reply_rate !== null
+                          ? <span style={{ color: ch.reply_rate >= 50 ? "#0b6b2a" : ch.reply_rate <= 20 ? "#8a0000" : undefined }}>{ch.reply_rate}%</span>
+                          : <span className="muted">not enough data</span>}
+                        <span className="muted" style={{ fontWeight: 400, marginLeft: 6, fontSize: 12 }}>
+                          {ch.outbound} sent · {ch.inbound} replies
+                        </span>
+                      </span>
+                    </div>
+                    {ch.reply_rate !== null && (
+                      <div style={{ height: 5, background: "rgba(0,0,0,.07)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${ch.reply_rate}%`, background: ch.reply_rate >= 50 ? "#0b6b2a" : ch.reply_rate <= 20 ? "#c00" : "#888", borderRadius: 3, transition: "width .4s" }} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Category breakdown */}
+          {commPatterns.category_stats.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="label" style={{ marginBottom: 8 }}>Touches by category (last 30d vs prior 30d)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {commPatterns.category_stats.map((cat) => {
+                  const delta = cat.touches_this - cat.touches_prior;
+                  return (
+                    <div key={cat.category} className="card cardPad" style={{ padding: "8px 12px", flex: "1 1 120px", minWidth: 110 }}>
+                      <div style={{ fontSize: 11, textTransform: "capitalize", color: "rgba(18,18,18,.5)", fontWeight: 700, marginBottom: 2 }}>{cat.category}</div>
+                      <div style={{ fontSize: 20, fontWeight: 900 }}>{cat.touches_this}</div>
+                      {cat.touches_prior > 0 && (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: delta >= 0 ? "#0b6b2a" : "#8a0000" }}>
+                          {delta >= 0 ? "+" : ""}{delta} vs prior
+                        </div>
+                      )}
+                      {cat.reply_rate !== null && (
+                        <div style={{ fontSize: 11, color: "rgba(18,18,18,.5)", marginTop: 2 }}>{cat.reply_rate}% reply</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Weekly sparkline */}
+          {commPatterns.weekly_trend.length >= 4 && (() => {
+            const weeks = commPatterns.weekly_trend.slice(-13);
+            const max = Math.max(...weeks.map(w => w.count), 1);
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div className="label" style={{ marginBottom: 8 }}>Weekly outbound trend (last 13 weeks)</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }}>
+                  {weeks.map((w) => (
+                    <div key={w.week} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                      <div
+                        style={{
+                          width: "100%",
+                          height: `${Math.max(4, Math.round((w.count / max) * 40))}px`,
+                          background: "var(--ink)",
+                          borderRadius: 2,
+                          opacity: 0.15 + (w.count / max) * 0.85,
+                        }}
+                        title={`${w.week}: ${w.count} touches`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Coaching observations */}
+          {commPatterns.coaching.length > 0 && (
+            <div>
+              <div className="label" style={{ marginBottom: 8 }}>Observations</div>
+              <div className="stack" style={{ gap: 6 }}>
+                {commPatterns.coaching.map((tip, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>→</span>
+                    <span style={{ fontSize: 13, lineHeight: 1.55 }}>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
