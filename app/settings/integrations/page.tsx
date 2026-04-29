@@ -46,7 +46,7 @@ export default function IntegrationsPage() {
     const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q)}`);
     if (res.ok) {
       const j = await res.json().catch(() => ({}));
-      setLinkResults((prev) => ({ ...prev, [itemId]: j.contacts ?? [] }));
+      setLinkResults((prev) => ({ ...prev, [itemId]: j.results ?? [] }));
     }
   }
 
