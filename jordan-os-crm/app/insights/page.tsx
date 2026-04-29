@@ -833,6 +833,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
             </button>
           ))}
           <button className="btn" onClick={fetchAll}>Refresh</button>
+          <a className="btn" href="/reports">Reports</a>
         </div>
       </div>
 

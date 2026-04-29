@@ -86,17 +86,19 @@ type RefAskOpportunity = {
   reason: string;
 };
 
-type Timeframe = "ytd" | "trailing12" | "trailing3";
+type Timeframe = "quarter" | "ytd" | "trailing12" | "trailing24" | "all";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function loadDailyGoal(uid?: string): number {
+async function loadDailyGoal(uid: string): Promise<number> {
   try {
-    // Try uid-scoped key first, fall back to legacy
-    const key = uid ? `morning_rules_v1_${uid}` : "morning_rules_v1";
-    const raw = localStorage.getItem(key) ?? (uid ? localStorage.getItem("morning_rules_v1") : null);
-    if (!raw) return 5;
-    return (JSON.parse(raw) as { totalRecs?: number })?.totalRecs ?? 5;
+    const { data } = await supabase
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", uid)
+      .eq("key", "morning_rules")
+      .maybeSingle();
+    return (data?.value as { totalRecs?: number } | null)?.totalRecs ?? 5;
   } catch { return 5; }
 }
 
@@ -151,6 +153,47 @@ function fmt$(n: number): string {
   return `$${n.toLocaleString()}`;
 }
 
+// LA zip → neighborhood for generic "Los Angeles" addresses
+const LA_ZIP_NEIGHBORHOODS: Record<string, string> = {
+  "90004": "Koreatown", "90005": "Koreatown", "90006": "Koreatown",
+  "90012": "Downtown LA", "90013": "Downtown LA", "90014": "Downtown LA", "90015": "Downtown LA",
+  "90016": "West Adams", "90017": "Westlake",
+  "90019": "Mid-City", "90020": "Hancock Park", "90024": "Westwood",
+  "90025": "West LA", "90026": "Silver Lake", "90027": "Los Feliz",
+  "90028": "Hollywood", "90029": "East Hollywood", "90031": "Lincoln Heights",
+  "90032": "El Sereno", "90034": "Palms", "90035": "Beverlywood",
+  "90036": "Fairfax", "90038": "Hollywood", "90039": "Atwater Village",
+  "90041": "Eagle Rock", "90042": "Highland Park", "90043": "Leimert Park",
+  "90044": "South LA", "90045": "Westchester", "90046": "West Hollywood Hills",
+  "90047": "South LA", "90048": "West Hollywood", "90049": "Brentwood",
+  "90056": "Ladera Heights", "90057": "Westlake", "90058": "Vernon",
+  "90061": "South LA", "90062": "South LA", "90063": "East LA",
+  "90064": "Rancho Park", "90065": "Mt Washington", "90066": "Mar Vista",
+  "90067": "Century City", "90068": "Hollywood Hills", "90069": "West Hollywood",
+  "90071": "Downtown LA", "90073": "Brentwood", "90077": "Bel Air",
+  "90094": "Playa Vista", "90210": "Beverly Hills", "90211": "Beverly Hills",
+  "90212": "Beverly Hills", "90230": "Culver City", "90232": "Culver City",
+  "90245": "El Segundo", "90272": "Pacific Palisades", "90290": "Topanga",
+  "90291": "Venice", "90292": "Marina del Rey", "90293": "Playa del Rey",
+  "90401": "Santa Monica", "90402": "Santa Monica", "90403": "Santa Monica",
+  "90404": "Santa Monica", "90405": "Santa Monica",
+};
+
+function parseNeighborhoodFromAddress(address: string | null): string | null {
+  if (!address) return null;
+  const parts = address.split(",").map(s => s.trim());
+  if (parts.length < 2) return null;
+  // parts[1] is usually the city/neighborhood
+  const city = parts[1];
+  if (!city || city === "USA") return null;
+  // If it's a named district (not generic "Los Angeles"), use it directly
+  if (city !== "Los Angeles") return city;
+  // For generic LA, try zip-based lookup
+  const zipMatch = address.match(/\b(\d{5})\b/);
+  if (zipMatch) return LA_ZIP_NEIGHBORHOODS[zipMatch[1]] ?? "Los Angeles";
+  return "Los Angeles";
+}
+
 function dealGci(d: Deal): number {
   const price = d.price ?? 0;
   const pct = d.commission_pct ?? 2.5;
@@ -162,11 +205,14 @@ function dealProjectedValue(d: Deal): number {
   return d.budget_max ?? d.price ?? 0;
 }
 
-function timeframeCutoff(tf: Timeframe): Date {
+function timeframeCutoff(tf: Timeframe): Date | null {
   const now = new Date();
+  if (tf === "all") return null;
   if (tf === "ytd") return new Date(now.getFullYear(), 0, 1);
+  if (tf === "quarter") { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d; }
   if (tf === "trailing12") { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d; }
-  const d = new Date(now); d.setMonth(d.getMonth() - 3); return d;
+  if (tf === "trailing24") { const d = new Date(now); d.setFullYear(d.getFullYear() - 2); return d; }
+  return null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -174,8 +220,13 @@ function timeframeCutoff(tf: Timeframe): Date {
 export default function InsightsPage() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<string | null>(null);
   const [dailyGoal, setDailyGoal] = useState(5);
   const [timeframe, setTimeframe] = useState<Timeframe>("ytd");
+  const TF_LABELS: Record<Timeframe, string> = {
+    quarter: "Quarter", ytd: "YTD", trailing12: "Last 12 Months", trailing24: "Last 2 Years", all: "All Time",
+  };
 
   // Accountability state
   const [out7, setOut7] = useState(0);
@@ -195,7 +246,7 @@ export default function InsightsPage() {
   const [refOpportunities, setRefOpportunities] = useState<RefAskOpportunity[]>([]);
   const [loggingAsk, setLoggingAsk] = useState<string | null>(null);
   const [loggedAskIds, setLoggedAskIds] = useState<Set<string>>(new Set());
-  const [refSources, setRefSources] = useState<RefSourceRow[]>([]);
+  // refSources is derived via useMemo below (timeframe-aware)
   const [contactsTotal, setContactsTotal] = useState(0);
   const [aClientsTotal, setAClientsTotal] = useState(0);
   const [aClientsDueOrOverdue, setAClientsDueOrOverdue] = useState(0);
@@ -231,6 +282,7 @@ export default function InsightsPage() {
     // Closed deals: filter by close_date; fall back to created_at if close_date missing
     const closed = allDeals.filter(d => {
       if (d.pipeline_status !== "past_client") return false;
+      if (!cutoff) return true;
       const dateStr = d.close_date || d.created_at;
       return new Date(dateStr) >= cutoff;
     });
@@ -267,7 +319,9 @@ export default function InsightsPage() {
     // Geographic distribution (all active + closed deals)
     const neighborhoodMap = new Map<string, { count: number; gci: number }>();
     for (const d of [...active, ...closed]) {
-      const n = d.neighborhood?.trim() || null;
+      // Use DB neighborhood if set; otherwise parse city from address string
+      // Address format from Google Places: "123 Main St, Sherman Oaks, CA 91423, USA"
+      const n = d.neighborhood?.trim() || parseNeighborhoodFromAddress(d.address) || null;
       if (!n) continue;
       const existing = neighborhoodMap.get(n) ?? { count: 0, gci: 0 };
       existing.count++;
@@ -327,6 +381,38 @@ export default function InsightsPage() {
       catCounts, developerCount, growthByMonth,
     };
   }, [allDeals, allContacts, timeframe]);
+
+  // ── Top referral sources — timeframe-filtered ────────────────────────────────
+  const refSources = useMemo(() => {
+    const cutoff = timeframeCutoff(timeframe);
+    const sourceMap = new Map<string, RefSourceRow>();
+    for (const d of allDeals) {
+      const src = d.referral_source as any;
+      if (!src?.id) continue;
+      const isPastClient = d.pipeline_status === "past_client";
+      if (isPastClient && cutoff) {
+        const dateStr = d.close_date || d.created_at;
+        if (new Date(dateStr) < cutoff) continue;
+      }
+      const existing = sourceMap.get(src.id) ?? {
+        contact_id: src.id, display_name: src.display_name, category: src.category ?? null,
+        deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0,
+        closed_gci: 0, pipeline_gci: 0,
+      };
+      existing.deals_total++;
+      const gci = dealGci(d);
+      if (isPastClient) {
+        existing.deals_closed++;
+        existing.closed_value += d.price ?? 0;
+        existing.closed_gci += gci;
+      } else {
+        existing.pipeline_value += dealProjectedValue(d);
+        existing.pipeline_gci += gci;
+      }
+      sourceMap.set(src.id, existing);
+    }
+    return [...sourceMap.values()].sort((a, b) => (b.closed_gci + b.pipeline_gci) - (a.closed_gci + a.pipeline_gci));
+  }, [allDeals, timeframe]);
 
   // ── Quick insights (accountability-focused, no day-gating) ───────────────────
   const quickInsights = useMemo(() => {
@@ -575,30 +661,7 @@ export default function InsightsPage() {
       const deals: Deal[] = pj.deals ?? [];
       setAllDeals(deals);
 
-      // Referral source ROI
-      const sourceMap = new Map<string, RefSourceRow>();
-      for (const d of deals) {
-        const src = d.referral_source as any;
-        if (!src?.id) continue;
-        const existing = sourceMap.get(src.id) ?? {
-          contact_id: src.id, display_name: src.display_name, category: src.category ?? null,
-          deals_total: 0, deals_closed: 0, pipeline_value: 0, closed_value: 0,
-          closed_gci: 0, pipeline_gci: 0,
-        };
-        existing.deals_total++;
-        const gci = dealGci(d);
-        if (d.pipeline_status === "past_client") {
-          existing.deals_closed++;
-          existing.closed_value += d.price ?? 0;
-          existing.closed_gci += gci;
-        } else {
-          existing.pipeline_value += dealProjectedValue(d);
-          existing.pipeline_gci += gci;
-        }
-        sourceMap.set(src.id, existing);
-      }
-      const sorted = [...sourceMap.values()].sort((a, b) => (b.closed_gci + b.pipeline_gci) - (a.closed_gci + a.pipeline_gci));
-      setRefSources(sorted);
+      // refSources is now a useMemo derived from allDeals + timeframe
     }
 
     const [refAskRaw, closedDealRaw] = await Promise.all([
@@ -650,7 +713,7 @@ export default function InsightsPage() {
     try {
       const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, sourceByCategory, totalSourced, neighborhoods, developerCount, priceBuckets } = bizMetrics;
 
-      const tfLabel = timeframe === "ytd" ? "YTD" : timeframe === "trailing12" ? "trailing 12 months" : "trailing 3 months";
+      const tfLabel = TF_LABELS[timeframe];
 
       const srcLines = Object.entries(sourceByCategory)
         .map(([k, v]) => `${k}: ${v.count} deals (${Math.round(v.count / Math.max(totalSourced, 1) * 100)}%, GCI ${fmt$(v.gci)})`)
@@ -705,7 +768,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
       const { data } = await supabase.auth.getSession();
       if (!alive) return;
       if (!data.session) { window.location.href = "/login"; return; }
-      if (typeof window !== "undefined") setDailyGoal(loadDailyGoal(data.session.user.id));
+      setDailyGoal(await loadDailyGoal(data.session.user.id));
       setReady(true);
       await fetchAll();
     };
@@ -744,7 +807,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
 
   const { closedGci, projectedGci, closedCount, activeCount, buyers, sellers, avgClosePrice, priceBuckets, neighborhoods, sourceByCategory, totalSourced, catCounts, developerCount, growthByMonth } = bizMetrics;
 
-  const tfLabel = { ytd: "YTD", trailing12: "Trailing 12mo", trailing3: "Trailing Quarter" }[timeframe];
+  const tfLabel = TF_LABELS[timeframe];
 
   const maxGrowth = Math.max(...growthByMonth.map(m => m.count), 1);
 
@@ -759,17 +822,18 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
           </div>
         </div>
         <div className="row">
-          {(["ytd", "trailing12", "trailing3"] as Timeframe[]).map(tf => (
+          {(["quarter", "ytd", "trailing12", "trailing24", "all"] as Timeframe[]).map(tf => (
             <button
               key={tf}
               className={`btn${timeframe === tf ? " btnPrimary" : ""}`}
               style={{ fontSize: 12 }}
               onClick={() => { setTimeframe(tf); setAiBrief(null); }}
             >
-              {{ ytd: "YTD", trailing12: "12mo", trailing3: "Quarter" }[tf]}
+              {TF_LABELS[tf]}
             </button>
           ))}
           <button className="btn" onClick={fetchAll}>Refresh</button>
+          <a className="btn" href="/reports">Reports</a>
         </div>
       </div>
 
@@ -876,10 +940,29 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
 
       {/* ── Geographic Distribution ──────────────────────────────────────────── */}
       <div className="card cardPad">
-        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Geographic distribution</div>
-        <div className="subtle" style={{ fontSize: 12, marginBottom: 14 }}>Active + closed deals by neighborhood (auto-extracted from address)</div>
+        <div className="rowBetween" style={{ alignItems: "flex-start", marginBottom: 4 }}>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>Geographic distribution</div>
+          <button
+            className="btn"
+            style={{ fontSize: 11, padding: "3px 10px" }}
+            disabled={backfilling}
+            onClick={async () => {
+              setBackfilling(true);
+              setBackfillResult(null);
+              const res = await fetch("/api/pipeline/backfill-neighborhoods", { method: "POST" });
+              const j = await res.json().catch(() => ({}));
+              setBackfillResult(res.ok ? `Updated ${j.updated} of ${j.total} deals` : (j.error ?? "Failed"));
+              setBackfilling(false);
+              if (res.ok && j.updated > 0) window.location.reload();
+            }}
+          >
+            {backfilling ? "Geocoding…" : "Backfill neighborhoods"}
+          </button>
+        </div>
+        <div className="subtle" style={{ fontSize: 12, marginBottom: backfillResult ? 6 : 14 }}>Active + closed deals by neighborhood — parsed from address when not explicitly set</div>
+        {backfillResult && <div style={{ fontSize: 12, color: "#0b6b2a", marginBottom: 10 }}>{backfillResult}</div>}
         {neighborhoods.length === 0 ? (
-          <div className="subtle" style={{ fontSize: 13 }}>No neighborhood data yet — neighborhoods are captured when you select an address via autocomplete on deals.</div>
+          <div className="subtle" style={{ fontSize: 13 }}>No neighborhood data yet. Click "Backfill neighborhoods" to geocode existing deals, or add addresses via autocomplete on the Pipeline page.</div>
         ) : (
           <div className="stack" style={{ gap: 8 }}>
             {neighborhoods.map((n, i) => {
