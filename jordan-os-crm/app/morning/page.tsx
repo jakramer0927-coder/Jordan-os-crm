@@ -39,9 +39,11 @@ type Touch = {
 type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
+  last_outbound_summary: string | null;
   days_since_outbound: number | null;
   last_inbound_at: string | null;
   active_deals: number;
+  referral_gci: number;
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
@@ -265,145 +267,49 @@ function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
   return "text";
 }
 
-function firstName(displayName: string): string {
-  const first = (displayName || "").trim().split(/\s+/)[0] || "";
-  return first || "there";
-}
 
-function choose<T>(arr: T[], fallback: T): T {
-  if (!arr || arr.length === 0) return fallback;
-  return arr[Math.floor(Math.random() * arr.length)] || fallback;
-}
-
-function buildDraftWithVoice(opts: {
-  contact: ContactWithLastOutbound;
-  intent: TouchIntent;
-  channel: Touch["channel"];
-  voice: VoiceProfile | null;
-}): string {
-  const c = opts.contact;
+function contextTalkingPoint(c: Recommendation): string {
   const cat = (c.category || "").toLowerCase();
-  const name = firstName(c.display_name);
+  const t = (c.tier || "").toUpperCase();
+  const anns = dealAnniversaries(c);
+  const ms = upcomingMilestones(c);
 
-  const openers = [
-    `Hey ${name} — quick one.`,
-    `Hey ${name} — quick check-in.`,
-    `Hi ${name} — quick note.`,
-    `Hey ${name} — hope you're doing well.`,
-  ];
-
-  const softCloses = [
-    "No rush — just let me know.",
-    "If helpful, happy to share more.",
-    "Happy to be a sounding board.",
-    "Keep me posted when you have a sec.",
-  ];
-
-  const agentValues = [
-    "I've got an active buyer in the market right now and I'm keeping my eyes open.",
-    "I'm seeing a little shift in buyer sensitivity — curious what you're noticing.",
-    "I'm comparing a few pockets right now — always interested in anything quiet/off-market.",
-  ];
-
-  const agentAsks = [
-    "Do you have anything coming up (or off-market) that I should know about?",
-    "What are you seeing right now on pricing + demand?",
-    "Any inventory you're watching that feels like it's about to trade?",
-  ];
-
-  const clientValues = [
-    "Just checking in and making sure everything's going smoothly on your end.",
-    "Wanted to say hi — it's been a minute and I figured I'd reach out.",
-    "Quick pulse check — I've been watching the market closely and thought of you.",
-  ];
-
-  const clientAsks = [
-    "Anything real-estate related on your mind right now?",
-    "Any changes in your plans this spring?",
-    "Want me to keep an eye out for anything specific, or run a quick value check?",
-  ];
-
-  const devValues = [
-    "Checking in — curious what you're seeing on absorption + buyer feedback right now.",
-    "Wanted to reconnect and see what's in the pipeline.",
-    "Quick note — I'm tracking a few new-build comps and would love to compare notes.",
-  ];
-
-  const devAsks = [
-    "Anything upcoming that fits the current moment?",
-    "What's your read on pricing strategy this quarter?",
-    "Are you seeing more pushback on finishes or layout lately?",
-  ];
-
-  const vendorValues = [
-    "Quick check-in — hope business is good on your side.",
-    "Wanted to stay in touch — I've got a few projects moving and may need help soon.",
-    "Quick note — I'm tightening up my vendor bench and making sure I've got the right partners queued.",
-  ];
-
-  const vendorAsks = [
-    "What's your schedule look like over the next couple weeks?",
-    "Any changes to pricing or lead times I should be aware of?",
-    "If I loop you in on something, what's the fastest way to get it on your radar?",
-  ];
-
-  const sphereValues = [
-    "Just wanted to check in — hope everything's going well on your end.",
-    "Been thinking about you — wanted to say hi and stay in touch.",
-    "Quick note to reconnect — it's been a while and I've been meaning to reach out.",
-  ];
-
-  const sphereAsks = [
-    "How's life treating you?",
-    "Anything new and exciting happening for you?",
-    "Would love to grab coffee or a quick call whenever works for you.",
-  ];
-
-  const voice = opts.voice;
-  let opener = choose(openers, `Hey ${name} — quick one.`);
-  let close = choose(softCloses, "No rush — just let me know.");
-
-  if (voice?.topPhrases?.some((p) => p.phrase === "no rush")) close = "No rush — just let me know.";
-  if (voice?.topPhrases?.some((p) => p.phrase === "quick one")) opener = `Hey ${name} — quick one.`;
-
-  let value = "";
-  let ask = "";
-
+  if (anns.length > 0) {
+    const a = anns[0];
+    return `Acknowledge the ${a.years}-year anniversary${a.daysAway === 0 ? " — reach out today" : ` in ${a.daysAway}d`} — ask how they're enjoying the home.`;
+  }
+  if (ms.some(m => m.label === "Birthday")) {
+    return "Simple birthday message — no real estate, just a warm personal touch.";
+  }
+  if (c.active_deals > 0) {
+    return cat === "client"
+      ? "Active deal in progress — market update and timeline check-in."
+      : "Active deal moving — check on status and any co-op opportunities.";
+  }
+  if (c.referral_gci > 0) {
+    return `Referral source with $${(c.referral_gci / 1000).toFixed(0)}k in past GCI — thank them and ask who in their world might need help next.`;
+  }
   if (cat === "agent") {
-    value = choose(agentValues, agentValues[0]);
-    ask = choose(agentAsks, agentAsks[0]);
-  } else if (cat === "developer") {
-    value = choose(devValues, devValues[0]);
-    ask = choose(devAsks, devAsks[0]);
-  } else if (cat === "vendor") {
-    value = choose(vendorValues, vendorValues[0]);
-    ask = choose(vendorAsks, vendorAsks[0]);
-  } else if (cat === "sphere") {
-    value = choose(sphereValues, sphereValues[0]);
-    ask = choose(sphereAsks, sphereAsks[0]);
-  } else {
-    value = choose(clientValues, clientValues[0]);
-    ask = choose(clientAsks, clientAsks[0]);
+    return t === "A"
+      ? "Ask what they're seeing on listings and buyer demand — position yourself for a co-op."
+      : "Quick market pulse check — stay top of mind for future co-ops and referrals.";
   }
-
-  if (opts.intent === "referral_ask") {
-    ask =
-      cat === "agent"
-        ? "If you bump into anyone who needs a strong agent on the buy side, I'd really appreciate a quick intro."
-        : "If anyone comes up in your world who needs help buying or selling, I'd be grateful for an intro.";
+  if (cat === "developer") {
+    return "Ask about absorption, buyer feedback, and what's coming up — offer comp analysis if useful.";
   }
-
-  if (opts.intent === "review_ask") {
-    ask =
-      "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you'd think.";
+  if (cat === "sphere" && (c.days_since_outbound ?? 999) > 90) {
+    return "Long overdue — genuine personal check-in, no agenda. Just reconnect.";
   }
-
-  const isText = opts.channel === "text";
-  const body = isText
-    ? `${opener} ${value} ${ask} ${close}`
-    : `${opener}\n\n${value}\n${ask}\n\n${close}`;
-
-  return body.trim();
+  if (cat === "client" && t === "A") {
+    return "A-Client — personal check-in with a value-add offer: market update, vendor referral, or equity snapshot.";
+  }
+  if (cat === "client") {
+    return "Past client check-in — ask how they're enjoying the home and if anything real estate is on their mind.";
+  }
+  if (c.days_since_outbound == null) {
+    return "First touch — introduce yourself genuinely and find common ground before any ask.";
+  }
+  return "Check in genuinely — ask about them first, real estate second.";
 }
 
 type Recommendation = ContactWithLastOutbound & {
@@ -516,13 +422,6 @@ export default function MorningPage() {
   const [lockedIdsLoaded, setLockedIdsLoaded] = useState(false);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  // AI-generated drafts keyed by contact ID
-  const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
-  const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
-  // Per-contact intent selection
-  const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
-  // Copy-to-clipboard feedback
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Pipeline momentum alerts
   const [staleDealAlerts, setStaleDealAlerts] = useState<PipelineDeal[]>([]);
@@ -929,6 +828,13 @@ export default function MorningPage() {
       if (t === "A") score += 20;
       if (t === "B") score += 10;
 
+      // Referral attribution: past referral GCI is a strong signal this contact is worth nurturing
+      // $100k in referral GCI → +15, capped at +60
+      if (c.referral_gci > 0) {
+        score += Math.min(60, Math.floor(c.referral_gci / 100000) * 15);
+        reasons.push(`Referral source — $${(c.referral_gci / 1000).toFixed(0)}k in closed GCI`);
+      }
+
       // Anniversary boost — strong reason to reach out even if recently touched
       if (anns.length > 0) {
         const daysAway = anns[0].daysAway;
@@ -977,8 +883,9 @@ export default function MorningPage() {
       }
     }
 
-    // Fill remaining slots — only contacts at least 50% through their cadence
+    // Fill remaining slots — only contacts at least 30% through their cadence
     // (or never contacted). Never pad with recently-touched people.
+    // D-tier contacts fill last — only after all A/B/C/untiered slots are exhausted.
     // Category diversity cap: max 2 per category in fill phase.
     const fillCategoryCounts: Record<string, number> = {};
     for (const c of top) {
@@ -986,18 +893,29 @@ export default function MorningPage() {
       fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
     }
 
-    for (const c of scored) {
-      if (top.length >= totalRecs) break;
-      if (used.has(c.id)) continue;
-      if (c.score === -999) continue; // recency-protected
+    const isEligibleFill = (c: Recommendation) => {
+      if (used.has(c.id)) return false;
+      if (c.score === -999) return false; // recency-protected
       const isNeverContacted = c.days_since_outbound == null;
-      const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.5;
-      if (!isNeverContacted && !isApproachingDue) continue;
-      const cat = (c.category || "other").toLowerCase();
-      if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
-      top.push(c);
-      used.add(c.id);
-      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+      const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.3;
+      return isNeverContacted || isApproachingDue;
+    };
+
+    // Non-D-tier fill first, then D-tier — enforces hard ordering so D-tier only appears
+    // when no higher-value contacts remain
+    const nonDPool = scored.filter(c => isEligibleFill(c) && (c.tier || "").toUpperCase() !== "D");
+    const dPool = scored.filter(c => isEligibleFill(c) && (c.tier || "").toUpperCase() === "D");
+
+    for (const pool of [nonDPool, dPool]) {
+      for (const c of pool) {
+        if (top.length >= totalRecs) break;
+        const cat = (c.category || "other").toLowerCase();
+        if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
+        top.push(c);
+        used.add(c.id);
+        fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+      }
+      if (top.length >= totalRecs) break;
     }
 
     return top;
@@ -1020,68 +938,6 @@ export default function MorningPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recs, lockedIds, lockedIdsLoaded]);
-
-  async function generateDrafts(contacts: Recommendation[]) {
-    const pending = new Set(contacts.map((c) => c.id));
-    setDraftsGenerating(pending);
-    await Promise.all(
-      contacts.map(async (c) => {
-        try {
-          const res = await fetch("/api/voice/draft", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contact_id: c.id,
-              channel: c.suggested_channel,
-              intent: "check_in",
-              length: "short",
-            }),
-          });
-          const j = await res.json();
-          if (res.ok && j.draft) {
-            setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
-          }
-        } catch {
-          // silently fall back to template
-        } finally {
-          setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
-        }
-      })
-    );
-  }
-
-  async function regenerateDraft(c: Recommendation, intent?: TouchIntent) {
-    const resolvedIntent = intent ?? draftIntents[c.id] ?? "check_in";
-    setDraftsGenerating((prev) => new Set(prev).add(c.id));
-    try {
-      const res = await fetch("/api/voice/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contact_id: c.id,
-          channel: c.suggested_channel,
-          intent: resolvedIntent,
-          length: "short",
-        }),
-      });
-      const j = await res.json();
-      if (res.ok && j.draft) {
-        setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
-    }
-  }
-
-  async function copyDraft(contactId: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(contactId);
-      setTimeout(() => setCopiedId((prev) => (prev === contactId ? null : prev)), 2000);
-    } catch { /* ignore */ }
-  }
 
   // Stable display list — always shows the same contacts from first load today.
   // Falls back to the full contacts array for any locked contact that has since
@@ -1611,92 +1467,30 @@ export default function MorningPage() {
                       ))}
                     </div>
 
-                    {(() => {
-                      const generating = draftsGenerating.has(c.id);
-                      const draft = aiDrafts[c.id];
-                      if (!generating && !draft) return (
-                        <button
-                          className="btn"
-                          style={{ fontSize: 11, padding: "1px 8px", marginTop: 10 }}
-                          onClick={() => regenerateDraft(c)}
-                        >
-                          Draft
-                        </button>
-                      );
-                      return (
-                        <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                          <div className="rowBetween" style={{ marginBottom: 8 }}>
-                            <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                              <span className="small muted bold">AI draft</span>
-                              {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
-                                const active = (draftIntents[c.id] ?? "check_in") === intent;
-                                return (
-                                  <button
-                                    key={intent}
-                                    className="btn"
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "1px 8px",
-                                      fontWeight: active ? 900 : 400,
-                                      background: active ? "var(--ink)" : undefined,
-                                      color: active ? "var(--paper)" : undefined,
-                                    }}
-                                    onClick={() => {
-                                      setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
-                                      regenerateDraft(c, intent);
-                                    }}
-                                    disabled={generating}
-                                  >
-                                    {intent.replace("_", " ")}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <div className="row" style={{ gap: 4 }}>
-                              {!generating && draft && (
-                                <button
-                                  className="btn"
-                                  style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
-                                  onClick={() => copyDraft(c.id, draft)}
-                                >
-                                  {copiedId === c.id ? "Copied ✓" : "Copy"}
-                                </button>
-                              )}
-                              <button
-                                className="btn"
-                                style={{ fontSize: 11, padding: "1px 8px" }}
-                                disabled={generating}
-                                onClick={() => regenerateDraft(c)}
-                              >
-                                {generating ? "…" : "Regenerate"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {generating ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 2 }}>
-                              {[0.85, 0.65, 0.45].map((w, i) => (
-                                <div
-                                  key={i}
-                                  style={{
-                                    height: 13,
-                                    borderRadius: 4,
-                                    width: `${w * 100}%`,
-                                    background: "rgba(0,0,0,.08)",
-                                    animation: "pulse 1.4s ease-in-out infinite",
-                                    animationDelay: `${i * 0.15}s`,
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14, animation: "fadeIn .3s ease" }}>
-                              {draft}
-                            </div>
-                          )}
+                    {/* Context brief — instant, no API call */}
+                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(18,18,18,.4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Talking point
+                      </div>
+                      <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink)" }}>
+                        {contextTalkingPoint(c)}
+                      </div>
+                      {c.last_outbound_summary && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(18,18,18,.5)", borderTop: "1px solid rgba(0,0,0,.06)", paddingTop: 8 }}>
+                          <span style={{ fontWeight: 700 }}>Last note:</span>{" "}
+                          {c.last_outbound_summary.length > 120
+                            ? `${c.last_outbound_summary.slice(0, 120)}…`
+                            : c.last_outbound_summary}
                         </div>
-                      );
-                    })()}
+                      )}
+                      {c.referral_gci > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
+                            Referral source — ${(c.referral_gci / 1000).toFixed(0)}k in closed GCI
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div style={{ width: isMobile ? "100%" : 280, display: "grid", gap: 8 }}>

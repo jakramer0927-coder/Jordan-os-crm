@@ -27,8 +27,8 @@ export async function GET() {
 
     const contactIds = contacts.map((c: any) => c.id);
 
-    // Attach active deal count, milestones, and closed deal dates in parallel
-    const [dealRows, milestoneRows, closedDealRows] = await Promise.all([
+    // Attach active deal count, milestones, closed deal dates, and referral GCI in parallel
+    const [dealRows, milestoneRows, closedDealRows, referralRows] = await Promise.all([
       contactIds.length > 0
         ? supabaseAdmin.from("deals").select("contact_id").eq("user_id", uid)
             .not("status", "in", '("closed_won","closed_lost")').in("contact_id", contactIds)
@@ -41,6 +41,12 @@ export async function GET() {
         ? supabaseAdmin.from("deals").select("contact_id, address, close_date")
             .eq("user_id", uid).eq("status", "closed_won")
             .not("close_date", "is", null).in("contact_id", contactIds)
+        : Promise.resolve({ data: [] }),
+      contactIds.length > 0
+        ? supabaseAdmin.from("deals").select("referral_source_contact_id, price")
+            .eq("user_id", uid).eq("status", "closed_won")
+            .not("referral_source_contact_id", "is", null)
+            .in("referral_source_contact_id", contactIds)
         : Promise.resolve({ data: [] }),
     ]);
 
@@ -60,10 +66,17 @@ export async function GET() {
       closedDealMap[row.contact_id].push({ address: row.address, close_date: row.close_date });
     }
 
+    const referralGciMap: Record<string, number> = {};
+    for (const row of (referralRows as any).data ?? []) {
+      const id = row.referral_source_contact_id;
+      referralGciMap[id] = (referralGciMap[id] ?? 0) + (row.price ?? 0);
+    }
+
     const contactsWithDeals = contacts.map((c: any) => ({
       ...c,
       active_deals: dealMap[c.id] ?? 0,
       closed_deal_dates: closedDealMap[c.id] ?? [],
+      referral_gci: referralGciMap[c.id] ?? 0,
       ...(milestoneMap[c.id] ?? { birthday: null, close_anniversary: null, move_in_date: null }),
     }));
 

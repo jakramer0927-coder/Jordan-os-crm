@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 const supabase = createSupabaseBrowserClient();
 
@@ -39,9 +39,11 @@ type Touch = {
 type ContactWithLastOutbound = Contact & {
   last_outbound_at: string | null;
   last_outbound_channel: Touch["channel"] | null;
+  last_outbound_summary: string | null;
   days_since_outbound: number | null;
   last_inbound_at: string | null;
   active_deals: number;
+  referral_gci: number;
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
@@ -218,10 +220,12 @@ function cadenceDays(category: string, tier: string | null): number {
     if (t === "A") return 30;
     if (t === "B") return 60;
     if (t === "C") return 90;
+    if (t === "D") return 150;
     return 60;
   }
   if (cat === "agent") {
     if (t === "A") return 30;
+    if (t === "D") return 150;
     return 60;
   }
   if (cat === "developer") return 60;
@@ -229,6 +233,7 @@ function cadenceDays(category: string, tier: string | null): number {
   if (cat === "sphere") {
     if (t === "A") return 30;
     if (t === "B") return 60;
+    if (t === "D") return 150;
     return 90;
   }
   return 60;
@@ -262,145 +267,49 @@ function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
   return "text";
 }
 
-function firstName(displayName: string): string {
-  const first = (displayName || "").trim().split(/\s+/)[0] || "";
-  return first || "there";
-}
 
-function choose<T>(arr: T[], fallback: T): T {
-  if (!arr || arr.length === 0) return fallback;
-  return arr[Math.floor(Math.random() * arr.length)] || fallback;
-}
-
-function buildDraftWithVoice(opts: {
-  contact: ContactWithLastOutbound;
-  intent: TouchIntent;
-  channel: Touch["channel"];
-  voice: VoiceProfile | null;
-}): string {
-  const c = opts.contact;
+function contextTalkingPoint(c: Recommendation): string {
   const cat = (c.category || "").toLowerCase();
-  const name = firstName(c.display_name);
+  const t = (c.tier || "").toUpperCase();
+  const anns = dealAnniversaries(c);
+  const ms = upcomingMilestones(c);
 
-  const openers = [
-    `Hey ${name} — quick one.`,
-    `Hey ${name} — quick check-in.`,
-    `Hi ${name} — quick note.`,
-    `Hey ${name} — hope you're doing well.`,
-  ];
-
-  const softCloses = [
-    "No rush — just let me know.",
-    "If helpful, happy to share more.",
-    "Happy to be a sounding board.",
-    "Keep me posted when you have a sec.",
-  ];
-
-  const agentValues = [
-    "I've got an active buyer in the market right now and I'm keeping my eyes open.",
-    "I'm seeing a little shift in buyer sensitivity — curious what you're noticing.",
-    "I'm comparing a few pockets right now — always interested in anything quiet/off-market.",
-  ];
-
-  const agentAsks = [
-    "Do you have anything coming up (or off-market) that I should know about?",
-    "What are you seeing right now on pricing + demand?",
-    "Any inventory you're watching that feels like it's about to trade?",
-  ];
-
-  const clientValues = [
-    "Just checking in and making sure everything's going smoothly on your end.",
-    "Wanted to say hi — it's been a minute and I figured I'd reach out.",
-    "Quick pulse check — I've been watching the market closely and thought of you.",
-  ];
-
-  const clientAsks = [
-    "Anything real-estate related on your mind right now?",
-    "Any changes in your plans this spring?",
-    "Want me to keep an eye out for anything specific, or run a quick value check?",
-  ];
-
-  const devValues = [
-    "Checking in — curious what you're seeing on absorption + buyer feedback right now.",
-    "Wanted to reconnect and see what's in the pipeline.",
-    "Quick note — I'm tracking a few new-build comps and would love to compare notes.",
-  ];
-
-  const devAsks = [
-    "Anything upcoming that fits the current moment?",
-    "What's your read on pricing strategy this quarter?",
-    "Are you seeing more pushback on finishes or layout lately?",
-  ];
-
-  const vendorValues = [
-    "Quick check-in — hope business is good on your side.",
-    "Wanted to stay in touch — I've got a few projects moving and may need help soon.",
-    "Quick note — I'm tightening up my vendor bench and making sure I've got the right partners queued.",
-  ];
-
-  const vendorAsks = [
-    "What's your schedule look like over the next couple weeks?",
-    "Any changes to pricing or lead times I should be aware of?",
-    "If I loop you in on something, what's the fastest way to get it on your radar?",
-  ];
-
-  const sphereValues = [
-    "Just wanted to check in — hope everything's going well on your end.",
-    "Been thinking about you — wanted to say hi and stay in touch.",
-    "Quick note to reconnect — it's been a while and I've been meaning to reach out.",
-  ];
-
-  const sphereAsks = [
-    "How's life treating you?",
-    "Anything new and exciting happening for you?",
-    "Would love to grab coffee or a quick call whenever works for you.",
-  ];
-
-  const voice = opts.voice;
-  let opener = choose(openers, `Hey ${name} — quick one.`);
-  let close = choose(softCloses, "No rush — just let me know.");
-
-  if (voice?.topPhrases?.some((p) => p.phrase === "no rush")) close = "No rush — just let me know.";
-  if (voice?.topPhrases?.some((p) => p.phrase === "quick one")) opener = `Hey ${name} — quick one.`;
-
-  let value = "";
-  let ask = "";
-
+  if (anns.length > 0) {
+    const a = anns[0];
+    return `Acknowledge the ${a.years}-year anniversary${a.daysAway === 0 ? " — reach out today" : ` in ${a.daysAway}d`} — ask how they're enjoying the home.`;
+  }
+  if (ms.some(m => m.label === "Birthday")) {
+    return "Simple birthday message — no real estate, just a warm personal touch.";
+  }
+  if (c.active_deals > 0) {
+    return cat === "client"
+      ? "Active deal in progress — market update and timeline check-in."
+      : "Active deal moving — check on status and any co-op opportunities.";
+  }
+  if (c.referral_gci > 0) {
+    return `Referral source with $${(c.referral_gci / 1000).toFixed(0)}k in past GCI — thank them and ask who in their world might need help next.`;
+  }
   if (cat === "agent") {
-    value = choose(agentValues, agentValues[0]);
-    ask = choose(agentAsks, agentAsks[0]);
-  } else if (cat === "developer") {
-    value = choose(devValues, devValues[0]);
-    ask = choose(devAsks, devAsks[0]);
-  } else if (cat === "vendor") {
-    value = choose(vendorValues, vendorValues[0]);
-    ask = choose(vendorAsks, vendorAsks[0]);
-  } else if (cat === "sphere") {
-    value = choose(sphereValues, sphereValues[0]);
-    ask = choose(sphereAsks, sphereAsks[0]);
-  } else {
-    value = choose(clientValues, clientValues[0]);
-    ask = choose(clientAsks, clientAsks[0]);
+    return t === "A"
+      ? "Ask what they're seeing on listings and buyer demand — position yourself for a co-op."
+      : "Quick market pulse check — stay top of mind for future co-ops and referrals.";
   }
-
-  if (opts.intent === "referral_ask") {
-    ask =
-      cat === "agent"
-        ? "If you bump into anyone who needs a strong agent on the buy side, I'd really appreciate a quick intro."
-        : "If anyone comes up in your world who needs help buying or selling, I'd be grateful for an intro.";
+  if (cat === "developer") {
+    return "Ask about absorption, buyer feedback, and what's coming up — offer comp analysis if useful.";
   }
-
-  if (opts.intent === "review_ask") {
-    ask =
-      "Also — if you have 30 seconds, would you be open to leaving a quick review? It helps more than you'd think.";
+  if (cat === "sphere" && (c.days_since_outbound ?? 999) > 90) {
+    return "Long overdue — genuine personal check-in, no agenda. Just reconnect.";
   }
-
-  const isText = opts.channel === "text";
-  const body = isText
-    ? `${opener} ${value} ${ask} ${close}`
-    : `${opener}\n\n${value}\n${ask}\n\n${close}`;
-
-  return body.trim();
+  if (cat === "client" && t === "A") {
+    return "A-Client — personal check-in with a value-add offer: market update, vendor referral, or equity snapshot.";
+  }
+  if (cat === "client") {
+    return "Past client check-in — ask how they're enjoying the home and if anything real estate is on their mind.";
+  }
+  if (c.days_since_outbound == null) {
+    return "First touch — introduce yourself genuinely and find common ground before any ask.";
+  }
+  return "Check in genuinely — ask about them first, real estate second.";
 }
 
 type Recommendation = ContactWithLastOutbound & {
@@ -425,53 +334,64 @@ const DEFAULT_RULES: MorningRules = {
   minSphere: 0,
 };
 
-// Keys are scoped to uid so multiple agents on the same browser don't share settings.
-// Fall back to legacy unscoped key so existing data migrates automatically on first use.
-const LEGACY_RULES_KEY = "morning_rules_v1";
-const LEGACY_LOCK_KEY = "morning_lock_v1";
-const rulesKey = (uid: string) => `morning_rules_v1_${uid}`;
-const lockKey = (uid: string) => `morning_lock_v1_${uid}`;
-
-function todayDateString(): string {
+function todayIsoDate(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function loadLockedIds(uid: string): string[] | null {
+async function loadLockedIds(uid: string): Promise<string[] | null> {
+  const { data } = await supabase
+    .from("morning_locks")
+    .select("contact_ids")
+    .eq("user_id", uid)
+    .eq("lock_date", todayIsoDate())
+    .maybeSingle();
+  return (data?.contact_ids as string[] | null) ?? null;
+}
+
+async function saveLockedIds(uid: string, ids: string[]) {
+  await supabase.from("morning_locks").upsert(
+    { user_id: uid, lock_date: todayIsoDate(), contact_ids: ids, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,lock_date" }
+  );
+}
+
+async function clearLockedIds(uid: string) {
+  await supabase.from("morning_locks").delete().eq("user_id", uid).eq("lock_date", todayIsoDate());
+}
+
+const rulesLsKey = (uid: string) => `morning_rules_v2_${uid}`;
+
+async function loadRules(uid: string): Promise<MorningRules> {
   try {
-    const raw = localStorage.getItem(lockKey(uid)) ?? localStorage.getItem(LEGACY_LOCK_KEY);
-    if (!raw) return null;
-    const { date, ids } = JSON.parse(raw) as { date: string; ids: string[] };
-    if (date !== todayDateString()) return null;
-    return ids;
-  } catch {
-    return null;
-  }
-}
-
-function saveLockedIds(uid: string, ids: string[]) {
+    const { data } = await supabase
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", uid)
+      .eq("key", "morning_rules")
+      .maybeSingle();
+    if (data?.value) {
+      const rules = { ...DEFAULT_RULES, ...(data.value as Partial<MorningRules>) };
+      try { localStorage.setItem(rulesLsKey(uid), JSON.stringify(rules)); } catch {}
+      return rules;
+    }
+  } catch {}
+  // Fallback: localStorage cache
   try {
-    localStorage.setItem(lockKey(uid), JSON.stringify({ date: todayDateString(), ids }));
-  } catch { /* ignore */ }
+    const raw = localStorage.getItem(rulesLsKey(uid));
+    if (raw) return { ...DEFAULT_RULES, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_RULES;
 }
 
-function clearLockedIds(uid: string) {
-  try { localStorage.removeItem(lockKey(uid)); } catch { /* ignore */ }
-}
-
-function loadRules(uid: string): MorningRules {
-  try {
-    const raw = localStorage.getItem(rulesKey(uid)) ?? localStorage.getItem(LEGACY_RULES_KEY);
-    if (!raw) return DEFAULT_RULES;
-    const parsed = JSON.parse(raw) as Partial<MorningRules>;
-    return { ...DEFAULT_RULES, ...parsed };
-  } catch {
-    return DEFAULT_RULES;
-  }
-}
-
-function saveRules(uid: string, r: MorningRules) {
-  try { localStorage.setItem(rulesKey(uid), JSON.stringify(r)); } catch { /* ignore */ }
+async function saveRules(uid: string, r: MorningRules) {
+  // Write to localStorage immediately — guarantees same-device persistence even if Supabase is slow
+  try { localStorage.setItem(rulesLsKey(uid), JSON.stringify(r)); } catch {}
+  // Write to Supabase for cross-device sync
+  await supabase.from("user_settings").upsert(
+    { user_id: uid, key: "morning_rules", value: r, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,key" }
+  );
 }
 
 export default function MorningPage() {
@@ -486,6 +406,7 @@ export default function MorningPage() {
   // voice
   const [voice, setVoice] = useState<VoiceProfile | null>(null);
   const [voiceLoaded, setVoiceLoaded] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
@@ -498,15 +419,9 @@ export default function MorningPage() {
 
   // stable list + completed tracking — persisted per calendar day (loaded after uid is known)
   const [lockedIds, setLockedIds] = useState<string[] | null>(null);
+  const [lockedIdsLoaded, setLockedIdsLoaded] = useState(false);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  // AI-generated drafts keyed by contact ID
-  const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
-  const [draftsGenerating, setDraftsGenerating] = useState<Set<string>>(new Set());
-  // Per-contact intent selection
-  const [draftIntents, setDraftIntents] = useState<Record<string, TouchIntent>>({});
-  // Copy-to-clipboard feedback
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Pipeline momentum alerts
   const [staleDealAlerts, setStaleDealAlerts] = useState<PipelineDeal[]>([]);
@@ -527,6 +442,15 @@ export default function MorningPage() {
   const [bulkSummary, setBulkSummary] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+
+  // prevents rulesReady effect from clearing the Supabase lock when rules load on init
+  const rulesSetFromInit = useRef(false);
+
+  // mobile
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileLogContact, setMobileLogContact] = useState<Recommendation | null>(null);
+  const swipeTouchStartX = useRef(0);
+  const swipeTouchStartY = useRef(0);
 
   // accountability strip
   const [todayCount, setTodayCount] = useState(0);
@@ -575,7 +499,7 @@ export default function MorningPage() {
 
     if (forceRefresh) {
       setLockedIds(null);
-      clearLockedIds(user.id);
+      await clearLockedIds(user.id);
     }
 
     // Fetch contacts+touches+counts, voice profile, sync status, follow-ups, and pipeline in parallel
@@ -609,6 +533,16 @@ export default function MorningPage() {
     setContacts((merged ?? []) as ContactWithLastOutbound[]);
     setTodayCount(tc ?? 0);
     setWtdCount(wc ?? 0);
+
+    // Pre-populate completedIds from contacts touched today so ✓ survives navigation
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const touchedToday = new Set(
+      ((merged ?? []) as ContactWithLastOutbound[])
+        .filter(c => c.last_outbound_at && new Date(c.last_outbound_at) >= todayStart)
+        .map(c => c.id)
+    );
+    if (touchedToday.size > 0) setCompletedIds(prev => new Set([...prev, ...touchedToday]));
 
     if (pipelineRes.ok) {
       const pj = await pipelineRes.json().catch(() => ({}));
@@ -680,6 +614,27 @@ export default function MorningPage() {
     setTouchSummary("");
     setTouchSource("manual");
     setTouchLink("");
+    if (isMobile) setMobileLogContact(c);
+  }
+
+  function closeMobileSheet() {
+    setMobileLogContact(null);
+    setLoggingFor(null);
+    setTouchSummary("");
+    setRemindOpen(false);
+  }
+
+  const handleCardTouchStart = useCallback((e: React.TouchEvent) => {
+    swipeTouchStartX.current = e.touches[0].clientX;
+    swipeTouchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  function handleCardTouchEnd(e: React.TouchEvent, c: Recommendation) {
+    const dx = e.changedTouches[0].clientX - swipeTouchStartX.current;
+    const dy = e.changedTouches[0].clientY - swipeTouchStartY.current;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) openLog(c); // left swipe → log
+    }
   }
 
   async function saveTouch() {
@@ -776,9 +731,16 @@ export default function MorningPage() {
       if (!alive) return;
       if (!user) return;
 
-      // Load uid-scoped localStorage values now that we have the uid
-      setRules(loadRules(user.id));
-      setLockedIds(loadLockedIds(user.id));
+      // Load persisted settings + today's lock from Supabase (cross-device)
+      const [savedRules, savedLock] = await Promise.all([
+        loadRules(user.id),
+        loadLockedIds(user.id),
+      ]);
+      if (!alive) return;
+      rulesSetFromInit.current = true; // prevent rulesReady effect from clearing the loaded lock
+      setRules(savedRules);
+      setLockedIds(savedLock);
+      setLockedIdsLoaded(true);
 
       setReady(true);
       await load();
@@ -796,6 +758,13 @@ export default function MorningPage() {
       sub.subscription.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
   const recs = useMemo<Recommendation[]>(() => {
@@ -859,6 +828,13 @@ export default function MorningPage() {
       if (t === "A") score += 20;
       if (t === "B") score += 10;
 
+      // Referral attribution: past referral GCI is a strong signal this contact is worth nurturing
+      // $100k in referral GCI → +15, capped at +60
+      if (c.referral_gci > 0) {
+        score += Math.min(60, Math.floor(c.referral_gci / 100000) * 15);
+        reasons.push(`Referral source — $${(c.referral_gci / 1000).toFixed(0)}k in closed GCI`);
+      }
+
       // Anniversary boost — strong reason to reach out even if recently touched
       if (anns.length > 0) {
         const daysAway = anns[0].daysAway;
@@ -907,8 +883,9 @@ export default function MorningPage() {
       }
     }
 
-    // Fill remaining slots — only contacts at least 50% through their cadence
+    // Fill remaining slots — only contacts at least 30% through their cadence
     // (or never contacted). Never pad with recently-touched people.
+    // D-tier contacts fill last — only after all A/B/C/untiered slots are exhausted.
     // Category diversity cap: max 2 per category in fill phase.
     const fillCategoryCounts: Record<string, number> = {};
     for (const c of top) {
@@ -916,120 +893,89 @@ export default function MorningPage() {
       fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
     }
 
-    for (const c of scored) {
-      if (top.length >= totalRecs) break;
-      if (used.has(c.id)) continue;
-      if (c.score === -999) continue; // recency-protected
+    const isEligibleFill = (c: Recommendation) => {
+      if (used.has(c.id)) return false;
+      if (c.score === -999) return false; // recency-protected
       const isNeverContacted = c.days_since_outbound == null;
-      const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.5;
-      if (!isNeverContacted && !isApproachingDue) continue;
-      const cat = (c.category || "other").toLowerCase();
-      if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
-      top.push(c);
-      used.add(c.id);
-      fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+      const isApproachingDue = c.days_since_outbound != null && c.days_since_outbound >= c.cadence * 0.3;
+      return isNeverContacted || isApproachingDue;
+    };
+
+    // Non-D-tier fill first, then D-tier — enforces hard ordering so D-tier only appears
+    // when no higher-value contacts remain
+    const nonDPool = scored.filter(c => isEligibleFill(c) && (c.tier || "").toUpperCase() !== "D");
+    const dPool = scored.filter(c => isEligibleFill(c) && (c.tier || "").toUpperCase() === "D");
+
+    for (const pool of [nonDPool, dPool]) {
+      for (const c of pool) {
+        if (top.length >= totalRecs) break;
+        const cat = (c.category || "other").toLowerCase();
+        if ((fillCategoryCounts[cat] ?? 0) >= 2) continue;
+        top.push(c);
+        used.add(c.id);
+        fillCategoryCounts[cat] = (fillCategoryCounts[cat] ?? 0) + 1;
+      }
+      if (top.length >= totalRecs) break;
     }
 
     return top;
   }, [contacts, voice, rules]);
 
-  // Reset locked list when user explicitly changes rules (not on mount)
+  // Reset locked list when user explicitly changes rules — skip the init load from Supabase
   useEffect(() => {
     if (!rulesReady) { setRulesReady(true); return; }
+    if (rulesSetFromInit.current) { rulesSetFromInit.current = false; return; }
     setLockedIds(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules]);
 
   useEffect(() => {
+    if (!lockedIdsLoaded) return; // wait until Supabase lock has been checked
     if (lockedIds === null && recs.length > 0) {
       const ids = recs.map((r) => r.id);
       setLockedIds(ids);
-      if (uid) saveLockedIds(uid, ids);
+      if (uid) saveLockedIds(uid, ids); // fire-and-forget
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recs, lockedIds]);
+  }, [recs, lockedIds, lockedIdsLoaded]);
 
-  async function generateDrafts(contacts: Recommendation[]) {
-    const pending = new Set(contacts.map((c) => c.id));
-    setDraftsGenerating(pending);
-    await Promise.all(
-      contacts.map(async (c) => {
-        try {
-          const res = await fetch("/api/voice/draft", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contact_id: c.id,
-              channel: c.suggested_channel,
-              intent: "check_in",
-              length: "short",
-            }),
-          });
-          const j = await res.json();
-          if (res.ok && j.draft) {
-            setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
-          }
-        } catch {
-          // silently fall back to template
-        } finally {
-          setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
-        }
-      })
-    );
-  }
-
-  async function regenerateDraft(c: Recommendation, intent?: TouchIntent) {
-    const resolvedIntent = intent ?? draftIntents[c.id] ?? "check_in";
-    setDraftsGenerating((prev) => new Set(prev).add(c.id));
-    try {
-      const res = await fetch("/api/voice/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contact_id: c.id,
-          channel: c.suggested_channel,
-          intent: resolvedIntent,
-          length: "short",
-        }),
-      });
-      const j = await res.json();
-      if (res.ok && j.draft) {
-        setAiDrafts((prev) => ({ ...prev, [c.id]: j.draft }));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setDraftsGenerating((prev) => { const next = new Set(prev); next.delete(c.id); return next; });
-    }
-  }
-
-  async function copyDraft(contactId: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(contactId);
-      setTimeout(() => setCopiedId((prev) => (prev === contactId ? null : prev)), 2000);
-    } catch { /* ignore */ }
-  }
-
-  // Stable display list — always shows the same 5 contacts from first load
+  // Stable display list — always shows the same contacts from first load today.
+  // Falls back to the full contacts array for any locked contact that has since
+  // been touched (score = -999) and dropped out of the top-N recs.
   const displayRecs = useMemo<Recommendation[]>(() => {
     if (lockedIds === null) return recs;
     return lockedIds
-      .map((id) => recs.find((r) => r.id === id))
+      .map((id) => {
+        const fromRecs = recs.find((r) => r.id === id);
+        if (fromRecs) return fromRecs;
+        // Contact was touched today and fell out of recs — reconstruct from contacts
+        const c = contacts.find((c) => c.id === id);
+        if (!c) return null;
+        return {
+          ...c,
+          cadence: cadenceDays(c.category, c.tier),
+          overdue: false,
+          score: -999,
+          reasons: ["Recently contacted"],
+          suggested_channel: "text" as const,
+        } satisfies Recommendation;
+      })
       .filter((r): r is Recommendation => r != null);
-  }, [lockedIds, recs]);
+  }, [lockedIds, recs, contacts]);
 
   const stats = useMemo(() => {
     const total = contacts.length;
     const overdue = contacts.filter((c) => isOverdue(c)).length;
     const overdueA = contacts.filter((c) => isAClient(c) && isOverdue(c)).length;
     const agents = contacts.filter((c) => (c.category || "").toLowerCase() === "agent").length;
-    return { total, overdue, overdueA, agents };
+    const unclassified = contacts.filter((c) => !c.tier).length;
+    return { total, overdue, overdueA, agents, unclassified };
   }, [contacts]);
 
   if (!ready) return <div className="page">Loading…</div>;
 
   const weekday = isWeekdayLocal();
+  const showTriageBanner = stats.unclassified >= 10;
   const lateNudge = (() => {
     if (!weekday) return false;
     if (todayCount >= rules.totalRecs) return false;
@@ -1043,25 +989,39 @@ export default function MorningPage() {
         <div>
           <h1 className="h1">Morning</h1>
           <div className="muted" style={{ marginTop: 8 }}>
-            <span className="badge">{weekday ? "Weekday focus" : "Weekend (view-only focus)"}</span>{" "}
-            <span className="badge">{stats.total} contacts</span>{" "}
-            <span className="badge">{stats.overdue} overdue</span>{" "}
-            <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
-            <span className="badge">{stats.agents} agents</span>
-            {voiceLoaded ? (
-              <span className="badge">
-                Voice: <strong>{voice?.count ?? 0}</strong> examples
-              </span>
+            {weekday ? (
+              <>
+                <span className="badge">{stats.total} contacts</span>{" "}
+                <span className="badge">{stats.overdue} overdue</span>{" "}
+                <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
+                <span className="badge">{stats.agents} agents</span>
+              </>
             ) : (
-              <span className="badge">Voice: loading…</span>
+              <span className="badge">Weekend — pipeline view only</span>
             )}
           </div>
 
-          {voice?.rules?.length ? (
-            <div className="muted small" style={{ marginTop: 10 }}>
-              <strong>Voice rules:</strong> {voice.rules.slice(0, 3).join(" • ")}
+          {weekday && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "rgba(18,18,18,.4)", padding: 0 }}
+                onClick={() => setVoiceSettingsOpen(v => !v)}
+              >
+                Voice settings {voiceSettingsOpen ? "▲" : "▾"}
+              </button>
+              {voiceSettingsOpen && (
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {voiceLoaded
+                    ? <>
+                        <strong>{voice?.count ?? 0}</strong> examples loaded
+                        {voice?.rules?.length ? <> · <strong>Rules:</strong> {voice.rules.slice(0, 3).join(" • ")}</> : null}
+                      </>
+                    : "Loading…"
+                  }
+                </div>
+              )}
             </div>
-          ) : null}
+          )}
 
           {(syncGmail !== undefined || syncCalendar !== undefined) && (() => {
             const g = syncAgo(syncGmail);
@@ -1094,6 +1054,20 @@ export default function MorningPage() {
           </button>
         </div>
       </div>
+
+      {showTriageBanner && (
+        <div className="card cardPad" style={{ borderColor: "rgba(180,120,0,0.3)", background: "rgba(255,180,0,0.06)", marginBottom: 8 }}>
+          <div className="rowBetween" style={{ alignItems: "center" }}>
+            <div>
+              <span style={{ fontWeight: 800 }}>{stats.unclassified} contacts</span>
+              <span className="muted"> need a tier — your Morning coaching won't be accurate until they're classified.</span>
+            </div>
+            <a className="btn btnPrimary" href="/triage" style={{ flexShrink: 0, marginLeft: 12 }}>
+              Classify now →
+            </a>
+          </div>
+        </div>
+      )}
 
       {(error || msg) && (
         <div
@@ -1426,6 +1400,8 @@ export default function MorningPage() {
                 key={c.id}
                 className="card cardPad"
                 style={completed ? { opacity: 0.5, pointerEvents: "none" } : undefined}
+                onTouchStart={handleCardTouchStart}
+                onTouchEnd={(e) => handleCardTouchEnd(e, c)}
               >
                 {completed && (
                   <div className="small bold" style={{ color: "#0b6b2a", marginBottom: 8 }}>
@@ -1491,101 +1467,57 @@ export default function MorningPage() {
                       ))}
                     </div>
 
-                    {(() => {
-                      const generating = draftsGenerating.has(c.id);
-                      const draft = aiDrafts[c.id];
-                      if (!generating && !draft) return (
-                        <button
-                          className="btn"
-                          style={{ fontSize: 11, padding: "1px 8px", marginTop: 10 }}
-                          onClick={() => regenerateDraft(c)}
-                        >
-                          Draft
-                        </button>
-                      );
-                      return (
-                        <div style={{ marginTop: 10 }} className="cardSoft cardPad">
-                          <div className="rowBetween" style={{ marginBottom: 8 }}>
-                            <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                              <span className="small muted bold">AI draft</span>
-                              {(["check_in", "referral_ask", "follow_up", "review_ask"] as TouchIntent[]).map((intent) => {
-                                const active = (draftIntents[c.id] ?? "check_in") === intent;
-                                return (
-                                  <button
-                                    key={intent}
-                                    className="btn"
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "1px 8px",
-                                      fontWeight: active ? 900 : 400,
-                                      background: active ? "var(--ink)" : undefined,
-                                      color: active ? "var(--paper)" : undefined,
-                                    }}
-                                    onClick={() => {
-                                      setDraftIntents((prev) => ({ ...prev, [c.id]: intent }));
-                                      regenerateDraft(c, intent);
-                                    }}
-                                    disabled={generating}
-                                  >
-                                    {intent.replace("_", " ")}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <div className="row" style={{ gap: 4 }}>
-                              {!generating && draft && (
-                                <button
-                                  className="btn"
-                                  style={{ fontSize: 11, padding: "1px 8px", fontWeight: copiedId === c.id ? 900 : undefined, color: copiedId === c.id ? "#0b6b2a" : undefined }}
-                                  onClick={() => copyDraft(c.id, draft)}
-                                >
-                                  {copiedId === c.id ? "Copied ✓" : "Copy"}
-                                </button>
-                              )}
-                              <button
-                                className="btn"
-                                style={{ fontSize: 11, padding: "1px 8px" }}
-                                disabled={generating}
-                                onClick={() => regenerateDraft(c)}
-                              >
-                                {generating ? "…" : "Regenerate"}
-                              </button>
-                            </div>
-                          </div>
-
-                          {generating ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 2 }}>
-                              {[0.85, 0.65, 0.45].map((w, i) => (
-                                <div
-                                  key={i}
-                                  style={{
-                                    height: 13,
-                                    borderRadius: 4,
-                                    width: `${w * 100}%`,
-                                    background: "rgba(0,0,0,.08)",
-                                    animation: "pulse 1.4s ease-in-out infinite",
-                                    animationDelay: `${i * 0.15}s`,
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14, animation: "fadeIn .3s ease" }}>
-                              {draft}
-                            </div>
-                          )}
+                    {/* Context brief — instant, no API call */}
+                    <div style={{ marginTop: 10 }} className="cardSoft cardPad">
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(18,18,18,.4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Talking point
+                      </div>
+                      <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink)" }}>
+                        {contextTalkingPoint(c)}
+                      </div>
+                      {c.last_outbound_summary && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(18,18,18,.5)", borderTop: "1px solid rgba(0,0,0,.06)", paddingTop: 8 }}>
+                          <span style={{ fontWeight: 700 }}>Last note:</span>{" "}
+                          {c.last_outbound_summary.length > 120
+                            ? `${c.last_outbound_summary.slice(0, 120)}…`
+                            : c.last_outbound_summary}
                         </div>
-                      );
-                    })()}
+                      )}
+                      {c.referral_gci > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
+                            Referral source — ${(c.referral_gci / 1000).toFixed(0)}k in closed GCI
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div style={{ width: 280, display: "grid", gap: 10 }}>
-                    <a className="btn" href={`/contacts/${c.id}`}>
-                      Open contact
-                    </a>
-                    <button className="btn btnPrimary" onClick={() => openLog(c)}>
-                      Log outbound touch
-                    </button>
+                  <div style={{ width: isMobile ? "100%" : 280, display: "grid", gap: 8 }}>
+                    {isMobile ? (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <a className="btn" href={`/contacts/${c.id}`} style={{ justifyContent: "center" }}>
+                          Open
+                        </a>
+                        <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                          Log touch
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <a className="btn" href={`/contacts/${c.id}`}>
+                          Open contact
+                        </a>
+                        <button className="btn btnPrimary" onClick={() => openLog(c)}>
+                          Log outbound touch
+                        </button>
+                      </>
+                    )}
+                    {isMobile && !completed && (
+                      <div className="muted" style={{ fontSize: 11, textAlign: "center", marginTop: 2 }}>
+                        or swipe left to log
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1734,6 +1666,114 @@ export default function MorningPage() {
           ) : null}
         </div>
       </div>
+
+      {/* ── Mobile bottom sheet for logging ── */}
+      {mobileLogContact && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            background: "rgba(0,0,0,.45)",
+            display: "flex", alignItems: "flex-end",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeMobileSheet(); }}
+        >
+          <div style={{
+            width: "100%", background: "var(--paper)",
+            borderRadius: "20px 20px 0 0",
+            padding: "20px 16px 40px",
+            boxShadow: "0 -4px 32px rgba(0,0,0,.18)",
+            animation: "slideUp .22s ease",
+          }}>
+            {/* Handle */}
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: "rgba(0,0,0,.15)", margin: "0 auto 16px" }} />
+
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 17 }}>{mobileLogContact.display_name}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                  {mobileLogContact.category}{mobileLogContact.tier ? ` · Tier ${mobileLogContact.tier}` : ""}
+                </div>
+              </div>
+              <button onClick={closeMobileSheet} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)", padding: "4px 8px" }}>✕</button>
+            </div>
+
+            {/* Channel pills */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="label" style={{ marginBottom: 8 }}>Channel</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {(["text", "call", "email", "in_person", "social_dm"] as Touch["channel"][]).map((ch) => (
+                  <button
+                    key={ch}
+                    onClick={() => setTouchChannel(ch)}
+                    style={{
+                      padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700,
+                      border: "1px solid",
+                      borderColor: touchChannel === ch ? "var(--accent)" : "var(--line)",
+                      background: touchChannel === ch ? "var(--accent)" : "var(--paper)",
+                      color: touchChannel === ch ? "#fff" : "var(--ink)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {ch === "in_person" ? "In Person" : ch === "social_dm" ? "DM" : ch.charAt(0).toUpperCase() + ch.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Summary */}
+            <div style={{ marginBottom: 16 }}>
+              <div className="label" style={{ marginBottom: 6 }}>Notes (optional)</div>
+              <textarea
+                className="textarea"
+                autoFocus
+                value={touchSummary}
+                onChange={(e) => setTouchSummary(e.target.value)}
+                placeholder="Quick note — what you sent or what happened"
+                style={{ minHeight: 72, fontSize: 16 }}
+              />
+            </div>
+
+            {/* Follow-up reminder */}
+            <div style={{ marginBottom: 16 }}>
+              <button
+                className="btn"
+                style={{ fontSize: 13, width: "100%" }}
+                onClick={() => { setRemindOpen(v => !v); setRemindDate(""); setRemindNote(""); }}
+              >
+                {remindOpen ? "Cancel reminder" : "+ Set follow-up reminder"}
+              </button>
+              {remindOpen && (
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  <div className="field">
+                    <div className="label">Follow up on</div>
+                    <input className="input" type="date" value={remindDate} onChange={(e) => setRemindDate(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <div className="label">Context (optional)</div>
+                    <input className="input" value={remindNote} onChange={(e) => setRemindNote(e.target.value)} placeholder="e.g. Check if they made a decision" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Submit */}
+            <button
+              className="btn btnPrimary"
+              style={{ width: "100%", fontSize: 16, padding: "14px", justifyContent: "center" }}
+              disabled={savingTouch}
+              onClick={async () => {
+                const contactId = loggingFor;
+                await saveTouch();
+                if (remindOpen && remindDate && contactId) await saveReminder(contactId);
+                closeMobileSheet();
+              }}
+            >
+              {savingTouch ? "Logging…" : "Log touch"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
