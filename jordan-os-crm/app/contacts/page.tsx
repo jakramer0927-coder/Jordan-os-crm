@@ -314,6 +314,7 @@ export default function ContactsPage() {
           <a className="btn" href="/morning">Morning</a>
           <a className="btn" href="/unmatched">Unmatched</a>
           <a className="btn" href="/contacts/import">Import CSV</a>
+          <a className="btn" href="/linkedin">LinkedIn</a>
           <button
             className="btn"
             style={triageMode ? { background: "#fef3c7", borderColor: "#fcd34d", fontWeight: 700 } : {}}
