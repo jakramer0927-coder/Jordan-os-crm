@@ -794,7 +794,7 @@ export default function ContactDetailPage() {
     const j = await res.json().catch(() => ({}));
     setLinkBusy(false);
     if (!res.ok) { setLinkMsg(`Error: ${j?.error || "Failed"}`); return; }
-    setLinkOpen(false); setLinkQ(""); setLinkResults([]); setLinkHouseholdName(""); setLinkMsg(null);
+    setLinkOpen(false); setLinkHouseholdName(""); setLinkMsg(null);
     await fetchAll();
   }
 
