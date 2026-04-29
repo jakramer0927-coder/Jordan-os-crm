@@ -44,6 +44,9 @@ type ContactWithLastOutbound = Contact & {
   last_inbound_at: string | null;
   active_deals: number;
   referral_gci: number;
+  gmail_reply_rate: number | null;
+  text_reply_rate: number | null;
+  linkedin_connected_at: string | null;
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
@@ -268,11 +271,20 @@ function pickChannel(c: ContactWithLastOutbound): Touch["channel"] {
 }
 
 
+function preferredChannel(c: Recommendation): string | null {
+  const g = c.gmail_reply_rate ?? 0;
+  const t = c.text_reply_rate ?? 0;
+  if (g >= 60 && g > t + 20) return "email";
+  if (t >= 60 && t > g + 20) return "text";
+  return null;
+}
+
 function contextTalkingPoint(c: Recommendation): string {
   const cat = (c.category || "").toLowerCase();
   const t = (c.tier || "").toUpperCase();
   const anns = dealAnniversaries(c);
   const ms = upcomingMilestones(c);
+  const channel = preferredChannel(c);
 
   if (anns.length > 0) {
     const a = anns[0];
@@ -301,7 +313,8 @@ function contextTalkingPoint(c: Recommendation): string {
     return "Long overdue — genuine personal check-in, no agenda. Just reconnect.";
   }
   if (cat === "client" && t === "A") {
-    return "A-Client — personal check-in with a value-add offer: market update, vendor referral, or equity snapshot.";
+    const channelNote = channel ? ` Prefers ${channel}.` : "";
+    return `A-Client — personal check-in with a value-add offer: market update, vendor referral, or equity snapshot.${channelNote}`;
   }
   if (cat === "client") {
     return "Past client check-in — ask how they're enjoying the home and if anything real estate is on their mind.";
@@ -834,6 +847,14 @@ export default function MorningPage() {
         score += Math.min(60, Math.floor(c.referral_gci / 100000) * 15);
         reasons.push(`Referral source — $${(c.referral_gci / 1000).toFixed(0)}k in closed GCI`);
       }
+
+      // Engagement signal: high reply rate = this person actually responds, worth prioritizing
+      const bestReplyRate = Math.max(c.gmail_reply_rate ?? 0, c.text_reply_rate ?? 0);
+      if (bestReplyRate >= 60) score += 10;
+      else if (bestReplyRate > 0 && bestReplyRate <= 20) score -= 5; // consistently unresponsive
+
+      // LinkedIn connection: verified professional relationship
+      if (c.linkedin_connected_at) score += 5;
 
       // Anniversary boost — strong reason to reach out even if recently touched
       if (anns.length > 0) {
@@ -1483,11 +1504,26 @@ export default function MorningPage() {
                             : c.last_outbound_summary}
                         </div>
                       )}
-                      {c.referral_gci > 0 && (
-                        <div style={{ marginTop: 6 }}>
-                          <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
-                            Referral source — ${(c.referral_gci / 1000).toFixed(0)}k in closed GCI
-                          </span>
+                      {(c.referral_gci > 0 || c.gmail_reply_rate !== null || c.text_reply_rate !== null || c.linkedin_connected_at) && (
+                        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {c.referral_gci > 0 && (
+                            <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
+                              Referral ${(c.referral_gci / 1000).toFixed(0)}k GCI
+                            </span>
+                          )}
+                          {c.gmail_reply_rate !== null && (
+                            <span className="badge" style={{ fontSize: 11, color: c.gmail_reply_rate >= 60 ? "#0b6b2a" : c.gmail_reply_rate <= 20 ? "#8a0000" : undefined }}>
+                              Email {c.gmail_reply_rate}% reply
+                            </span>
+                          )}
+                          {c.text_reply_rate !== null && (
+                            <span className="badge" style={{ fontSize: 11, color: c.text_reply_rate >= 60 ? "#0b6b2a" : c.text_reply_rate <= 20 ? "#8a0000" : undefined }}>
+                              Text {c.text_reply_rate}% reply
+                            </span>
+                          )}
+                          {c.linkedin_connected_at && (
+                            <span className="badge" style={{ fontSize: 11 }}>LinkedIn</span>
+                          )}
                         </div>
                       )}
                     </div>
