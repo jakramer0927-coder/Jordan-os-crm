@@ -83,6 +83,16 @@ type FollowUp = {
   contacts: { id: string; display_name: string; category: string; tier: string | null } | null;
 };
 
+type ReferralFollowUp = {
+  id: string;
+  contact_id: string;
+  contact_name: string;
+  asked_on: string;
+  days_ago: number;
+  channel: string;
+  summary: string | null;
+};
+
 type VoiceProfile = {
   ok: boolean;
   count: number;
@@ -443,6 +453,9 @@ export default function MorningPage() {
   // Follow-ups
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [completingFollowUp, setCompletingFollowUp] = useState<string | null>(null);
+  // Referral ask follow-ups (touches logged as referral_ask 25-40 days ago with no outcome)
+  const [referralFollowUps, setReferralFollowUps] = useState<ReferralFollowUp[]>([]);
+  const [savingFollowUp, setSavingFollowUp] = useState<string | null>(null);
   // Remind-me form (attached to touch log)
   const [remindOpen, setRemindOpen] = useState(false);
   const [remindDate, setRemindDate] = useState("");
@@ -522,6 +535,7 @@ export default function MorningPage() {
       fetch("/api/follow-ups?due_today=1"),
       fetch("/api/pipeline"),
       voiceLoaded ? Promise.resolve() : loadVoiceProfile(user.id),
+      loadReferralFollowUps(),
     ]);
 
     if (syncRes.ok) {
@@ -665,6 +679,8 @@ export default function MorningPage() {
       summary: touchSummary.trim() ? touchSummary.trim() : null,
       source: touchSource.trim() ? touchSource.trim() : null,
       source_link: touchLink.trim() ? touchLink.trim() : null,
+      // Auto-set outcome=pending for referral asks so we can follow up in 30 days
+      outcome: touchIntent === "referral_ask" ? "pending" : null,
     });
 
     setSavingTouch(false);
@@ -680,6 +696,39 @@ export default function MorningPage() {
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
+  }
+
+  async function loadReferralFollowUps() {
+    const twentyFiveDaysAgo = new Date(Date.now() - 25 * 86400000).toISOString();
+    const fortyDaysAgo = new Date(Date.now() - 40 * 86400000).toISOString();
+    const { data } = await supabase
+      .from("touches")
+      .select("id, contact_id, occurred_at, channel, summary, contacts!inner(display_name)")
+      .eq("intent", "referral_ask")
+      .eq("outcome", "pending")
+      .eq("direction", "outbound")
+      .lte("occurred_at", twentyFiveDaysAgo)
+      .gte("occurred_at", fortyDaysAgo);
+    if (!data) return;
+    const now = Date.now();
+    setReferralFollowUps(
+      (data as any[]).map((row) => ({
+        id: row.id,
+        contact_id: row.contact_id,
+        contact_name: (row.contacts as any)?.display_name ?? "Unknown",
+        asked_on: row.occurred_at,
+        days_ago: Math.floor((now - new Date(row.occurred_at).getTime()) / 86400000),
+        channel: row.channel,
+        summary: row.summary,
+      }))
+    );
+  }
+
+  async function recordReferralOutcome(touchId: string, outcome: "referred" | "no_referral") {
+    setSavingFollowUp(touchId);
+    const { error } = await supabase.from("touches").update({ outcome }).eq("id", touchId);
+    setSavingFollowUp(null);
+    if (!error) setReferralFollowUps((prev) => prev.filter((f) => f.id !== touchId));
   }
 
   async function completeFollowUp(id: string) {
@@ -1275,6 +1324,57 @@ export default function MorningPage() {
               {bulkSaving ? "Logging…" : `Log ${displayRecs.length} touches`}
             </button>
             <button className="btn" onClick={() => setBulkOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Referral ask follow-ups ── */}
+      {referralFollowUps.length > 0 && (
+        <div className="section" style={{ marginTop: 12 }}>
+          <div className="sectionTitleRow">
+            <div className="sectionTitle">Referral asks — close the loop</div>
+            <div className="sectionSub">{referralFollowUps.length} ask{referralFollowUps.length !== 1 ? "s" : ""} from ~30 days ago</div>
+          </div>
+          <div className="stack">
+            {referralFollowUps.map((f) => (
+              <div key={f.id} className="card cardPad" style={{ borderColor: "rgba(180,120,0,.2)", background: "rgba(255,200,0,.03)" }}>
+                <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                      <a href={`/contacts/${f.contact_id}`} style={{ fontWeight: 900, fontSize: 15, textDecoration: "none", color: "var(--ink)" }}>
+                        {f.contact_name}
+                      </a>
+                      <span className="badge" style={{ fontSize: 11, color: "rgba(140,90,0,.9)", borderColor: "rgba(180,120,0,.3)" }}>
+                        Asked {f.days_ago}d ago via {f.channel}
+                      </span>
+                    </div>
+                    {f.summary && (
+                      <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>
+                        "{f.summary.length > 100 ? `${f.summary.slice(0, 100)}…` : f.summary}"
+                      </div>
+                    )}
+                  </div>
+                  <div className="row" style={{ gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button
+                      className="btn btnPrimary"
+                      style={{ fontSize: 12, background: "#0b6b2a", borderColor: "#0b6b2a" }}
+                      onClick={() => recordReferralOutcome(f.id, "referred")}
+                      disabled={savingFollowUp === f.id}
+                    >
+                      {savingFollowUp === f.id ? "…" : "Got a referral ✓"}
+                    </button>
+                    <button
+                      className="btn"
+                      style={{ fontSize: 12 }}
+                      onClick={() => recordReferralOutcome(f.id, "no_referral")}
+                      disabled={savingFollowUp === f.id}
+                    >
+                      No outcome
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
