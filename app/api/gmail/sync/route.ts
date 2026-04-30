@@ -424,7 +424,7 @@ export async function GET(req: Request) {
           for (let i = 0; i < toInsert.length; i += 50) {
             const { error: insErr } = await supabaseAdmin
               .from("unmatched_recipients")
-              .upsert(toInsert.slice(i, i + 50), { onConflict: "email", ignoreDuplicates: true });
+              .upsert(toInsert.slice(i, i + 50), { onConflict: "user_id,email", ignoreDuplicates: true });
             if (insErr) { unmatchedSaveError = insErr.message; console.error("UNMATCHED_INSERT_ERROR", insErr); }
           }
         }

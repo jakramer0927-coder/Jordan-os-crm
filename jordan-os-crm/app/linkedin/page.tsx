@@ -24,12 +24,25 @@ type MatchResult = {
   position: string;
 };
 
+type UnmatchedContact = {
+  linkedin_name: string;
+  email: string;
+  company: string;
+  position: string;
+  connected_on: string | null;
+};
+
 type PreviewResult = {
   total: number;
   matched: number;
   unmatched: number;
   matchedContacts: MatchResult[];
-  unmatchedContacts: { linkedin_name: string; email: string; company: string; position: string }[];
+  unmatchedContacts: UnmatchedContact[];
+};
+
+type AppliedResult = {
+  tagged: number;
+  created: number;
 };
 
 function parseCSVLine(line: string): string[] {
@@ -82,15 +95,26 @@ function parseLinkedInCSV(text: string): LinkedInRow[] {
   return rows;
 }
 
+function buildApplyLabel(matched: number, newCount: number): string {
+  const parts: string[] = [];
+  if (matched > 0) parts.push(`Tag ${matched} matched`);
+  if (newCount > 0) parts.push(`Add ${newCount} new`);
+  return parts.length > 0 ? parts.join(" + ") : "Apply";
+}
+
 export default function LinkedInImportPage() {
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<LinkedInRow[]>([]);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [applied, setApplied] = useState<number | null>(null);
+  const [applied, setApplied] = useState<AppliedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showUnmatched, setShowUnmatched] = useState(false);
+
+  const [selectedUnmatched, setSelectedUnmatched] = useState<Set<number>>(new Set());
+  const [newCategory, setNewCategory] = useState("Agent");
+  const [newTier, setNewTier] = useState("B");
+
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -104,6 +128,7 @@ export default function LinkedInImportPage() {
     setError(null);
     setPreview(null);
     setApplied(null);
+    setSelectedUnmatched(new Set());
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -121,6 +146,7 @@ export default function LinkedInImportPage() {
     if (rows.length === 0) return;
     setLoading(true);
     setError(null);
+    setSelectedUnmatched(new Set());
     try {
       const res = await fetch("/api/linkedin/import", {
         method: "POST",
@@ -142,20 +168,42 @@ export default function LinkedInImportPage() {
     setApplying(true);
     setError(null);
     try {
+      const selectedItems = Array.from(selectedUnmatched).map(i => ({
+        ...preview.unmatchedContacts[i]!,
+        category: newCategory,
+        tier: newTier,
+      }));
+
       const res = await fetch("/api/linkedin/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, apply: true }),
+        body: JSON.stringify({ rows, apply: true, selectedToCreate: selectedItems }),
       });
       const j = await res.json();
       if (!res.ok) { setError(j.error ?? "Apply failed"); return; }
-      setApplied(j.applied);
+      setApplied({ tagged: j.applied, created: j.created ?? 0 });
       setPreview(null);
       setRows([]);
+      setSelectedUnmatched(new Set());
     } catch (e: any) {
       setError(e?.message ?? "Apply failed");
     } finally {
       setApplying(false);
+    }
+  }
+
+  function toggleUnmatched(i: number) {
+    const s = new Set(selectedUnmatched);
+    if (s.has(i)) s.delete(i);
+    else s.add(i);
+    setSelectedUnmatched(s);
+  }
+
+  function toggleSelectAll(total: number) {
+    if (selectedUnmatched.size === total) {
+      setSelectedUnmatched(new Set());
+    } else {
+      setSelectedUnmatched(new Set(Array.from({ length: total }, (_, i) => i)));
     }
   }
 
@@ -196,10 +244,13 @@ export default function LinkedInImportPage() {
       {applied !== null && (
         <div className="card cardPad" style={{ borderColor: "rgba(11,107,42,.2)", background: "rgba(11,107,42,.04)", marginBottom: 12 }}>
           <div style={{ fontWeight: 900, color: "#0b6b2a", fontSize: 15 }}>
-            ✓ {applied} contacts tagged as LinkedIn connections
+            {[
+              applied.tagged > 0 && `${applied.tagged} contact${applied.tagged !== 1 ? "s" : ""} tagged as LinkedIn connections`,
+              applied.created > 0 && `${applied.created} new contact${applied.created !== 1 ? "s" : ""} added`,
+            ].filter(Boolean).map((msg, i) => <div key={i}>✓ {msg}</div>)}
           </div>
           <div className="muted small" style={{ marginTop: 4 }}>
-            These contacts now get a scoring boost in your Morning recommendations.
+            Tagged contacts get a scoring boost in your Morning recommendations.
           </div>
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <a className="btn btnPrimary" href="/morning">Go to Morning →</a>
@@ -259,7 +310,7 @@ export default function LinkedInImportPage() {
       {/* Preview results */}
       {preview && (
         <div className="stack">
-          {/* Summary */}
+          {/* Summary + apply */}
           <div className="card cardPad">
             <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Match results</div>
             <div className="row" style={{ gap: 24, flexWrap: "wrap", marginBottom: 16 }}>
@@ -277,18 +328,19 @@ export default function LinkedInImportPage() {
               </div>
             </div>
             <div className="muted small" style={{ marginBottom: 16 }}>
-              Applying will tag matched contacts with their LinkedIn connection date. This improves their morning recommendation score.
+              Matched contacts will be tagged with their LinkedIn connection date, improving their morning score.
+              Select unmatched connections below to add them as new contacts.
             </div>
             <div className="row" style={{ gap: 8 }}>
               <button
                 className="btn btnPrimary"
                 style={{ fontSize: 14, padding: "10px 20px" }}
                 onClick={applyImport}
-                disabled={applying}
+                disabled={applying || (preview.matched === 0 && selectedUnmatched.size === 0)}
               >
-                {applying ? "Applying…" : `Tag ${preview.matched} contacts`}
+                {applying ? "Applying…" : buildApplyLabel(preview.matched, selectedUnmatched.size)}
               </button>
-              <button className="btn" onClick={() => { setPreview(null); setRows([]); }}>
+              <button className="btn" onClick={() => { setPreview(null); setRows([]); setSelectedUnmatched(new Set()); }}>
                 Cancel
               </button>
             </div>
@@ -332,33 +384,72 @@ export default function LinkedInImportPage() {
             </div>
           )}
 
-          {/* Unmatched toggle */}
+          {/* Unmatched contacts — selectable */}
           {preview.unmatchedContacts.length > 0 && (
             <div>
-              <button
-                className="btn"
-                style={{ fontSize: 13 }}
-                onClick={() => setShowUnmatched(v => !v)}
-              >
-                {showUnmatched ? "Hide" : "Show"} {preview.unmatched} unmatched connections
-              </button>
-              {showUnmatched && (
-                <div className="stack" style={{ marginTop: 8 }}>
-                  {preview.unmatchedContacts.map((u, i) => (
-                    <div key={i} className="card cardPad" style={{ padding: "8px 12px", opacity: 0.7 }}>
+              <div className="rowBetween" style={{ marginBottom: 8 }}>
+                <div className="sectionTitle">
+                  Not in CRM ({preview.unmatched}{preview.unmatched > 100 ? ", showing first 100" : ""})
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", userSelect: "none" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedUnmatched.size === preview.unmatchedContacts.length && preview.unmatchedContacts.length > 0}
+                    onChange={() => toggleSelectAll(preview.unmatchedContacts.length)}
+                  />
+                  Select all
+                </label>
+              </div>
+
+              <div className="stack">
+                {preview.unmatchedContacts.map((u, i) => (
+                  <label key={i} className="card cardPad" style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedUnmatched.has(i)}
+                      onChange={() => toggleUnmatched(i)}
+                      style={{ flexShrink: 0 }}
+                    />
+                    <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 13 }}>{u.linkedin_name}</div>
-                      {(u.email || u.company) && (
+                      {(u.email || u.company || u.position) && (
                         <div className="muted small" style={{ marginTop: 2, fontSize: 12 }}>
-                          {[u.email, u.company].filter(Boolean).join(" · ")}
+                          {[u.position, u.company, u.email].filter(Boolean).join(" · ")}
                         </div>
                       )}
                     </div>
-                  ))}
-                  {preview.unmatched > 100 && (
-                    <div className="muted small" style={{ paddingLeft: 4 }}>
-                      + {preview.unmatched - 100} more not shown
+                  </label>
+                ))}
+              </div>
+
+              {/* Category/tier picker — only shown when something is selected */}
+              {selectedUnmatched.size > 0 && (
+                <div className="card cardPad" style={{ marginTop: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>
+                    Add {selectedUnmatched.size} selected as new contacts
+                  </div>
+                  <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                    <div className="field">
+                      <div className="label">Category</div>
+                      <select className="select" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
+                        <option>Agent</option>
+                        <option>Client</option>
+                        <option>Sphere</option>
+                        <option>Developer</option>
+                        <option>Vendor</option>
+                        <option>Other</option>
+                      </select>
                     </div>
-                  )}
+                    <div className="field">
+                      <div className="label">Tier</div>
+                      <select className="select" value={newTier} onChange={e => setNewTier(e.target.value)}>
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

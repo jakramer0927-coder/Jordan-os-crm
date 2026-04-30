@@ -23,6 +23,16 @@ type MatchResult = {
   position: string;
 };
 
+type ContactToCreate = {
+  linkedin_name: string;
+  email: string;
+  company: string;
+  position: string;
+  connected_on: string | null;
+  category: string;
+  tier: string;
+};
+
 function normalizeName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
 }
@@ -44,6 +54,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const rows: LinkedInRow[] = body.rows ?? [];
     const apply: boolean = body.apply ?? false;
+    const selectedToCreate: ContactToCreate[] = body.selectedToCreate ?? [];
 
     const { data: contacts } = await supabaseAdmin
       .from("contacts")
@@ -62,7 +73,7 @@ export async function POST(req: Request) {
     }
 
     const matched: MatchResult[] = [];
-    const unmatched: { linkedin_name: string; email: string; company: string; position: string }[] = [];
+    const unmatched: { linkedin_name: string; email: string; company: string; position: string; connected_on: string | null }[] = [];
     const seenContactIds = new Set<string>();
 
     for (const row of rows) {
@@ -99,7 +110,7 @@ export async function POST(req: Request) {
           position: row.position,
         });
       } else if (!contactId) {
-        unmatched.push({ linkedin_name: fullName, email: row.email, company: row.company, position: row.position });
+        unmatched.push({ linkedin_name: fullName, email: row.email, company: row.company, position: row.position, connected_on: connectedOn });
       }
     }
 
@@ -112,7 +123,48 @@ export async function POST(req: Request) {
             .eq("id", m.contact_id)
         )
       );
-      return NextResponse.json({ applied: matched.length });
+
+      let created = 0;
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const item of selectedToCreate) {
+        const fullName = item.linkedin_name.trim();
+        if (!fullName) continue;
+
+        const emailKey = (item.email || "").toLowerCase().trim();
+        const connectedOn = item.connected_on ?? today;
+
+        // Skip if email already exists as a contact
+        if (emailKey && emailIndex[emailKey]) continue;
+
+        const { data: newContact, error: insErr } = await supabaseAdmin
+          .from("contacts")
+          .insert({
+            user_id: uid,
+            display_name: fullName,
+            category: item.category || "Agent",
+            tier: item.tier || null,
+            company: item.company || null,
+            email: emailKey || null,
+            linkedin_connected_at: connectedOn,
+          })
+          .select("id")
+          .single();
+
+        if (insErr || !newContact) continue;
+
+        if (emailKey) {
+          await supabaseAdmin.from("contact_emails").insert({
+            contact_id: (newContact as { id: string }).id,
+            email: emailKey,
+            created_at: new Date().toISOString(),
+          });
+        }
+
+        created++;
+      }
+
+      return NextResponse.json({ applied: matched.length, created });
     }
 
     return NextResponse.json({
