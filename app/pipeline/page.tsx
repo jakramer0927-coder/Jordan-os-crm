@@ -430,10 +430,8 @@ export default function PipelinePage() {
     setEditRefFeePct(deal.referral_fee_pct != null ? String(deal.referral_fee_pct) : "");
     setEditRefFeeId(deal.referral_fee_contact?.id ?? "");
     setEditRefFeeName(deal.referral_fee_contact?.display_name ?? "");
-    setEditRefFeeQuery(deal.referral_fee_contact?.display_name ?? "");
     setEditCoAgentId(deal.co_agent?.id ?? "");
     setEditCoAgentName(deal.co_agent?.display_name ?? "");
-    setEditCoAgentQuery(deal.co_agent?.display_name ?? "");
     // Auto-expand advanced section if any advanced fields have data
     setDetailsExpanded(!!(
       deal.pipeline_status !== "active" ||
