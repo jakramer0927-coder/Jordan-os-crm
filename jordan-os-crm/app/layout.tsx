@@ -2,8 +2,8 @@ import "./globals.css";
 import ClientLayout from "./ClientLayout";
 
 export const metadata = {
-  title: "Jordan OS CRM",
-  description: "Personal CRM + recommendation engine",
+  title: "Dex",
+  description: "Private CRM",
 };
 
 export const viewport = {

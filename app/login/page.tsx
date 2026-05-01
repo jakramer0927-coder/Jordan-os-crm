@@ -63,7 +63,7 @@ export default function LoginPage() {
         textAlign: "center",
       }}
     >
-      <h1 style={{ marginBottom: 10 }}>Jordan OS CRM</h1>
+      <h1 style={{ marginBottom: 10, color: "#475569", letterSpacing: "-0.5px" }}>Dex</h1>
       <p style={{ color: "#666", marginBottom: 30 }}>
         Sign in with Google to access your private CRM.
       </p>

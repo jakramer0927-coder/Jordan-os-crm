@@ -148,8 +148,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <div className="topbarInner">
           <div className="brandRow">
             <div>
-              <div className="brandName">Jordan OS</div>
-              <div className="brandSub">Smith &amp; Berg — Private CRM</div>
+              <div className="brandName">Dex</div>
+              <div className="brandSub">Private CRM</div>
             </div>
 
             {/* Desktop nav */}
