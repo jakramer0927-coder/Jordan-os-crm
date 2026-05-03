@@ -215,6 +215,50 @@ function timeframeCutoff(tf: Timeframe): Date | null {
   return null;
 }
 
+// ── Reports helpers ───────────────────────────────────────────────────────────
+
+type Report = {
+  id: string;
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  content: string;
+  created_at: string;
+  data_snapshot: any;
+};
+
+function renderMarkdown(text: string) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let key = 0;
+  function flushList() {
+    if (listItems.length === 0) return;
+    elements.push(
+      <ul key={key++} style={{ margin: "6px 0 14px 0", paddingLeft: 20, lineHeight: 1.7 }}>
+        {listItems.map((item, i) => <li key={i} style={{ fontSize: 14, color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: inlineFmt(item) }} />)}
+      </ul>
+    );
+    listItems = [];
+  }
+  function inlineFmt(s: string): string {
+    return s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>");
+  }
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("## ")) { flushList(); elements.push(<h2 key={key++} style={{ fontSize: 17, fontWeight: 900, marginTop: 24, marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid rgba(0,0,0,.08)" }}>{trimmed.slice(3)}</h2>); continue; }
+    if (trimmed.startsWith("### ")) { flushList(); elements.push(<h3 key={key++} style={{ fontSize: 15, fontWeight: 800, marginTop: 16, marginBottom: 6 }}>{trimmed.slice(4)}</h3>); continue; }
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) { listItems.push(trimmed.slice(2)); continue; }
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    if (numMatch) { listItems.push(numMatch[2]); continue; }
+    flushList();
+    if (trimmed === "") { elements.push(<div key={key++} style={{ height: 6 }} />); continue; }
+    elements.push(<p key={key++} style={{ fontSize: 14, lineHeight: 1.7, margin: "4px 0", color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: inlineFmt(trimmed) }} />);
+  }
+  flushList();
+  return elements;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function InsightsPage() {
@@ -227,6 +271,15 @@ export default function InsightsPage() {
   const TF_LABELS: Record<Timeframe, string> = {
     quarter: "Quarter", ytd: "YTD", trailing12: "Last 12 Months", trailing24: "Last 2 Years", all: "All Time",
   };
+
+  // Tab state
+  const [insightsTab, setInsightsTab] = useState<"dashboard" | "reports">("dashboard");
+
+  // Reports state
+  const [reports, setReports] = useState<Report[]>([]);
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [reportsError, setReportsError] = useState<string | null>(null);
 
   // Accountability state
   const [out7, setOut7] = useState(0);
@@ -785,6 +838,33 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
     setRefAsks30((n) => n + 1);
   }
 
+  async function loadReports() {
+    const { data } = await supabase
+      .from("reports")
+      .select("id, period_label, period_start, period_end, content, created_at, data_snapshot")
+      .order("created_at", { ascending: false })
+      .limit(12);
+    if (data && data.length > 0) {
+      setReports(data as Report[]);
+      setActiveReportId(data[0].id);
+    }
+  }
+
+  async function generateReport() {
+    setGenerating(true);
+    setReportsError(null);
+    try {
+      const res = await fetch("/api/reports/generate", { method: "POST" });
+      const j = await res.json();
+      if (!res.ok) { setReportsError(j.error ?? "Generation failed"); return; }
+      await loadReports();
+    } catch (e: any) {
+      setReportsError(e?.message ?? "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   useEffect(() => {
     let alive = true;
     const init = async () => {
@@ -794,6 +874,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
       setDailyGoal(await loadDailyGoal(data.session.user.id));
       setReady(true);
       await fetchAll();
+      await loadReports();
     };
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       if (!session) window.location.href = "/login";
@@ -834,8 +915,25 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
 
   const maxGrowth = Math.max(...growthByMonth.map(m => m.count), 1);
 
+  const activeReport = reports.find((r) => r.id === activeReportId) ?? null;
+
   return (
     <div className="stack">
+      {/* ── Tab switcher ─────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 2, borderBottom: "2px solid rgba(0,0,0,.1)" }}>
+        {(["dashboard", "reports"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setInsightsTab(t)}
+            style={{ padding: "8px 16px", border: "none", background: insightsTab === t ? "var(--ink)" : "transparent", color: insightsTab === t ? "var(--paper)" : "rgba(18,18,18,.6)", borderRadius: "6px 6px 0 0", cursor: "pointer", fontSize: 14, fontWeight: insightsTab === t ? 800 : 500 }}
+          >
+            {t === "dashboard" ? "Dashboard" : "Reports"}
+          </button>
+        ))}
+      </div>
+
+      {insightsTab === "dashboard" && (
+      <div className="stack">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="rowBetween">
         <div>
@@ -1574,6 +1672,92 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
               </div>
             ))}
           </div>
+        </div>
+      )}
+      </div>
+      )}
+
+      {insightsTab === "reports" && (
+        <div className="stack">
+          <div className="rowBetween">
+            <div>
+              <h1 className="h1">Reports</h1>
+              <div className="muted" style={{ marginTop: 4 }}>
+                Monthly Claude-generated analysis of your CRM activity, referral network, and pipeline.
+              </div>
+            </div>
+            <button className="btn btnPrimary" onClick={generateReport} disabled={generating} style={{ minWidth: 140 }}>
+              {generating ? "Generating…" : "Generate report"}
+            </button>
+          </div>
+
+          {reportsError && (
+            <div className="card cardPad" style={{ borderColor: "rgba(200,0,0,.2)", background: "rgba(200,0,0,.03)" }}>
+              <div style={{ color: "#8a0000", fontWeight: 700, fontSize: 13 }}>{reportsError}</div>
+            </div>
+          )}
+
+          {generating && (
+            <div className="card cardPad" style={{ borderColor: "rgba(11,107,42,.2)", background: "rgba(11,107,42,.03)" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Analyzing your CRM data…</div>
+              <div className="muted small">Claude is reviewing your touch activity, referral network, and pipeline. This takes about 10 seconds.</div>
+            </div>
+          )}
+
+          {reports.length === 0 && !generating ? (
+            <div className="card cardPad" style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>No reports yet</div>
+              <div className="muted" style={{ marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" }}>
+                Generate your first report to get a Claude-written analysis of your CRM activity, referral network health, and pipeline.
+              </div>
+              <button className="btn btnPrimary" onClick={generateReport} disabled={generating} style={{ fontSize: 15, padding: "12px 24px" }}>
+                Generate first report
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: reports.length > 1 ? "200px 1fr" : "1fr", gap: 16, alignItems: "start" }}>
+              {reports.length > 1 && (
+                <div className="stack" style={{ gap: 4 }}>
+                  <div className="sectionTitle" style={{ marginBottom: 8 }}>History</div>
+                  {reports.map((r) => (
+                    <button key={r.id} className="btn" style={{ width: "100%", justifyContent: "flex-start", textAlign: "left", fontSize: 13, fontWeight: r.id === activeReportId ? 900 : 400, background: r.id === activeReportId ? "var(--ink)" : undefined, color: r.id === activeReportId ? "var(--paper)" : undefined, padding: "8px 12px" }} onClick={() => setActiveReportId(r.id)}>
+                      <div>{r.period_label}</div>
+                      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>{new Date(r.created_at).toLocaleDateString()}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {activeReport && (
+                <div>
+                  {activeReport.data_snapshot && (
+                    <div className="card cardPad" style={{ marginBottom: 12 }}>
+                      <div className="rowBetween" style={{ flexWrap: "wrap", gap: 20 }}>
+                        {[
+                          { val: activeReport.data_snapshot.touches?.this_period, label: "touches this period", sub: activeReport.data_snapshot.touches?.delta !== undefined ? `${activeReport.data_snapshot.touches.delta >= 0 ? "+" : ""}${activeReport.data_snapshot.touches.delta} vs prior` : null, subColor: activeReport.data_snapshot.touches?.delta >= 0 ? "#0b6b2a" : "#8a0000" },
+                          { val: activeReport.data_snapshot.contacts?.total, label: "active contacts", sub: activeReport.data_snapshot.contacts?.never_touched > 0 ? `${activeReport.data_snapshot.contacts.never_touched} never touched` : null, subColor: "#8a0000" },
+                          { val: activeReport.data_snapshot.referrals?.asks_last_90d, label: "referral asks (90d)", sub: activeReport.data_snapshot.referrals?.conversion_rate != null ? `${activeReport.data_snapshot.referrals.conversion_rate}% converted` : null, subColor: activeReport.data_snapshot.referrals?.conversion_rate >= 15 ? "#0b6b2a" : "rgba(18,18,18,.5)" },
+                          { val: activeReport.data_snapshot.pipeline?.active_deals, label: "active deals", sub: activeReport.data_snapshot.pipeline?.active_pipeline_value > 0 ? `$${Math.round(activeReport.data_snapshot.pipeline.active_pipeline_value / 1000000 * 10) / 10}M value` : null, subColor: "rgba(18,18,18,.5)" },
+                          { val: activeReport.data_snapshot.referral_network?.overdue_top_sources, label: "overdue top sources", sub: null, subColor: "" },
+                        ].map(({ val, label, sub, subColor }) => (
+                          <div key={label} style={{ textAlign: "center" }}>
+                            <div style={{ fontSize: 22, fontWeight: 900 }}>{val ?? "—"}</div>
+                            <div className="muted small">{label}</div>
+                            {sub && <div style={{ fontSize: 11, color: subColor, fontWeight: 700 }}>{sub}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="card cardPad" style={{ lineHeight: 1.6 }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                      <span className="muted small">Generated {new Date(activeReport.created_at).toLocaleString()}</span>
+                    </div>
+                    {renderMarkdown(activeReport.content)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
