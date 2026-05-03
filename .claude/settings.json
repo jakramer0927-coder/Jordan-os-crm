@@ -39,7 +39,8 @@
       "Bash(git fetch *)",
       "Bash(rsync -a --delete /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ /Users/jordankramer/projects/jordan-os-crm/app/)",
       "Bash(rsync -a /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ /Users/jordankramer/projects/jordan-os-crm/app/)",
-      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|sql\\)$\")"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",

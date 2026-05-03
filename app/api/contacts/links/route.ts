@@ -2,6 +2,76 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getVerifiedUid, unauthorized } from "@/lib/supabase/server";
 
+type TouchRow = {
+  id: string;
+  contact_id: string;
+  channel: string;
+  direction: string;
+  intent: string | null;
+  occurred_at: string;
+  summary: string | null;
+  source: string;
+  source_link: string | null;
+  source_message_id: string | null;
+};
+
+function touchDedupKey(t: TouchRow): string {
+  return `${t.occurred_at}|${t.channel}|${t.direction}`;
+}
+
+async function syncTouchHistories(idA: string, idB: string): Promise<{ copied_to_a: number; copied_to_b: number; error?: string }> {
+  try {
+    const [{ data: touchesA }, { data: touchesB }] = await Promise.all([
+      supabaseAdmin.from("touches").select("id,contact_id,channel,direction,intent,occurred_at,summary,source,source_link,source_message_id").eq("contact_id", idA),
+      supabaseAdmin.from("touches").select("id,contact_id,channel,direction,intent,occurred_at,summary,source,source_link,source_message_id").eq("contact_id", idB),
+    ]);
+
+    const allA = (touchesA ?? []) as TouchRow[];
+    const allB = (touchesB ?? []) as TouchRow[];
+
+    const bMsgIds = new Set(allB.filter(t => t.source_message_id).map(t => t.source_message_id!));
+    const bKeys   = new Set(allB.map(touchDedupKey));
+    const aMsgIds = new Set(allA.filter(t => t.source_message_id).map(t => t.source_message_id!));
+    const aKeys   = new Set(allA.map(touchDedupKey));
+
+    const toCopyToB = allA.filter(t =>
+      t.source_message_id ? !bMsgIds.has(t.source_message_id) : !bKeys.has(touchDedupKey(t))
+    );
+    const toCopyToA = allB.filter(t =>
+      t.source_message_id ? !aMsgIds.has(t.source_message_id) : !aKeys.has(touchDedupKey(t))
+    );
+
+    const toRow = (t: TouchRow, targetId: string) => ({
+      contact_id: targetId,
+      channel: t.channel,
+      direction: t.direction,
+      intent: t.intent,
+      occurred_at: t.occurred_at,
+      summary: t.summary,
+      source: "mirrored",
+      source_link: t.source_link,
+      source_message_id: t.source_message_id,
+    });
+
+    const BATCH = 100;
+    let copied_to_b = 0;
+    let copied_to_a = 0;
+
+    for (let i = 0; i < toCopyToB.length; i += BATCH) {
+      const { error } = await supabaseAdmin.from("touches").insert(toCopyToB.slice(i, i + BATCH).map(t => toRow(t, idB)));
+      if (!error) copied_to_b += Math.min(BATCH, toCopyToB.length - i);
+    }
+    for (let i = 0; i < toCopyToA.length; i += BATCH) {
+      const { error } = await supabaseAdmin.from("touches").insert(toCopyToA.slice(i, i + BATCH).map(t => toRow(t, idA)));
+      if (!error) copied_to_a += Math.min(BATCH, toCopyToA.length - i);
+    }
+
+    return { copied_to_a, copied_to_b };
+  } catch (e: any) {
+    return { copied_to_a: 0, copied_to_b: 0, error: String(e?.message ?? e) };
+  }
+}
+
 export const runtime = "nodejs";
 
 function isUuid(v: string): boolean {
@@ -84,7 +154,9 @@ export async function POST(req: Request) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, link: data });
+
+  const synced = await syncTouchHistories(idA, idB);
+  return NextResponse.json({ ok: true, link: data, synced });
 }
 
 // DELETE /api/contacts/links
