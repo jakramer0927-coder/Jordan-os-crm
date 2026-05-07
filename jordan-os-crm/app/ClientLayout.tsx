@@ -134,12 +134,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     { href: "/morning", label: "Morning" },
     { href: "/contacts", label: "Contacts" },
     { href: "/pipeline", label: "Pipeline" },
-    { href: "/unmatched", label: "Unmatched" },
-    { href: "/triage", label: "Triage" },
+    { href: "/review", label: "Review" },
     { href: "/insights", label: "Insights" },
-    { href: "/reports", label: "Reports" },
-    { href: "/linkedin", label: "LinkedIn" },
-    { href: "/settings/integrations", label: "Integrations" },
+    { href: "/settings", label: "Settings" },
   ];
 
   return (
