@@ -581,12 +581,15 @@ export default function MorningPage() {
       const allDeals: PipelineDeal[] = pj.deals ?? [];
       const now = Date.now();
 
-      // Stale deal momentum alerts (legacy status-based)
+      // Stale deal momentum alerts
       const stale = allDeals.filter(d => {
         const days = Math.floor((now - new Date(d.created_at).getTime()) / 86400000);
-        const thresholds: Record<string, number> = { lead: 60, showing: 30, offer_in: 14, under_contract: 60 };
-        const threshold = thresholds[d.status] ?? 999;
-        const closeOverdue = d.close_date && new Date(d.close_date) < new Date() && d.status === "under_contract";
+        const currentStage = d.opp_type === "seller" ? d.seller_stage : d.buyer_stage;
+        const buyerThresholds: Record<string, number> = { initial_meeting: 60, actively_searching: 30, offer: 14, under_contract: 60 };
+        const sellerThresholds: Record<string, number> = { initial_meeting: 60, signed_agreement: 30, listing_prepped: 14, on_market: 30, in_contract: 60 };
+        const thresholdMap = d.opp_type === "seller" ? sellerThresholds : buyerThresholds;
+        const threshold = thresholdMap[currentStage ?? ""] ?? 999;
+        const closeOverdue = d.close_date && new Date(d.close_date) < new Date() && (currentStage === "under_contract" || currentStage === "in_contract");
         return closeOverdue || days >= threshold;
       });
       stale.sort((a, b) => {
@@ -1447,7 +1450,14 @@ export default function MorningPage() {
             {staleDealAlerts.map(deal => {
               const days = Math.floor((Date.now() - new Date(deal.created_at).getTime()) / 86400000);
               const closeOverdue = deal.close_date && new Date(deal.close_date) < new Date();
-              const stageLabels: Record<string, string> = { lead: "Lead", showing: "Showing", offer_in: "Offer In", under_contract: "Under Contract" };
+              const allStageLabels: Record<string, string> = {
+                initial_meeting: "Initial Meeting", actively_searching: "Searching", offer: "Offer",
+                under_contract: "Under Contract", closed: "Closed",
+                signed_agreement: "Signed Agreement", listing_prepped: "Listing Prepped",
+                on_market: "On Market", in_contract: "In Contract", sold: "Sold",
+              };
+              const currentStage = deal.opp_type === "seller" ? deal.seller_stage : deal.buyer_stage;
+              const stageLabel = allStageLabels[currentStage ?? ""] ?? (currentStage ?? deal.status);
               return (
                 <div key={deal.id} className="card cardPad" style={{ borderColor: closeOverdue ? "rgba(200,0,0,.2)" : "rgba(200,100,0,.2)", background: closeOverdue ? "rgba(200,0,0,.03)" : "rgba(200,100,0,.03)", padding: "10px 14px" }}>
                   <div className="rowBetween" style={{ alignItems: "flex-start", gap: 12 }}>
@@ -1457,7 +1467,7 @@ export default function MorningPage() {
                         {deal.contacts && (
                           <span style={{ fontSize: 12, color: "rgba(18,18,18,.6)", fontWeight: 700 }}>{deal.contacts.display_name}</span>
                         )}
-                        <span className="badge" style={{ fontSize: 11 }}>{stageLabels[deal.status] ?? deal.status}</span>
+                        <span className="badge" style={{ fontSize: 11 }}>{stageLabel}</span>
                         <span style={{ fontSize: 12, fontWeight: 700, color: closeOverdue ? "#8a0000" : "#92610a" }}>
                           {closeOverdue
                             ? `⚠ Close date overdue · ${days}d in pipeline`

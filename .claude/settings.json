@@ -40,7 +40,12 @@
       "Bash(rsync -a --delete /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ /Users/jordankramer/projects/jordan-os-crm/app/)",
       "Bash(rsync -a /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ /Users/jordankramer/projects/jordan-os-crm/app/)",
       "Bash(grep -E \"\\\\.\\(tsx|ts|jsx|js\\)$\")",
-      "Bash(grep -E \"\\\\.\\(ts|tsx|sql\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx|sql\\)$\")",
+      "Bash(git -C /Users/jordankramer/projects/jordan-os-crm status)",
+      "Bash(git -C /Users/jordankramer/projects/jordan-os-crm diff --stat HEAD)",
+      "Bash(git -C /Users/jordankramer/projects/jordan-os-crm add jordan-os-crm/app/ClientLayout.tsx jordan-os-crm/app/insights/page.tsx jordan-os-crm/app/linkedin/page.tsx jordan-os-crm/app/reports/page.tsx jordan-os-crm/app/settings/integrations/page.tsx jordan-os-crm/app/triage/page.tsx jordan-os-crm/app/unmatched/page.tsx jordan-os-crm/app/review/ jordan-os-crm/app/settings/page.tsx)",
+      "Bash(git -C /Users/jordankramer/projects/jordan-os-crm commit -m ' *)",
+      "Bash(git -C /Users/jordankramer/projects/jordan-os-crm push)"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",
