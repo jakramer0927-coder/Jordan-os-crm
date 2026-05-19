@@ -48,6 +48,7 @@ type ContactWithLastOutbound = Contact & {
   text_reply_rate: number | null;
   linkedin_connected_at: string | null;
   referral_potential: number;
+  transaction_score: number | null;
   birthday: string | null;
   close_anniversary: string | null;
   move_in_date: string | null;
@@ -447,11 +448,7 @@ export default function MorningPage() {
 
   // logging touch inline
   const [loggingFor, setLoggingFor] = useState<string | null>(null);
-  const [touchChannel, setTouchChannel] = useState<Touch["channel"]>("text");
-  const [touchIntent, setTouchIntent] = useState<TouchIntent>("check_in");
-  const [touchSummary, setTouchSummary] = useState("");
-  const [touchSource, setTouchSource] = useState("manual");
-  const [touchLink, setTouchLink] = useState("");
+  const [touchNlInput, setTouchNlInput] = useState("");
   const [savingTouch, setSavingTouch] = useState(false);
 
   // stable list + completed tracking — persisted per calendar day (loaded after uid is known)
@@ -653,18 +650,14 @@ export default function MorningPage() {
 
   function openLog(c: Recommendation) {
     setLoggingFor(c.id);
-    setTouchChannel(c.suggested_channel);
-    setTouchIntent("check_in");
-    setTouchSummary("");
-    setTouchSource("manual");
-    setTouchLink("");
+    setTouchNlInput("");
     if (isMobile) setMobileLogContact(c);
   }
 
   function closeMobileSheet() {
     setMobileLogContact(null);
     setLoggingFor(null);
-    setTouchSummary("");
+    setTouchNlInput("");
     setRemindOpen(false);
   }
 
@@ -682,33 +675,29 @@ export default function MorningPage() {
   }
 
   async function saveTouch() {
-    if (!loggingFor) return;
+    if (!loggingFor || !touchNlInput.trim()) return;
     setSavingTouch(true);
     setError(null);
     setMsg(null);
 
-    const { error: insErr } = await supabase.from("touches").insert({
-      contact_id: loggingFor,
-      channel: touchChannel,
-      direction: "outbound",
-      intent: touchIntent,
-      occurred_at: new Date().toISOString(),
-      summary: touchSummary.trim() ? touchSummary.trim() : null,
-      source: touchSource.trim() ? touchSource.trim() : null,
-      source_link: touchLink.trim() ? touchLink.trim() : null,
-      // Auto-set outcome=pending for referral asks so we can follow up in 30 days
-      outcome: touchIntent === "referral_ask" ? "pending" : null,
-    });
-
-    setSavingTouch(false);
-
-    if (insErr) {
-      setError(`Insert touch error: ${insErr.message}`);
+    const contactId = loggingFor;
+    try {
+      const res = await fetch("/api/interaction-notes/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contactId, raw_text: touchNlInput.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(j?.error || "Save failed"); setSavingTouch(false); return; }
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+      setSavingTouch(false);
       return;
     }
 
+    setSavingTouch(false);
     // Mark as completed — do NOT reload (this is what caused reshuffling)
-    setCompletedIds((prev) => new Set([...prev, loggingFor]));
+    setCompletedIds((prev) => new Set([...prev, contactId]));
     setTodayCount((n) => n + 1);
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
@@ -925,6 +914,12 @@ export default function MorningPage() {
       // Referral potential: matches profile of proven referral sources
       if (c.referral_potential >= 70) score += 12;
       else if (c.referral_potential >= 50) score += 6;
+
+      // Transaction score: AI-assessed likelihood to transact in 6 months
+      const txScore = c.transaction_score ?? 0;
+      if (txScore >= 80) { score += 20; reasons.push(`Transaction score ${txScore} — high likelihood`); }
+      else if (txScore >= 60) { score += 12; reasons.push(`Transaction score ${txScore}`); }
+      else if (txScore >= 40) { score += 5; }
 
       // Anniversary boost — strong reason to reach out even if recently touched
       if (anns.length > 0) {
@@ -1693,85 +1688,21 @@ export default function MorningPage() {
                 {loggingFor === c.id && (
                   <div className="section" style={{ marginTop: 12 }}>
                     <div className="sectionTitleRow" style={{ marginBottom: 8 }}>
-                      <div className="sectionTitle">Log outbound touch</div>
+                      <div className="sectionTitle">Log touch</div>
                       <div className="sectionSub">{c.display_name}</div>
                     </div>
 
-                    <div className="row">
-                      <div style={{ width: 200, minWidth: 180 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Channel
-                        </div>
-                        <select
-                          className="select"
-                          value={touchChannel}
-                          onChange={(e) => setTouchChannel(e.target.value as Touch["channel"])}
-                        >
-                          <option value="email">email</option>
-                          <option value="text">text</option>
-                          <option value="call">call</option>
-                          <option value="in_person">in_person</option>
-                          <option value="social_dm">social_dm</option>
-                          <option value="other">other</option>
-                        </select>
-                      </div>
-
-                      <div style={{ width: 260, minWidth: 220 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Intent
-                        </div>
-                        <select
-                          className="select"
-                          value={touchIntent}
-                          onChange={(e) => setTouchIntent(e.target.value as TouchIntent)}
-                        >
-                          <option value="check_in">check_in</option>
-                          <option value="referral_ask">referral_ask</option>
-                          <option value="review_ask">review_ask</option>
-                          <option value="deal_followup">deal_followup</option>
-                          <option value="collaboration">collaboration</option>
-                          <option value="event_invite">event_invite</option>
-                          <option value="other">other</option>
-                        </select>
-                      </div>
-
-                      <div style={{ flex: 1, minWidth: 220 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Source
-                        </div>
-                        <input
-                          className="input"
-                          value={touchSource}
-                          onChange={(e) => setTouchSource(e.target.value)}
-                          placeholder="manual / gmail / sms"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="row" style={{ marginTop: 10 }}>
-                      <div style={{ flex: 1, minWidth: 260 }}>
-                        <div className="small muted bold" style={{ marginBottom: 6 }}>
-                          Link (optional)
-                        </div>
-                        <input
-                          className="input"
-                          value={touchLink}
-                          onChange={(e) => setTouchLink(e.target.value)}
-                          placeholder="thread link / calendar link"
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: 10 }}>
-                      <div className="small muted bold" style={{ marginBottom: 6 }}>
-                        Summary (optional)
-                      </div>
+                    <div style={{ marginBottom: 8 }}>
                       <textarea
                         className="textarea"
-                        value={touchSummary}
-                        onChange={(e) => setTouchSummary(e.target.value)}
-                        placeholder="Quick note about what you sent / what happened"
+                        autoFocus
+                        value={touchNlInput}
+                        onChange={(e) => setTouchNlInput(e.target.value)}
+                        placeholder='What happened? e.g. "texted to check in", "called, she wants to list in fall", "asked for a referral, he mentioned his colleague is buying"'
+                        rows={2}
+                        style={{ resize: "vertical" }}
                       />
+                      <div style={{ fontSize: 11, color: "rgba(18,18,18,.4)", marginTop: 4 }}>Claude will extract channel, intent, and any signals automatically.</div>
                     </div>
 
                     {/* Remind me */}
@@ -1798,11 +1729,11 @@ export default function MorningPage() {
                     </div>
 
                     <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
-                      <div className="muted small">Outbound touches reset cadence.</div>
+                      <div className="muted small">Claude extracts channel, intent &amp; signals.</div>
                       <div className="row">
                         <button
                           className="btn"
-                          onClick={() => { setLoggingFor(null); setRemindOpen(false); }}
+                          onClick={() => { setLoggingFor(null); setRemindOpen(false); setTouchNlInput(""); }}
                           disabled={savingTouch}
                         >
                           Cancel
@@ -1816,9 +1747,9 @@ export default function MorningPage() {
                               await saveReminder(contactId);
                             }
                           }}
-                          disabled={savingTouch}
+                          disabled={savingTouch || !touchNlInput.trim()}
                         >
-                          {savingTouch ? "Saving…" : "Save"}
+                          {savingTouch ? "Extracting…" : "Save"}
                         </button>
                       </div>
                     </div>
@@ -1867,40 +1798,18 @@ export default function MorningPage() {
               <button onClick={closeMobileSheet} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "var(--muted)", padding: "4px 8px" }}>✕</button>
             </div>
 
-            {/* Channel pills */}
-            <div style={{ marginBottom: 14 }}>
-              <div className="label" style={{ marginBottom: 8 }}>Channel</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {(["text", "call", "email", "in_person", "social_dm"] as Touch["channel"][]).map((ch) => (
-                  <button
-                    key={ch}
-                    onClick={() => setTouchChannel(ch)}
-                    style={{
-                      padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 700,
-                      border: "1px solid",
-                      borderColor: touchChannel === ch ? "var(--accent)" : "var(--line)",
-                      background: touchChannel === ch ? "var(--accent)" : "var(--paper)",
-                      color: touchChannel === ch ? "#fff" : "var(--ink)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {ch === "in_person" ? "In Person" : ch === "social_dm" ? "DM" : ch.charAt(0).toUpperCase() + ch.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Summary */}
+            {/* NL input */}
             <div style={{ marginBottom: 16 }}>
-              <div className="label" style={{ marginBottom: 6 }}>Notes (optional)</div>
+              <div className="label" style={{ marginBottom: 6 }}>What happened?</div>
               <textarea
                 className="textarea"
                 autoFocus
-                value={touchSummary}
-                onChange={(e) => setTouchSummary(e.target.value)}
-                placeholder="Quick note — what you sent or what happened"
-                style={{ minHeight: 72, fontSize: 16 }}
+                value={touchNlInput}
+                onChange={(e) => setTouchNlInput(e.target.value)}
+                placeholder='e.g. "texted to check in", "called, she wants to list in fall", "asked for a referral"'
+                style={{ minHeight: 80, fontSize: 16, resize: "none" }}
               />
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Claude extracts channel, intent, and any signals automatically.</div>
             </div>
 
             {/* Follow-up reminder */}
@@ -1930,7 +1839,7 @@ export default function MorningPage() {
             <button
               className="btn btnPrimary"
               style={{ width: "100%", fontSize: 16, padding: "14px", justifyContent: "center" }}
-              disabled={savingTouch}
+              disabled={savingTouch || !touchNlInput.trim()}
               onClick={async () => {
                 const contactId = loggingFor;
                 await saveTouch();
@@ -1938,7 +1847,7 @@ export default function MorningPage() {
                 closeMobileSheet();
               }}
             >
-              {savingTouch ? "Logging…" : "Log touch"}
+              {savingTouch ? "Extracting…" : "Log touch"}
             </button>
           </div>
         </div>

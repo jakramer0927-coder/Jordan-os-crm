@@ -492,15 +492,6 @@ export default function ContactDetailPage() {
   const [homeAddress, setHomeAddress] = useState("");
   const [savingContact, setSavingContact] = useState(false);
 
-  const [logOpen, setLogOpen] = useState(false);
-  const [logChannel, setLogChannel] = useState<Touch["channel"]>("text");
-  const [logDirection, setLogDirection] = useState<Touch["direction"]>("outbound");
-  const [logIntent, setLogIntent] = useState<TouchIntent>("check_in");
-  const [logOccurredAt, setLogOccurredAt] = useState<string>("");
-  const [logSummary, setLogSummary] = useState("");
-  const [logSource, setLogSource] = useState("manual");
-  const [logLink, setLogLink] = useState("");
-  const [savingTouch, setSavingTouch] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
 
@@ -650,7 +641,6 @@ export default function ContactDetailPage() {
   // UI state
   const [activeTab, setActiveTab] = useState<"outreach" | "timeline" | "details">("outreach");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [touchSaved, setTouchSaved] = useState(false);
 
   async function requireSession() {
     const { data } = await supabase.auth.getSession();
@@ -801,46 +791,6 @@ export default function ContactDetailPage() {
     await fetchAll();
   }
 
-  function openLog() {
-    setLogOpen(true);
-    setTouchSaved(false);
-    setLogChannel("text");
-    setLogDirection("outbound");
-    setLogIntent("check_in");
-    setLogSummary("");
-    setLogSource("manual");
-    setLogLink("");
-    setLogOccurredAt(new Date().toISOString().slice(0, 16)); // yyyy-mm-ddThh:mm
-  }
-
-  async function saveTouch() {
-    if (!contact) return;
-    setSavingTouch(true);
-    setError(null);
-
-    const occurred_at = logOccurredAt ? new Date(logOccurredAt).toISOString() : new Date().toISOString();
-
-    const { error } = await supabase.from("touches").insert({
-      contact_id: contact.id,
-      channel: logChannel,
-      direction: logDirection,
-      intent: logIntent,
-      occurred_at,
-      summary: logSummary.trim() ? logSummary.trim() : null,
-      source: logSource.trim() ? logSource.trim() : null,
-      source_link: logLink.trim() ? logLink.trim() : null,
-    });
-
-    setSavingTouch(false);
-
-    if (error) {
-      setError(`Insert touch error: ${error.message}`);
-      return;
-    }
-
-    setTouchSaved(true);
-    await fetchAll();
-  }
 
   async function addLink(targetId: string) {
     if (!uid) return;
@@ -1242,7 +1192,6 @@ export default function ContactDetailPage() {
             >
               Draft message
             </button>
-            <button className="btn" onClick={openLog}>Log touch</button>
             <button
               className="btn"
               style={{ fontSize: 12 }}
@@ -2008,132 +1957,6 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* Log touch modal */}
-      {logOpen && (
-        <div
-          className="modalSheet"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 16,
-            zIndex: 999,
-          }}
-        >
-          <div className="card cardPad modalSheetCard" style={{ width: "min(860px, 100%)" }}>
-            <div className="rowResponsiveBetween">
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>Log touch</div>
-                <div className="subtle" style={{ marginTop: 4 }}>{contact.display_name}</div>
-              </div>
-              <button className="btn btnFullMobile" onClick={() => { setLogOpen(false); setTouchSaved(false); }}>
-                Close
-              </button>
-            </div>
-
-            {touchSaved ? (
-              <div className="stack" style={{ marginTop: 16, gap: 12 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: "#0b6b2a" }}>Touch saved</div>
-                <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-                  <a href="/morning" className="btn btnPrimary">← Back to Morning</a>
-                  <button className="btn" onClick={() => { setLogOpen(false); setTouchSaved(false); }}>Stay here</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
-                  <div className="field" style={{ width: 160, minWidth: 160 }}>
-                    <div className="label">Direction</div>
-                    <select className="select" value={logDirection} onChange={(e) => setLogDirection(e.target.value as any)}>
-                      <option value="outbound">outbound</option>
-                      <option value="inbound">inbound</option>
-                    </select>
-                  </div>
-
-                  <div className="field" style={{ width: 160, minWidth: 160 }}>
-                    <div className="label">Channel</div>
-                    <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value as any)}>
-                      <option value="email">email</option>
-                      <option value="text">text</option>
-                      <option value="call">call</option>
-                      <option value="in_person">in_person</option>
-                      <option value="social_dm">social_dm</option>
-                      <option value="other">other</option>
-                    </select>
-                  </div>
-
-                  <div className="field" style={{ width: 220, minWidth: 220 }}>
-                    <div className="label">Intent</div>
-                    <select className="select" value={logIntent} onChange={(e) => setLogIntent(e.target.value as any)}>
-                      <option value="check_in">check_in</option>
-                      <option value="referral_ask">referral_ask</option>
-                      <option value="review_ask">review_ask</option>
-                      <option value="deal_followup">deal_followup</option>
-                      <option value="collaboration">collaboration</option>
-                      <option value="event_invite">event_invite</option>
-                      <option value="other">other</option>
-                    </select>
-                  </div>
-
-                  <div className="field" style={{ width: 220, minWidth: 220 }}>
-                    <div className="label">Occurred at</div>
-                    <input
-                      className="input"
-                      type="datetime-local"
-                      value={logOccurredAt}
-                      onChange={(e) => setLogOccurredAt(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="rowResponsive" style={{ marginTop: 12, alignItems: "flex-end" }}>
-                  <div className="field" style={{ flex: 1, minWidth: 220 }}>
-                    <div className="label">Source</div>
-                    <input
-                      className="input"
-                      value={logSource}
-                      onChange={(e) => setLogSource(e.target.value)}
-                      placeholder="manual / gmail / sms"
-                    />
-                  </div>
-
-                  <div className="field" style={{ flex: 1, minWidth: 260 }}>
-                    <div className="label">Link (optional)</div>
-                    <input
-                      className="input"
-                      value={logLink}
-                      onChange={(e) => setLogLink(e.target.value)}
-                      placeholder="thread link / calendar link"
-                    />
-                  </div>
-                </div>
-
-                <div className="field" style={{ marginTop: 10 }}>
-                  <div className="label">Summary (optional)</div>
-                  <textarea
-                    className="textarea"
-                    value={logSummary}
-                    onChange={(e) => setLogSummary(e.target.value)}
-                    placeholder="Quick note about what happened"
-                  />
-                </div>
-
-                <div className="rowResponsive" style={{ marginTop: 12 }}>
-                  <button className="btn btnPrimary btnFullMobile" onClick={saveTouch} disabled={savingTouch}>
-                    {savingTouch ? "Saving…" : "Save touch"}
-                  </button>
-                  <button className="btn btnFullMobile" onClick={() => setLogOpen(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -30,14 +30,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   // Quick-log touch
   const [quickLogOpen, setQuickLogOpen] = useState(false);
-  const [qlContactQuery, setQlContactQuery] = useState("");
-  const [qlContactResults, setQlContactResults] = useState<{ id: string; display_name: string; category: string; tier: string | null }[]>([]);
   const [qlContactId, setQlContactId] = useState("");
   const [qlContactName, setQlContactName] = useState("");
-  const [qlChannel, setQlChannel] = useState<"text" | "call" | "email" | "in_person" | "social_dm" | "other">("text");
-  const [qlSummary, setQlSummary] = useState("");
   const [qlNlInput, setQlNlInput] = useState("");
-  const [qlParsing, setQlParsing] = useState(false);
   const [qlSaving, setQlSaving] = useState(false);
   const [qlSuccess, setQlSuccess] = useState<string | null>(null);
   const [qlError, setQlError] = useState<string | null>(null);
@@ -78,56 +73,30 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   }
 
   function openQuickLog() {
-    setQlContactQuery(""); setQlContactResults([]); setQlContactId(""); setQlContactName("");
-    setQlChannel("text"); setQlSummary(""); setQlNlInput("");
+    setQlContactId(""); setQlContactName(""); setQlNlInput("");
     setQlSuccess(null); setQlError(null);
     setQuickLogOpen(true);
   }
 
-  async function searchQlContacts(q: string) {
-    setQlContactQuery(q);
-    setQlContactId(""); setQlContactName("");
-    if (!q.trim() || q.trim().length < 2) { setQlContactResults([]); return; }
-    const res = await fetch(`/api/contacts/search?q=${encodeURIComponent(q.trim())}`);
-    const j = await res.json().catch(() => ({}));
-    setQlContactResults(res.ok ? (j.results ?? []) : []);
-  }
-
-  async function parseNlInput() {
-    if (!qlNlInput.trim()) return;
-    setQlParsing(true);
-    try {
-      const res = await fetch("/api/touches/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: qlNlInput.trim(), contact_name: qlContactName }),
-      });
-      if (res.ok) {
-        const j = await res.json();
-        if (j.channel) setQlChannel(j.channel);
-        if (j.summary) setQlSummary(j.summary);
-      }
-    } catch { /* ignore */ }
-    setQlParsing(false);
-  }
-
   async function saveQuickLog() {
     if (!qlContactId) { setQlError("Select a contact first."); return; }
+    if (!qlNlInput.trim()) { setQlError("Describe what happened."); return; }
     setQlSaving(true);
     setQlError(null);
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.from("touches").insert({
-      contact_id: qlContactId,
-      channel: qlChannel,
-      direction: "outbound",
-      intent: "check_in",
-      occurred_at: new Date().toISOString(),
-      summary: qlSummary.trim() || qlNlInput.trim() || null,
-      source: "manual",
-    });
-    setQlSaving(false);
-    if (error) { setQlError(error.message); return; }
-    setQuickLogOpen(false);
+    try {
+      const res = await fetch("/api/interaction-notes/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: qlContactId, raw_text: qlNlInput.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setQlError(j?.error || "Save failed"); return; }
+      setQlSuccess(`Logged for ${qlContactName}`);
+    } catch (e: any) {
+      setQlError(e?.message || "Save failed");
+    } finally {
+      setQlSaving(false);
+    }
   }
 
   const navLinks = [
@@ -317,43 +286,27 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
             {!qlSuccess && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {/* Contact */}
                 <ContactSearchInput
                   selectedId={qlContactId}
                   selectedName={qlContactName}
-                  onSelect={(id, name) => { setQlContactId(id); setQlContactName(name); setQlContactQuery(id ? name : ""); }}
+                  onSelect={(id, name) => { setQlContactId(id); setQlContactName(name); }}
                   placeholder="Who did you reach out to?"
                   autoFocus
                 />
 
-                {/* Natural language input */}
-                <div>
-                  <input
-                    className="input"
-                    placeholder='What happened? e.g. "quick call, he wants to list in spring"'
-                    value={qlNlInput}
-                    onChange={e => setQlNlInput(e.target.value)}
-                    onBlur={() => qlNlInput.trim() && parseNlInput()}
-                  />
-                  {qlParsing && <div style={{ fontSize: 11, color: "rgba(18,18,18,.4)", marginTop: 4 }}>Parsing…</div>}
-                </div>
-
-                {/* Channel + summary (auto-filled by NL parse, editable) */}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <select className="select" value={qlChannel} onChange={e => setQlChannel(e.target.value as typeof qlChannel)} style={{ width: 120 }}>
-                    <option value="text">Text</option>
-                    <option value="call">Call</option>
-                    <option value="email">Email</option>
-                    <option value="in_person">In person</option>
-                    <option value="social_dm">Social DM</option>
-                    <option value="other">Other</option>
-                  </select>
-                  <input className="input" style={{ flex: 1, minWidth: 160 }} placeholder="Summary (optional)" value={qlSummary} onChange={e => setQlSummary(e.target.value)} />
-                </div>
+                <textarea
+                  className="textarea"
+                  placeholder='What happened? e.g. "Called Mike, he mentioned they might list in spring, wife is expecting"'
+                  value={qlNlInput}
+                  onChange={e => setQlNlInput(e.target.value)}
+                  rows={3}
+                  style={{ resize: "vertical" }}
+                />
+                <div style={{ fontSize: 11, color: "rgba(18,18,18,.4)" }}>Claude will extract the channel, intent, and any life events automatically.</div>
 
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="btn btnPrimary" onClick={saveQuickLog} disabled={qlSaving || !qlContactId}>
-                    {qlSaving ? "Saving…" : "Log touch"}
+                    {qlSaving ? "Extracting…" : "Log touch"}
                   </button>
                   <button className="btn" onClick={() => setQuickLogOpen(false)}>Cancel</button>
                 </div>

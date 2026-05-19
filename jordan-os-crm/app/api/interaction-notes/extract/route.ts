@@ -48,6 +48,9 @@ ${raw_text.trim()}
 
 Return this exact JSON structure:
 {
+  "channel": "text | call | email | in_person | social_dm | other",
+  "direction": "outbound | inbound",
+  "intent": "check_in | referral_ask | review_ask | deal_followup | collaboration | event_invite | other",
   "summary": "2-3 sentence summary of the interaction",
   "topics_discussed": ["array of topics discussed"],
   "sentiment": "positive | neutral | negative | mixed",
@@ -102,6 +105,19 @@ Return this exact JSON structure:
       transaction_intent: extracted.transaction_intent ?? null,
       timeline_mentioned: extracted.timeline_mentioned ?? null,
     }).eq("id", noteId);
+
+    // Insert a touches row so cadence tracking stays current
+    const touchIntent = extracted.intent ?? "check_in";
+    await supabaseAdmin.from("touches").insert({
+      contact_id,
+      channel: extracted.channel ?? "other",
+      direction: extracted.direction ?? "outbound",
+      intent: touchIntent,
+      occurred_at: new Date().toISOString(),
+      summary: extracted.summary ?? raw_text.trim().slice(0, 500) || null,
+      source: "manual",
+      outcome: touchIntent === "referral_ask" ? "pending" : null,
+    });
 
     // Update contacts: last_interaction_at, life_event_flags (append unique), referral_signal_active
     const existingFlags: string[] = owned.life_event_flags ?? [];

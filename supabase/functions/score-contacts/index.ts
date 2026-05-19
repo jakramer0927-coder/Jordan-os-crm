@@ -70,19 +70,28 @@ Return:
   "suggested_action": "one specific action Jordan should take given this score"
 }`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 500,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 500,
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) return null;
 
@@ -115,7 +124,7 @@ Deno.serve(async (_req) => {
       .or(`score_updated_at.is.null,score_updated_at.lt.${sixDaysAgo}`)
       .neq("archived", true)
       .order("last_interaction_at", { ascending: false, nullsFirst: false })
-      .limit(200);
+      .limit(10);
 
     if (contactsErr) throw new Error(`Contacts fetch failed: ${contactsErr.message}`);
     if (!contacts || contacts.length === 0) {
@@ -157,8 +166,7 @@ Deno.serve(async (_req) => {
         console.error(`Failed to score contact ${contact.id}:`, e);
       }
 
-      // 500ms delay between Claude calls to respect rate limits
-      await sleep(500);
+      await sleep(200);
     }
 
     // Log the run

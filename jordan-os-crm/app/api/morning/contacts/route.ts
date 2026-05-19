@@ -29,8 +29,8 @@ export async function GET() {
 
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
 
-    // Attach active deal count, milestones, closed deal dates, referral GCI, and reply rates in parallel
-    const [dealRows, milestoneRows, closedDealRows, referralRows, replyRateRows] = await Promise.all([
+    // Attach active deal count, milestones, closed deal dates, referral GCI, reply rates, and tx scores in parallel
+    const [dealRows, milestoneRows, closedDealRows, referralRows, replyRateRows, txScoreRows] = await Promise.all([
       contactIds.length > 0
         ? supabaseAdmin.from("deals").select("contact_id").eq("user_id", uid)
             .not("status", "in", '("closed_won","closed_lost")').in("contact_id", contactIds)
@@ -57,6 +57,11 @@ export async function GET() {
             .in("contact_id", contactIds)
             .in("channel", ["email", "text"])
             .gte("occurred_at", ninetyDaysAgo)
+        : Promise.resolve({ data: [] }),
+      contactIds.length > 0
+        ? supabaseAdmin.from("contacts")
+            .select("id, transaction_score")
+            .in("id", contactIds)
         : Promise.resolve({ data: [] }),
     ]);
 
@@ -105,6 +110,11 @@ export async function GET() {
       else if (row.direction === "inbound") replyRateRaw[row.contact_id][ch].in++;
     }
 
+    const txScoreMap: Record<string, number | null> = {};
+    for (const row of (txScoreRows as any).data ?? []) {
+      txScoreMap[row.id] = row.transaction_score;
+    }
+
     const contactsWithDeals = contacts.map((c: any) => {
       const rr = replyRateRaw[c.id];
       const emailRate = rr && rr.email.out >= 3 ? Math.round((rr.email.in / rr.email.out) * 100) : null;
@@ -116,6 +126,7 @@ export async function GET() {
         referral_gci: referralGciMap[c.id] ?? 0,
         gmail_reply_rate: emailRate,
         text_reply_rate: textRate,
+        transaction_score: txScoreMap[c.id] ?? null,
         ...(milestoneMap[c.id] ?? { birthday: null, close_anniversary: null, move_in_date: null, linkedin_connected_at: null }),
       };
     });
