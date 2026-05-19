@@ -310,7 +310,7 @@ function contextTalkingPoint(c: Recommendation): string {
       : "Active deal moving — check on status and any co-op opportunities.";
   }
   if (c.referral_gci > 0) {
-    return `Referral source with $${(c.referral_gci / 1000).toFixed(0)}k in past GCI — thank them and ask who in their world might need help next.`;
+    return `Referral source with ${fmtGci(c.referral_gci)} in past GCI — thank them and ask who in their world might need help next.`;
   }
   if (cat === "agent") {
     return t === "A"
@@ -365,6 +365,15 @@ const DEFAULT_RULES: MorningRules = {
 function todayIsoDate(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function fmtGci(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `$${parseFloat(m.toFixed(2))}M`;
+  }
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${n.toLocaleString()}`;
 }
 
 async function loadLockedIds(uid: string): Promise<string[] | null> {
@@ -902,7 +911,7 @@ export default function MorningPage() {
       // $100k in referral GCI → +15, capped at +60
       if (c.referral_gci > 0) {
         score += Math.min(60, Math.floor(c.referral_gci / 100000) * 15);
-        reasons.push(`Referral source — $${(c.referral_gci / 1000).toFixed(0)}k in closed GCI`);
+        reasons.push(`Referral source — ${fmtGci(c.referral_gci)} in closed GCI`);
       }
 
       // Engagement signal: high reply rate = this person actually responds, worth prioritizing
@@ -1627,7 +1636,7 @@ export default function MorningPage() {
                         <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
                           {c.referral_gci > 0 && (
                             <span className="badge" style={{ fontSize: 11, color: "#0b6b2a", borderColor: "rgba(11,107,42,.25)", background: "rgba(11,107,42,.05)" }}>
-                              Referral ${(c.referral_gci / 1000).toFixed(0)}k GCI
+                              Referral {fmtGci(c.referral_gci)} GCI
                             </span>
                           )}
                           {c.gmail_reply_rate !== null && (

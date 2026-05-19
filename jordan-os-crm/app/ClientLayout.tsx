@@ -134,6 +134,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     { href: "/morning", label: "Morning" },
     { href: "/contacts", label: "Contacts" },
     { href: "/pipeline", label: "Pipeline" },
+    { href: "/referral-pipeline", label: "Referrals" },
     { href: "/review", label: "Review" },
     { href: "/insights", label: "Insights" },
     { href: "/settings", label: "Settings" },

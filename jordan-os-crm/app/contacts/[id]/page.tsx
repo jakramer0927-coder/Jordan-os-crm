@@ -556,22 +556,15 @@ export default function ContactDetailPage() {
   }, [touches]);
 
   // Contact brief / prepare mode
-  type ContactBrief = {
-    headline: string;
-    quick_facts: string[];
-    recent_context: string;
-    suggested_ask: string;
-    watch_out: string | null;
-  };
   const [briefOpen, setBriefOpen] = useState(false);
-  const [brief, setBrief] = useState<ContactBrief | null>(null);
+  const [briefText, setBriefText] = useState<string | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
 
   async function loadBrief() {
     if (!contact) return;
     setBriefOpen(true);
-    if (brief) return; // already loaded
+    if (briefText) return; // already loaded
     setBriefLoading(true);
     setBriefError(null);
     try {
@@ -582,11 +575,39 @@ export default function ContactDetailPage() {
       });
       const j = await res.json();
       if (!res.ok) setBriefError(j?.error || "Failed to generate brief");
-      else setBrief(j.brief ?? null);
+      else setBriefText(j.brief_text ?? null);
     } catch (e: any) {
       setBriefError(e?.message || "Failed to generate brief");
     } finally {
       setBriefLoading(false);
+    }
+  }
+
+  // Interaction Logger
+  const [intRaw, setIntRaw] = useState("");
+  const [intSaving, setIntSaving] = useState(false);
+  const [intResult, setIntResult] = useState<any | null>(null);
+  const [intError, setIntError] = useState<string | null>(null);
+
+  async function extractInteraction() {
+    if (!contact || !intRaw.trim()) return;
+    setIntSaving(true);
+    setIntError(null);
+    setIntResult(null);
+    try {
+      const res = await fetch("/api/interaction-notes/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contact.id, raw_text: intRaw }),
+      });
+      const j = await res.json();
+      if (!res.ok) { setIntError(j?.error || "Failed to extract"); return; }
+      setIntResult(j.extracted);
+      setIntRaw("");
+    } catch (e: any) {
+      setIntError(e?.message || "Failed to extract");
+    } finally {
+      setIntSaving(false);
     }
   }
 
@@ -1267,12 +1288,13 @@ export default function ContactDetailPage() {
       {briefOpen && (
         <div className="card cardPad stack">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Call prep — {contact.display_name}</div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Pre-meeting brief — {contact.display_name}</div>
             <div className="row" style={{ gap: 8 }}>
-              {!briefLoading && brief && (
-                <button className="btn" style={{ fontSize: 12 }} onClick={() => { setBrief(null); loadBrief(); }}>
-                  Refresh
-                </button>
+              {!briefLoading && briefText && (
+                <>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={() => navigator.clipboard.writeText(briefText)}>Copy</button>
+                  <button className="btn" style={{ fontSize: 12 }} onClick={() => { setBriefText(null); loadBrief(); }}>Refresh</button>
+                </>
               )}
               <button className="btn" style={{ fontSize: 12 }} onClick={() => setBriefOpen(false)}>Close</button>
             </div>
@@ -1280,49 +1302,26 @@ export default function ContactDetailPage() {
 
           {briefLoading && (
             <div className="stack" style={{ gap: 10 }}>
-              {[120, 80, 100, 90, 70].map((w, i) => (
-                <div key={i} style={{ height: 14, borderRadius: 6, background: "rgba(18,18,18,.08)", width: `${w}%`, maxWidth: "100%", animation: "pulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s` }} />
+              {[100, 85, 95, 70, 88, 75].map((w, i) => (
+                <div key={i} style={{ height: 13, borderRadius: 6, background: "rgba(18,18,18,.08)", width: `${w}%`, maxWidth: "100%", animation: "pulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.1}s` }} />
               ))}
             </div>
           )}
 
           {briefError && <div className="alert alertError">{briefError}</div>}
 
-          {brief && !briefLoading && (
-            <div className="stack" style={{ gap: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4 }}>{brief.headline}</div>
-
-              {brief.quick_facts?.length > 0 && (
-                <div>
-                  <div className="label" style={{ marginBottom: 6 }}>Key facts</div>
-                  <div className="stack" style={{ gap: 5 }}>
-                    {brief.quick_facts.map((f: string, i: number) => (
-                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14 }}>
-                        <span style={{ color: "#0b6b2a", fontWeight: 900, flexShrink: 0 }}>·</span>
-                        <span>{f}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {brief.recent_context && (
-                <div>
-                  <div className="label" style={{ marginBottom: 4 }}>Recent context</div>
-                  <div style={{ fontSize: 14, lineHeight: 1.5 }}>{brief.recent_context}</div>
-                </div>
-              )}
-
-              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,60,140,.06)", border: "1px solid rgba(11,60,140,.15)" }}>
-                <div className="label" style={{ marginBottom: 4, color: "#1a3f8a" }}>Suggested opener</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#1a3f8a", lineHeight: 1.5 }}>{brief.suggested_ask}</div>
-              </div>
-
-              {brief.watch_out && (
-                <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(138,0,0,.04)", border: "1px solid rgba(138,0,0,.12)", fontSize: 13, color: "#8a0000" }}>
-                  <strong>Note:</strong> {brief.watch_out}
-                </div>
-              )}
+          {briefText && !briefLoading && (
+            <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+              {briefText.split("\n").map((line, i) => {
+                if (line.startsWith("**") && line.endsWith("**")) {
+                  return <div key={i} style={{ fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", color: "rgba(18,18,18,.45)", marginTop: i === 0 ? 0 : 16, marginBottom: 4 }}>{line.replace(/\*\*/g, "")}</div>;
+                }
+                if (line.startsWith("- ") || line.startsWith("• ")) {
+                  return <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", paddingLeft: 4 }}><span style={{ color: "#1a3f8a", fontWeight: 900, flexShrink: 0, marginTop: 2 }}>·</span><span>{line.replace(/^[-•]\s*/, "")}</span></div>;
+                }
+                if (!line.trim()) return <div key={i} style={{ height: 4 }} />;
+                return <div key={i}>{line}</div>;
+              })}
             </div>
           )}
         </div>
@@ -1388,6 +1387,60 @@ export default function ContactDetailPage() {
           <button className="btn" style={{ fontSize: 12 }} onClick={() => setFuFormOpen(true)}>+ Add follow-up</button>
         </div>
       )}
+
+      {/* ── INTERACTION LOGGER ────────────────────────────────────────────── */}
+      <div className="card cardPad stack">
+        <div style={{ fontWeight: 900, fontSize: 15 }}>Log Interaction</div>
+        <textarea
+          className="textarea"
+          value={intRaw}
+          onChange={e => setIntRaw(e.target.value)}
+          rows={4}
+          placeholder="What happened? Speak freely — e.g. Just got off the phone with Mike. He mentioned they're thinking about upsizing, possibly this fall. Brooke is pregnant again. He asked about the Brentwood market. Seems warm, not urgent yet."
+          style={{ fontSize: 14 }}
+        />
+        {intError && <div className="alert alertError">{intError}</div>}
+        <div>
+          <button className="btn btnPrimary" onClick={extractInteraction} disabled={intSaving || !intRaw.trim()}>
+            {intSaving ? "Extracting…" : "Extract & Save"}
+          </button>
+        </div>
+
+        {intResult && (
+          <div className="stack" style={{ gap: 10, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.07)" }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#0b6b2a" }}>Saved ✓</div>
+            {intResult.summary && (
+              <div>
+                <div className="label" style={{ marginBottom: 4 }}>Summary</div>
+                <div style={{ fontSize: 14, lineHeight: 1.55 }}>{intResult.summary}</div>
+              </div>
+            )}
+            {intResult.action_items?.length > 0 && (
+              <div>
+                <div className="label" style={{ marginBottom: 4 }}>Action items</div>
+                <div className="stack" style={{ gap: 4 }}>
+                  {intResult.action_items.map((a: string, i: number) => (
+                    <div key={i} style={{ display: "flex", gap: 8, fontSize: 14 }}>
+                      <span style={{ color: "#1a3f8a", fontWeight: 900, flexShrink: 0 }}>·</span>
+                      <span>{a}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {intResult.referral_signal && intResult.referral_signal_note && (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(146,97,10,.08)", border: "1px solid rgba(146,97,10,.22)", fontSize: 13, color: "#92610a" }}>
+                <strong>Referral signal:</strong> {intResult.referral_signal_note}
+              </div>
+            )}
+            {intResult.life_event_flags?.length > 0 && (
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,60,140,.06)", border: "1px solid rgba(11,60,140,.18)", fontSize: 13, color: "#1a3f8a" }}>
+                <strong>Life events flagged:</strong> {intResult.life_event_flags.join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ── MAIN TABS ─────────────────────────────────────────────────────── */}
       <div className="card cardPad" id="contact-tabs">

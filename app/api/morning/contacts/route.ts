@@ -46,7 +46,7 @@ export async function GET() {
             .not("close_date", "is", null).in("contact_id", contactIds)
         : Promise.resolve({ data: [] }),
       contactIds.length > 0
-        ? supabaseAdmin.from("deals").select("referral_source_contact_id, price")
+        ? supabaseAdmin.from("deals").select("referral_source_contact_id, price, commission_pct, referral_fee_pct")
             .eq("user_id", uid).eq("status", "closed_won")
             .not("referral_source_contact_id", "is", null)
             .in("referral_source_contact_id", contactIds)
@@ -84,7 +84,12 @@ export async function GET() {
     const referralGciMap: Record<string, number> = {};
     for (const row of (referralRows as any).data ?? []) {
       const id = row.referral_source_contact_id;
-      referralGciMap[id] = (referralGciMap[id] ?? 0) + (row.price ?? 0);
+      const price = row.price ?? 0;
+      const commPct = row.commission_pct ?? 0;
+      const refFeePct = row.referral_fee_pct ?? 0;
+      const gross = price * (commPct / 100);
+      const net = gross - gross * (refFeePct / 100);
+      referralGciMap[id] = (referralGciMap[id] ?? 0) + net;
     }
 
     // Per-contact reply rates (last 90 days, email + text channels)
