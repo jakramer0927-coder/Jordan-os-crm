@@ -14,11 +14,11 @@ export async function POST(req: Request) {
     const { contact_id } = body;
     if (!contact_id) return NextResponse.json({ error: "contact_id required" }, { status: 400 });
 
-    // Parallel data fetch
-    const [contactRes, touchesRes, dealsRes, notesRes] = await Promise.all([
+    // Parallel data fetch from all sources
+    const [contactRes, touchesRes, dealsRes, notesRes, voiceRes, textMsgRes] = await Promise.all([
       supabaseAdmin
         .from("contacts")
-        .select("display_name, category, tier, client_type, phone, email, notes, ai_context, birthday, close_anniversary, move_in_date, buyer_budget_min, buyer_budget_max, buyer_target_areas, referral_signal_active, last_referral_ask_date, referral_ask_count, life_event_flags, created_at")
+        .select("display_name, category, tier, client_type, phone, email, notes, ai_context, birthday, close_anniversary, move_in_date, buyer_budget_min, buyer_budget_max, buyer_target_areas, referral_signal_active, last_referral_ask_date, referral_ask_count, life_event_flags, transaction_score, transaction_score_rationale, purchase_date, purchase_neighborhood, created_at")
         .eq("id", contact_id)
         .eq("user_id", uid)
         .maybeSingle(),
@@ -40,6 +40,20 @@ export async function POST(req: Request) {
         .eq("contact_id", contact_id)
         .order("created_at", { ascending: false })
         .limit(5),
+      // Gmail / voice examples (raw_text holds the thread content)
+      supabaseAdmin
+        .from("user_voice_examples")
+        .select("title, raw_text, source, created_at")
+        .eq("contact_id", contact_id)
+        .order("created_at", { ascending: false })
+        .limit(10),
+      // iMessage individual messages
+      supabaseAdmin
+        .from("text_messages")
+        .select("body, direction, occurred_at, sender")
+        .eq("contact_id", contact_id)
+        .order("occurred_at", { ascending: false })
+        .limit(20),
     ]);
 
     const contact = contactRes.data;
@@ -48,11 +62,13 @@ export async function POST(req: Request) {
     const touches = touchesRes.data ?? [];
     const allDeals = dealsRes.data ?? [];
     const interactionNotes = notesRes.data ?? [];
+    const voiceExamples = voiceRes.data ?? [];
+    const textMessages = textMsgRes.data ?? [];
 
     const activeDeals = allDeals.filter((d: any) => !["closed_won", "closed_lost", "sold"].includes(d.status ?? ""));
     const closedDeals = allDeals.filter((d: any) => ["closed_won", "closed_lost", "sold"].includes(d.status ?? ""));
 
-    // Format context blocks
+    // Format each data source
     const touchBlock = touches.length === 0 ? "None" : touches.map((t: any) => {
       const date = new Date(t.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
       const dir = t.direction === "outbound" ? "→" : "←";
@@ -74,13 +90,23 @@ export async function POST(req: Request) {
       return `${date}: ${n.summary ?? "(no summary)"}${items}${flags}${n.timeline_mentioned ? ` Timeline: ${n.timeline_mentioned}` : ""}`;
     }).join("\n");
 
+    const voiceBlock = voiceExamples.length === 0 ? "None" : voiceExamples.map((v: any) => {
+      const date = new Date(v.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const preview = v.raw_text ? v.raw_text.slice(0, 400).replace(/\n+/g, " ") : "";
+      return `${date}${v.title ? ` [${v.title}]` : ""}${v.source ? ` (${v.source})` : ""}${preview ? `: ${preview}` : ""}`;
+    }).join("\n\n");
+
+    const textBlock = textMessages.length === 0 ? "None" : textMessages.map((m: any) => {
+      const date = new Date(m.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const dir = m.direction === "outbound" ? "Jordan" : (m.sender || "Contact");
+      return `${date} ${dir}: ${(m.body ?? "").slice(0, 200)}`;
+    }).join("\n");
+
     const contactJson = JSON.stringify({
       name: contact.display_name,
       category: contact.category,
       tier: contact.tier,
       client_type: contact.client_type,
-      email: contact.email,
-      phone: contact.phone,
       notes: contact.notes,
       ai_context: contact.ai_context,
       life_event_flags: contact.life_event_flags,
@@ -90,49 +116,61 @@ export async function POST(req: Request) {
       buyer_budget_min: contact.buyer_budget_min,
       buyer_budget_max: contact.buyer_budget_max,
       buyer_target_areas: contact.buyer_target_areas,
+      purchase_date: contact.purchase_date,
+      purchase_neighborhood: contact.purchase_neighborhood,
       in_crm_since: contact.created_at?.slice(0, 10),
     }, null, 2);
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
-    const prompt = `You are preparing a pre-meeting intelligence brief for Jordan, a luxury real estate agent in Los Angeles.
-Jordan is about to speak with this contact. Be specific, concise, and direct.
-Jordan reads this in 60 seconds before a call — no fluff.
+    const prompt = `You are preparing a pre-meeting intelligence brief for Jordan, a luxury real estate agent at Compass in Los Angeles. Jordan is about to speak with this contact.
+Be specific, concise, and direct. Jordan reads this in 60 seconds — no fluff.
 
 Contact data:
 ${contactJson}
 
-Recent interaction notes:
+Transaction score: ${contact.transaction_score ?? "Not yet scored"} / 100
+Score rationale: ${contact.transaction_score_rationale ?? "None"}
+
+Recent interaction notes (calls, meetings, showings):
 ${notesBlock}
 
-Recent touches:
+Recent Gmail / voice examples:
+${voiceBlock}
+
+Recent text messages:
+${textBlock}
+
+Recent touch log:
 ${touchBlock}
 
-Active deals:
-${dealBlock}
+Active deals: ${dealBlock}
 
 Produce a brief with exactly these sections:
 
 **Relationship Snapshot**
-2-3 sentences. Who is this person to Jordan, how long they've known each other, what's the history.
+2-3 sentences. Who is this person to Jordan, history together, how they communicate.
 
 **Current Mindset**
-1-2 sentences. Where they likely are based on timing, recent interactions, and any signals.
+1-2 sentences. Where they likely are right now based on all recent signals across calls, texts, and email.
 
 **What They Care About**
-3-5 bullet points. Known priorities, preferences, concerns, hot buttons.
+3-5 bullets. Known priorities, preferences, concerns — drawn from actual interactions.
+
+**Recent Thread Summary**
+2-3 sentences. What has the recent back-and-forth been about across all channels? Any open loops or unanswered items?
 
 **Suggested Agenda**
-3-4 bullet points. What to cover in this specific conversation given current context.
+3-4 bullets. Specific things to cover in this conversation given full context.
 
 **Referral Opportunity**
 1 sentence. Is there a natural referral ask here right now? Why or why not.
 
 **Watch Out For**
-1-2 sentences. Any tension, sensitivity, known objection, or thing to avoid.
+1-2 sentences. Tension, sensitivity, known objection, or anything to avoid.
 
-Be specific. Use names, properties, dates when available. Generic observations are useless.`;
+Be specific. Use names, properties, dates, dollar figures when available. Generic observations are useless.`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

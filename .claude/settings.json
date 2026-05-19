@@ -46,7 +46,9 @@
       "Bash(git -C /Users/jordankramer/projects/jordan-os-crm add jordan-os-crm/app/ClientLayout.tsx jordan-os-crm/app/insights/page.tsx jordan-os-crm/app/linkedin/page.tsx jordan-os-crm/app/reports/page.tsx jordan-os-crm/app/settings/integrations/page.tsx jordan-os-crm/app/triage/page.tsx jordan-os-crm/app/unmatched/page.tsx jordan-os-crm/app/review/ jordan-os-crm/app/settings/page.tsx)",
       "Bash(git -C /Users/jordankramer/projects/jordan-os-crm commit -m ' *)",
       "Bash(git -C /Users/jordankramer/projects/jordan-os-crm push)",
-      "Bash(# Sync modified and new files to root app/ *)"
+      "Bash(# Sync modified and new files to root app/ *)",
+      "Bash(# Sync all modified/new files to root app/ *)",
+      "mcp__claude_ai_Supabase__deploy_edge_function"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",

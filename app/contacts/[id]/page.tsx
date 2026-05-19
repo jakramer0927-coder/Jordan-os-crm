@@ -38,6 +38,9 @@ type Contact = {
   move_in_date: string | null;
   home_address: string | null;
   archived: boolean;
+  transaction_score: number | null;
+  transaction_score_rationale: string | null;
+  score_updated_at: string | null;
 };
 
 type DealStage = "lead" | "showing" | "offer_in" | "under_contract" | "closed_won" | "closed_lost";
@@ -583,6 +586,39 @@ export default function ContactDetailPage() {
     }
   }
 
+  // Transaction scoring
+  const [txScore, setTxScore] = useState<number | null>(null);
+  const [txRationale, setTxRationale] = useState<string | null>(null);
+  const [txSignals, setTxSignals] = useState<string[]>([]);
+  const [txSuggestedAction, setTxSuggestedAction] = useState<string | null>(null);
+  const [txScoreUpdatedAt, setTxScoreUpdatedAt] = useState<string | null>(null);
+  const [txScoring, setTxScoring] = useState(false);
+  const [txScoreError, setTxScoreError] = useState<string | null>(null);
+
+  async function rescoreContact() {
+    if (!contact) return;
+    setTxScoring(true);
+    setTxScoreError(null);
+    try {
+      const res = await fetch("/api/contacts/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contact.id }),
+      });
+      const j = await res.json();
+      if (!res.ok) { setTxScoreError(j?.error || "Scoring failed"); return; }
+      setTxScore(j.transaction_score ?? null);
+      setTxRationale(j.rationale ?? null);
+      setTxSignals(j.top_signals ?? []);
+      setTxSuggestedAction(j.suggested_action ?? null);
+      setTxScoreUpdatedAt(new Date().toISOString());
+    } catch (e: any) {
+      setTxScoreError(e?.message || "Scoring failed");
+    } finally {
+      setTxScoring(false);
+    }
+  }
+
   // Interaction Logger
   const [intRaw, setIntRaw] = useState("");
   const [intSaving, setIntSaving] = useState(false);
@@ -637,7 +673,7 @@ export default function ContactDetailPage() {
     // Contact (scoped to user_id if your table has it)
     const { data: cData, error: cErr } = await supabase
       .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived")
+      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived, transaction_score, transaction_score_rationale, score_updated_at")
       .eq("id", id)
       .eq("user_id", myUid)
       .single();
@@ -668,6 +704,9 @@ export default function ContactDetailPage() {
     setCloseAnniversary(c.close_anniversary ?? "");
     setMoveInDate(c.move_in_date ?? "");
     setHomeAddress(c.home_address ?? "");
+    setTxScore(c.transaction_score ?? null);
+    setTxRationale(c.transaction_score_rationale ?? null);
+    setTxScoreUpdatedAt(c.score_updated_at ?? null);
 
     const { data: tData, error: tErr } = await supabase
       .from("touches")
@@ -1204,11 +1243,43 @@ export default function ContactDetailPage() {
               Draft message
             </button>
             <button className="btn" onClick={openLog}>Log touch</button>
+            <button
+              className="btn"
+              style={{ fontSize: 12 }}
+              onClick={rescoreContact}
+              disabled={txScoring}
+              title="Run AI transaction score"
+            >
+              {txScoring ? "Scoring…" : "Rescore Now"}
+            </button>
             <button className="btn" style={{ fontSize: 12 }} onClick={() => { setActiveTab("details"); setAdvancedOpen(true); document.getElementById("contact-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
               Edit ▾
             </button>
           </div>
         </div>
+
+        {/* Transaction score badge */}
+        {txScore !== null && (
+          <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 6, fontWeight: 800, fontSize: 13,
+              background: txScore >= 90 ? "rgba(200,0,0,.1)" : txScore >= 80 ? "rgba(200,80,0,.1)" : "rgba(200,160,0,.1)",
+              color: txScore >= 90 ? "#8a0000" : txScore >= 80 ? "#c25a00" : "#92610a",
+              border: `1px solid ${txScore >= 90 ? "rgba(200,0,0,.3)" : txScore >= 80 ? "rgba(200,80,0,.3)" : "rgba(200,160,0,.3)"}`,
+            }}>
+              Transaction score: {txScore}
+            </span>
+            {txScoreUpdatedAt && (
+              <span className="subtle" style={{ fontSize: 11 }}>
+                scored {Math.floor((Date.now() - new Date(txScoreUpdatedAt).getTime()) / 86400000)}d ago
+              </span>
+            )}
+            {txScoreError && <span style={{ fontSize: 12, color: "#8a0000" }}>{txScoreError}</span>}
+          </div>
+        )}
+        {txScore === null && txScoreError && (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#8a0000" }}>{txScoreError}</div>
+        )}
 
         {/* Milestone banners */}
         {milestones.length > 0 && (
@@ -1283,6 +1354,34 @@ export default function ContactDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ── TRANSACTION SCORE PANEL ───────────────────────────────────────── */}
+      {(txScore !== null || txSignals.length > 0 || txSuggestedAction) && (
+        <div className="card cardPad stack" style={{ gap: 10 }}>
+          <div style={{ fontWeight: 900, fontSize: 15 }}>Transaction Score</div>
+          {txRationale && (
+            <div style={{ fontSize: 14, lineHeight: 1.55 }}>{txRationale}</div>
+          )}
+          {txSignals.length > 0 && (
+            <div>
+              <div className="label" style={{ marginBottom: 4 }}>Top signals</div>
+              <div className="stack" style={{ gap: 4 }}>
+                {txSignals.map((s, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, fontSize: 13 }}>
+                    <span style={{ color: "#c25a00", fontWeight: 900, flexShrink: 0 }}>·</span>
+                    <span>{s}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {txSuggestedAction && (
+            <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(11,60,140,.06)", border: "1px solid rgba(11,60,140,.18)", fontSize: 13, color: "#1a3f8a" }}>
+              <strong>Suggested action:</strong> {txSuggestedAction}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── PREPARE / BRIEF PANEL ─────────────────────────────────────────── */}
       {briefOpen && (
