@@ -114,7 +114,7 @@ Return this exact JSON structure:
       direction: extracted.direction ?? "outbound",
       intent: touchIntent,
       occurred_at: new Date().toISOString(),
-      summary: extracted.summary ?? raw_text.trim().slice(0, 500) || null,
+      summary: (extracted.summary ?? raw_text.trim().slice(0, 500)) || null,
       source: "manual",
       outcome: touchIntent === "referral_ask" ? "pending" : null,
     });
