@@ -474,9 +474,7 @@ export default function MorningPage() {
 
   // Bulk touch logging
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkChannel, setBulkChannel] = useState<Touch["channel"]>("email");
-  const [bulkIntent, setBulkIntent] = useState<TouchIntent>("check_in");
-  const [bulkSummary, setBulkSummary] = useState("");
+  const [bulkNlInput, setBulkNlInput] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
@@ -762,18 +760,34 @@ export default function MorningPage() {
   }
 
   async function saveBulkTouch() {
-    if (displayRecs.length === 0) return;
+    if (displayRecs.length === 0 || !bulkNlInput.trim()) return;
     setBulkSaving(true);
     setBulkMsg(null);
+
+    // Parse NL once to get channel + summary, then bulk insert
+    let channel: Touch["channel"] = "other";
+    let summary: string | null = bulkNlInput.trim();
+    try {
+      const parseRes = await fetch("/api/touches/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: bulkNlInput.trim() }),
+      });
+      if (parseRes.ok) {
+        const parsed = await parseRes.json();
+        if (parsed.channel) channel = parsed.channel as Touch["channel"];
+        if (parsed.summary) summary = parsed.summary;
+      }
+    } catch { /* fall back to defaults */ }
 
     const now = new Date().toISOString();
     const rows = displayRecs.map((c) => ({
       contact_id: c.id,
-      channel: bulkChannel,
+      channel,
       direction: "outbound" as const,
-      intent: bulkIntent,
+      intent: "check_in" as TouchIntent,
       occurred_at: now,
-      summary: bulkSummary.trim() || null,
+      summary,
       source: "manual",
     }));
 
@@ -788,7 +802,7 @@ export default function MorningPage() {
     setWtdCount((n) => n + ids.length);
     setBulkMsg(`${ids.length} touches logged ✓`);
     setBulkOpen(false);
-    setBulkSummary("");
+    setBulkNlInput("");
   }
 
   useEffect(() => {
@@ -1304,39 +1318,21 @@ export default function MorningPage() {
         <div className="card cardPad stack" style={{ marginTop: 8 }}>
           <div style={{ fontWeight: 900, fontSize: 14 }}>Log a touch for all {displayRecs.length} contacts</div>
           <div className="subtle" style={{ fontSize: 12, marginTop: -4 }}>
-            Same channel + intent logged to every contact in today's list. Use for events, open houses, or mass check-ins.
+            Same touch logged to every contact in today's list. Use for events, open houses, or mass check-ins. Claude extracts the channel automatically.
           </div>
           {bulkMsg && <div className="alert alertOk">{bulkMsg}</div>}
-          <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
-            <div className="field">
-              <div className="label">Channel</div>
-              <select className="select" value={bulkChannel} onChange={(e) => setBulkChannel(e.target.value as Touch["channel"])}>
-                <option value="email">Email</option>
-                <option value="text">Text</option>
-                <option value="call">Call</option>
-                <option value="in_person">In person</option>
-                <option value="social_dm">Social DM</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div className="field">
-              <div className="label">Intent</div>
-              <select className="select" value={bulkIntent} onChange={(e) => setBulkIntent(e.target.value as TouchIntent)}>
-                <option value="check_in">Check-in</option>
-                <option value="follow_up">Follow-up</option>
-                <option value="referral_ask">Referral ask</option>
-                <option value="review_ask">Review ask</option>
-                <option value="event_invite">Event invite</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
           <div className="field">
-            <div className="label">Notes (optional)</div>
-            <input className="input" value={bulkSummary} onChange={(e) => setBulkSummary(e.target.value)} placeholder="e.g. Met at open house on 123 Main" />
+            <textarea
+              className="textarea"
+              value={bulkNlInput}
+              onChange={(e) => setBulkNlInput(e.target.value)}
+              placeholder='What happened? e.g. "Sent a market update email to all sphere contacts" or "Met everyone at the Compass open house on PCH"'
+              rows={2}
+              style={{ resize: "vertical" }}
+            />
           </div>
           <div className="row">
-            <button className="btn btnPrimary" onClick={saveBulkTouch} disabled={bulkSaving}>
+            <button className="btn btnPrimary" onClick={saveBulkTouch} disabled={bulkSaving || !bulkNlInput.trim()}>
               {bulkSaving ? "Logging…" : `Log ${displayRecs.length} touches`}
             </button>
             <button className="btn" onClick={() => setBulkOpen(false)}>Cancel</button>

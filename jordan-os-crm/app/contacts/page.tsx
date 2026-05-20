@@ -61,8 +61,7 @@ export default function ContactsPage() {
 
   // expanded row + inline log
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [logChannel, setLogChannel] = useState("text");
-  const [logSummary, setLogSummary] = useState("");
+  const [logNlInput, setLogNlInput] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logMsg, setLogMsg] = useState<string | null>(null);
 
@@ -164,29 +163,31 @@ export default function ContactsPage() {
   }
 
   async function quickLog(contactId: string) {
+    if (!logNlInput.trim()) return;
     setLogSaving(true);
     setLogMsg(null);
-    const { error } = await supabase.from("touches").insert({
-      contact_id: contactId,
-      channel: logChannel,
-      direction: "outbound",
-      intent: "check_in",
-      occurred_at: new Date().toISOString(),
-      summary: logSummary.trim() || null,
-      source: "manual",
-    });
-    setLogSaving(false);
-    if (error) { setLogMsg(`Error: ${error.message}`); return; }
-    setLogSummary("");
-    setLogMsg("Logged ✓");
-    // refresh touch map for this contact
-    const now = new Date().toISOString();
-    setLastTouchMap((prev) => {
-      const next = new Map(prev);
-      next.set(contactId, { occurred_at: now, channel: logChannel, summary: logSummary.trim() || null, days: 0 });
-      return next;
-    });
-    setTimeout(() => setLogMsg(null), 2000);
+    try {
+      const res = await fetch("/api/interaction-notes/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: contactId, raw_text: logNlInput.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { setLogMsg(`Error: ${j?.error || "Save failed"}`); return; }
+      const now = new Date().toISOString();
+      setLastTouchMap((prev) => {
+        const next = new Map(prev);
+        next.set(contactId, { occurred_at: now, channel: j.extracted?.channel ?? "other", summary: j.extracted?.summary ?? logNlInput.trim().slice(0, 100), days: 0 });
+        return next;
+      });
+      setLogNlInput("");
+      setLogMsg("Logged ✓");
+      setTimeout(() => setLogMsg(null), 2000);
+    } catch (e: any) {
+      setLogMsg(`Error: ${e?.message || "Save failed"}`);
+    } finally {
+      setLogSaving(false);
+    }
   }
 
   async function addContact() {
@@ -546,26 +547,17 @@ export default function ContactsPage() {
 
                   {/* Quick log */}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <select className="select" value={logChannel} onChange={(e) => setLogChannel(e.target.value)}
-                      style={{ width: 110, flexShrink: 0, fontSize: 13 }}>
-                      <option value="text">Text</option>
-                      <option value="email">Email</option>
-                      <option value="call">Call</option>
-                      <option value="in_person">In person</option>
-                      <option value="social_dm">Social DM</option>
-                      <option value="other">Other</option>
-                    </select>
                     <input
                       className="input"
-                      value={logSummary}
-                      onChange={(e) => setLogSummary(e.target.value)}
-                      placeholder="Note (optional)"
-                      style={{ flex: "1 1 120px", minWidth: 0, fontSize: 13 }}
+                      value={logNlInput}
+                      onChange={(e) => setLogNlInput(e.target.value)}
+                      placeholder='What happened? e.g. "texted to check in"'
+                      style={{ flex: "1 1 160px", minWidth: 0, fontSize: 13 }}
                       onKeyDown={(e) => e.key === "Enter" && quickLog(c.id)}
                     />
                     <button className="btn btnPrimary" style={{ fontSize: 13, flexShrink: 0 }}
-                      onClick={() => quickLog(c.id)} disabled={logSaving}>
-                      {logSaving ? "Saving…" : "Reached out"}
+                      onClick={() => quickLog(c.id)} disabled={logSaving || !logNlInput.trim()}>
+                      {logSaving ? "Extracting…" : "Reached out"}
                     </button>
                     <a className="btn" href={`/contacts/${c.id}`}
                       style={{ textDecoration: "none", fontSize: 13, flexShrink: 0 }}>
