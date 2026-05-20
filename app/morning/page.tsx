@@ -683,7 +683,7 @@ export default function MorningPage() {
       const res = await fetch("/api/interaction-notes/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact_id: contactId, raw_text: touchNlInput.trim() }),
+        body: JSON.stringify({ contact_id: contactId, raw_text: touchNlInput.trim(), direction: "outbound" }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setError(j?.error || "Save failed"); setSavingTouch(false); return; }

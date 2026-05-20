@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     if (!uid) return unauthorized();
 
     const body = await req.json().catch(() => ({}));
-    const { contact_id, raw_text } = body;
+    const { contact_id, raw_text, direction: directionOverride } = body;
 
     if (!contact_id) return NextResponse.json({ error: "contact_id required" }, { status: 400 });
     if (!raw_text?.trim()) return NextResponse.json({ error: "raw_text required" }, { status: 400 });
@@ -111,7 +111,7 @@ Return this exact JSON structure:
     await supabaseAdmin.from("touches").insert({
       contact_id,
       channel: extracted.channel ?? "other",
-      direction: extracted.direction ?? "outbound",
+      direction: directionOverride ?? extracted.direction ?? "outbound",
       intent: touchIntent,
       occurred_at: new Date().toISOString(),
       summary: (extracted.summary ?? raw_text.trim().slice(0, 500)) || null,

@@ -87,7 +87,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       const res = await fetch("/api/interaction-notes/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact_id: qlContactId, raw_text: qlNlInput.trim() }),
+        body: JSON.stringify({ contact_id: qlContactId, raw_text: qlNlInput.trim(), direction: "outbound" }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setQlError(j?.error || "Save failed"); return; }

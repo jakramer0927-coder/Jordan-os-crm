@@ -170,7 +170,7 @@ export default function ContactsPage() {
       const res = await fetch("/api/interaction-notes/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact_id: contactId, raw_text: logNlInput.trim() }),
+        body: JSON.stringify({ contact_id: contactId, raw_text: logNlInput.trim(), direction: "outbound" }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setLogMsg(`Error: ${j?.error || "Save failed"}`); return; }
