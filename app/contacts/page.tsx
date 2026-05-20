@@ -217,12 +217,11 @@ export default function ContactsPage() {
   function toggleExpand(id: string) {
     if (expandedId === id) {
       setExpandedId(null);
-      setLogSummary("");
+      setLogNlInput("");
       setLogMsg(null);
     } else {
       setExpandedId(id);
-      setLogChannel("text");
-      setLogSummary("");
+      setLogNlInput("");
       setLogMsg(null);
     }
   }
