@@ -31,8 +31,9 @@ function buildEmail(data: {
   overdueAgents: { name: string; days: number }[];
   topToday: { name: string; category: string; tier: string | null; days: number | null }[];
   missedDays: number;
+  ceoReview?: string | null;
 }): string {
-  const { streak, yesterdayCount, dailyTarget, overdueAClients, overdueAgents, topToday, missedDays } = data;
+  const { streak, yesterdayCount, dailyTarget, overdueAClients, overdueAgents, topToday, missedDays, ceoReview } = data;
   const catchUp = Math.max(0, dailyTarget - yesterdayCount);
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/Los_Angeles" });
 
@@ -74,6 +75,7 @@ function buildEmail(data: {
     aClientLines,
     agentLines,
     priorityLines,
+    ceoReview ? `\n${ceoReview}` : "",
     ``,
     `---`,
     `Open morning page: ${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL}/morning`,
@@ -246,6 +248,123 @@ export async function GET(req: Request) {
       scoredAll.sort((a, b) => b.score - a.score);
       const topToday = scoredAll.slice(0, 5);
 
+      // ── Nightly rollup: upsert yesterday's daily_stats row ─────────────────
+      // Classify each of yesterday's touched contacts by warmth using the full
+      // 180-day touch history already fetched above.
+      const touchesByContact = new Map<string, string[]>();
+      for (const t of (lastTouches ?? []) as any[]) {
+        if (!ownIds.has(t.contact_id)) continue;
+        if (!touchesByContact.has(t.contact_id)) touchesByContact.set(t.contact_id, []);
+        touchesByContact.get(t.contact_id)!.push(t.occurred_at); // already desc
+      }
+
+      const catById = new Map<string, string>();
+      for (const c of (contacts ?? []) as any[]) catById.set(c.id, (c.category || "").toLowerCase());
+
+      const yOwn = ((yTouches ?? []) as any[]).filter((t) => ownIds.has(t.contact_id));
+      const yByContact = new Map<string, string>(); // contact -> earliest touch yesterday
+      for (const t of yOwn) {
+        const cur = yByContact.get(t.contact_id);
+        if (!cur || t.occurred_at < cur) yByContact.set(t.contact_id, t.occurred_at);
+      }
+
+      let dormantTouches = 0;
+      let newContactTouches = 0;
+      for (const [cid, firstYesterday] of yByContact) {
+        const prior = (touchesByContact.get(cid) ?? []).find((iso) => iso < firstYesterday);
+        if (!prior) newContactTouches++;
+        else if (new Date(firstYesterday).getTime() - new Date(prior).getTime() > 60 * 86400000) dormantTouches++;
+      }
+
+      const { count: notesYesterday } = await supabaseAdmin
+        .from("interaction_notes")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", yStart)
+        .lt("created_at", yEnd);
+
+      await supabaseAdmin.from("daily_stats").upsert({
+        user_id: uid,
+        day: laYesterday,
+        touches_outbound: yOwn.length,
+        touches_outbound_agents: yOwn.filter((t) => catById.get(t.contact_id) === "agent").length,
+        distinct_contacts: yByContact.size,
+        referral_asks: 0, // intent not fetched in yTouches; recomputed below for CEO review
+        dormant_touches: dormantTouches,
+        new_contact_touches: newContactTouches,
+        notes_logged: notesYesterday ?? 0,
+      }, { onConflict: "user_id,day" });
+
+      // ── Friday CEO review: score the week against the KPI model ────────────
+      // Targets: 15 touches (10 warm / 3 dormant / 2 new), 5 referral asks,
+      // 5 listing probes (proxy: selling-intent conversations), 1 upstream touch.
+      let ceoReview: string | null = null;
+      const laDow = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" })).getDay();
+      if (laDow === 5) {
+        // Monday of the current LA week
+        const monday = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+        monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+        const weekStartIso = new Date(`${localDateStr(monday)}T00:00:00-07:00`).toISOString();
+
+        const [weekTouchesRes, weekNotesRes] = await Promise.all([
+          supabaseAdmin
+            .from("touches")
+            .select("contact_id, occurred_at, intent")
+            .eq("user_id", uid)
+            .eq("direction", "outbound")
+            .gte("occurred_at", weekStartIso)
+            .limit(1000),
+          supabaseAdmin
+            .from("interaction_notes")
+            .select("contact_id, transaction_intent")
+            .gte("created_at", weekStartIso)
+            .limit(500),
+        ]);
+
+        const wTouches = ((weekTouchesRes.data ?? []) as any[]).filter((t) => ownIds.has(t.contact_id));
+        const wByContact = new Map<string, string>();
+        for (const t of wTouches) {
+          const cur = wByContact.get(t.contact_id);
+          if (!cur || t.occurred_at < cur) wByContact.set(t.contact_id, t.occurred_at);
+        }
+
+        let wDormant = 0, wNew = 0;
+        for (const [cid, first] of wByContact) {
+          const prior = (touchesByContact.get(cid) ?? []).find((iso) => iso < first);
+          if (!prior) wNew++;
+          else if (new Date(first).getTime() - new Date(prior).getTime() > 60 * 86400000) wDormant++;
+        }
+        const wWarm = wByContact.size - wDormant - wNew;
+        const wAsks = new Set(wTouches.filter((t) => t.intent === "referral_ask").map((t) => t.contact_id)).size;
+
+        // Upstream: A-tier agents and developers (wealth managers aren't categorized yet)
+        const upstreamIds = new Set(
+          ((contacts ?? []) as any[])
+            .filter((c) => {
+              const cat = (c.category || "").toLowerCase();
+              const tier = (c.tier || "").toUpperCase();
+              return cat === "developer" || (cat === "agent" && tier === "A");
+            })
+            .map((c) => c.id)
+        );
+        const wUpstream = [...wByContact.keys()].filter((id) => upstreamIds.has(id)).length;
+
+        const wProbes = new Set(
+          ((weekNotesRes.data ?? []) as any[])
+            .filter((n) => n.transaction_intent === "selling" && ownIds.has(n.contact_id))
+            .map((n) => n.contact_id)
+        ).size;
+
+        const mark = (got: number, target: number) => `${got}/${target}${got >= target ? " ✓" : ""}`;
+        ceoReview = [
+          `══ FRIDAY CEO REVIEW (week so far) ══`,
+          `Touches: ${mark(wByContact.size, 15)} distinct contacts`,
+          `  warm ${mark(wWarm, 10)} · dormant>60d ${mark(wDormant, 3)} · new ${mark(wNew, 2)}`,
+          `Referral asks: ${mark(wAsks, 5)}`,
+          `Listing probes (selling-intent convos): ${mark(wProbes, 5)}`,
+          `Upstream touches (A-agents/developers): ${mark(wUpstream, 1)}`,
+        ].join("\n");
+      }
+
       // Build and send email
       const body = buildEmail({
         streak,
@@ -255,6 +374,7 @@ export async function GET(req: Request) {
         overdueAgents: overdueAgents.sort((a, b) => b.days - a.days),
         topToday,
         missedDays,
+        ceoReview,
       });
 
       const isWeekday = now.getDay() >= 1 && now.getDay() <= 5;
