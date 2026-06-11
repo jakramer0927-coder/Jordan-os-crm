@@ -52,7 +52,9 @@
       "mcp__claude_ai_Supabase__get_publishable_keys",
       "Bash(curl -s -X POST https://mvaophllhvvhsotevxbv.supabase.co/functions/v1/score-contacts -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im12YW9waGxsaHZ2aHNvdGV2eGJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4MTAyMjUsImV4cCI6MjA4NzM4NjIyNX0.O0GGb-fcDE3eFdX0bWZVTGi9NbhF_-UY4Z1xAjQw-GA' -H 'Content-Type: application/json' -d '{}')",
       "Bash(cp /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/api/morning/contacts/route.ts /Users/jordankramer/projects/jordan-os-crm/app/api/morning/contacts/route.ts && cp /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/morning/page.tsx /Users/jordankramer/projects/jordan-os-crm/app/morning/page.tsx && cp /Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/ClientLayout.tsx /Users/jordankramer/projects/jordan-os-crm/app/ClientLayout.tsx && cp \"/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]/page.tsx\" \"/Users/jordankramer/projects/jordan-os-crm/app/contacts/[id]/page.tsx\" && echo \"all synced\")",
-      "mcp__claude_ai_Supabase__get_logs"
+      "mcp__claude_ai_Supabase__get_logs",
+      "mcp__claude_ai_Supabase__get_advisors",
+      "mcp__claude_ai_Supabase__list_tables"
     ],
     "additionalDirectories": [
       "/Users/jordankramer/projects/jordan-os-crm/jordan-os-crm/app/contacts/[id]",
