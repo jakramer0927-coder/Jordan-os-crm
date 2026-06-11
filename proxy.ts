@@ -22,14 +22,26 @@ export default async function proxy(req: NextRequest) {
     },
   );
 
+  const path = req.nextUrl.pathname;
+
+  // Vercel cron invocations carry no session cookie — they authenticate inside
+  // the route handler via CRON_SECRET. Redirecting them to /login silently
+  // disables every scheduled job, so let them through untouched.
+  if (path.startsWith("/api/cron")) {
+    return res;
+  }
+
   const { data } = await supabase.auth.getSession();
   const session = data.session;
 
-  const path = req.nextUrl.pathname;
   const isLogin = path.startsWith("/login");
   const isAuth = path.startsWith("/auth");
 
   if (!session && !isLogin && !isAuth) {
+    // API callers need a 401 they can handle, not a redirect to an HTML page
+    if (path.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", req.url));
   }
 

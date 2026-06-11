@@ -124,6 +124,17 @@ export async function GET(req: Request) {
       yesterday.setDate(yesterday.getDate() - 1);
       const laYesterday = localDateStr(yesterday);
 
+      // This user's contacts — fetched up front so every touch query below can
+      // be scoped to them (touches has no user_id column of its own)
+      const { data: contacts } = await supabaseAdmin
+        .from("contacts")
+        .select("id, display_name, category, tier")
+        .eq("user_id", uid)
+        .eq("archived", false)
+        .limit(20000);
+
+      const ownIds = new Set(((contacts ?? []) as any[]).map((c) => c.id));
+
       // Yesterday's outbound touches
       const yStart = new Date(`${laYesterday}T00:00:00-07:00`).toISOString();
       const yEnd   = new Date(`${laToday}T00:00:00-07:00`).toISOString();
@@ -136,7 +147,9 @@ export async function GET(req: Request) {
         .lt("occurred_at", yEnd)
         .limit(200);
 
-      const yesterdayCount = new Set((yTouches ?? []).map((t: any) => t.contact_id)).size;
+      const yesterdayCount = new Set(
+        (yTouches ?? []).filter((t: any) => ownIds.has(t.contact_id)).map((t: any) => t.contact_id)
+      ).size;
 
       // Streak — count weekdays in last 30 days where distinct contacts touched >= 3
       const thirtyAgo = new Date(now);
@@ -149,9 +162,10 @@ export async function GET(req: Request) {
         .gte("occurred_at", thirtyAgo.toISOString())
         .limit(2000);
 
-      // Group by local date
+      // Group by local date (own contacts only)
       const byDay = new Map<string, Set<string>>();
       for (const t of (recentTouches ?? []) as any[]) {
+        if (!ownIds.has(t.contact_id)) continue;
         const d = localDateStr(new Date(t.occurred_at));
         if (!byDay.has(d)) byDay.set(d, new Set());
         byDay.get(d)!.add(t.contact_id);
@@ -185,23 +199,20 @@ export async function GET(req: Request) {
         walkDay.setDate(walkDay.getDate() + 1);
       }
 
-      // Overdue contacts
-      const { data: contacts } = await supabaseAdmin
-        .from("contacts")
-        .select("id, display_name, category, tier")
-        .eq("user_id", uid)
-        .eq("archived", false)
-        .limit(1000);
-
+      // Overdue contacts — most recent outbound touch per contact. Without the
+      // descending sort the map kept whichever row happened to arrive first,
+      // which made overdue calculations use stale touch dates.
       const { data: lastTouches } = await supabaseAdmin
         .from("touches")
         .select("contact_id, occurred_at")
         .eq("direction", "outbound")
         .gte("occurred_at", new Date(Date.now() - 180 * 86400000).toISOString())
+        .order("occurred_at", { ascending: false })
         .limit(3000);
 
       const lastTouchMap = new Map<string, string>();
       for (const t of (lastTouches ?? []) as any[]) {
+        if (!ownIds.has(t.contact_id)) continue;
         if (!lastTouchMap.has(t.contact_id)) lastTouchMap.set(t.contact_id, t.occurred_at);
       }
 

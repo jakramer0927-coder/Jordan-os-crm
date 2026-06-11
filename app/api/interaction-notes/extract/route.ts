@@ -119,6 +119,26 @@ Return this exact JSON structure:
       outcome: touchIntent === "referral_ask" ? "pending" : null,
     });
 
+    // Turn extracted action items into follow_ups so they surface on the
+    // morning page instead of sitting unread on the note
+    const actionItems: string[] = Array.isArray(extracted.action_items)
+      ? extracted.action_items.filter((s: any) => typeof s === "string" && s.trim())
+      : [];
+    let followUpsCreated = 0;
+    if (actionItems.length > 0) {
+      // Default due tomorrow; timeline_mentioned stays on the note for context
+      const due = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const { error: fuErr } = await supabaseAdmin.from("follow_ups").insert(
+        actionItems.map((item) => ({
+          user_id: uid,
+          contact_id,
+          due_date: due,
+          note: item.trim().slice(0, 500),
+        }))
+      );
+      if (!fuErr) followUpsCreated = actionItems.length;
+    }
+
     // Update contacts: last_interaction_at, life_event_flags (append unique), referral_signal_active
     const existingFlags: string[] = owned.life_event_flags ?? [];
     const newFlags: string[] = extracted.life_event_flags ?? [];
@@ -130,7 +150,7 @@ Return this exact JSON structure:
       ...(extracted.referral_signal ? { referral_signal_active: true } : {}),
     }).eq("id", contact_id);
 
-    return NextResponse.json({ note_id: noteId, extracted });
+    return NextResponse.json({ note_id: noteId, extracted, follow_ups_created: followUpsCreated });
   } catch (e) {
     return serverError("INTERACTION_EXTRACT_CRASH", e);
   }
