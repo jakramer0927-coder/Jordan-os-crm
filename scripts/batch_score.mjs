@@ -19,7 +19,7 @@ for (const line of readFileSync(join(root, ".env.local"), "utf8").split("\n")) {
 const DRY = process.argv.includes("--dry-run");
 const limitArg = process.argv.indexOf("--limit");
 const LIMIT = limitArg > -1 ? parseInt(process.argv[limitArg + 1], 10) : Infinity;
-const CONCURRENCY = 4;
+const CONCURRENCY = 2;
 const STALE_DAYS = 14; // skip items refreshed within this window
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
