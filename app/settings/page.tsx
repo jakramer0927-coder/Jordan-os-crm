@@ -402,7 +402,10 @@ export default function SettingsPage() {
 
   return (
     <div className="stack">
-      <h1 className="h1">Settings</h1>
+      <div>
+        <div className="eyebrow">Configuration</div>
+        <h1 className="h1">Settings</h1>
+      </div>
 
       <TabBar tabs={TABS} active={tab} onChange={setTab} />
 

@@ -55,32 +55,29 @@ export default function LoginPage() {
   return (
     <div
       style={{
-        padding: 40,
-        maxWidth: 500,
-        margin: "60px auto",
-        border: "1px solid #e5e5e5",
+        padding: "48px 40px",
+        maxWidth: 440,
+        margin: "84px auto",
+        background: "var(--paper)",
+        border: "1px solid var(--line)",
         borderRadius: 16,
         textAlign: "center",
+        boxShadow: "var(--shadow)",
       }}
     >
-      <h1 style={{ marginBottom: 10, color: "#475569", letterSpacing: "-0.5px" }}>Dex</h1>
-      <p style={{ color: "#666", marginBottom: 30 }}>
+      <div className="eyebrow" style={{ marginBottom: 6 }}>Private CRM</div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 40, letterSpacing: "-0.5px", margin: 0, color: "var(--ink)" }}>Dex</h1>
+      <p style={{ color: "var(--muted)", margin: "12px 0 32px", fontSize: 14, lineHeight: 1.5 }}>
         Sign in with Google to access your private CRM.
       </p>
 
-      {error && <div style={{ color: "crimson", marginBottom: 14, fontWeight: 700 }}>{error}</div>}
+      {error && <div className="alert alertError" style={{ marginBottom: 16, textAlign: "left" }}>{error}</div>}
 
       <button
+        className="btn btnPrimary"
         onClick={signInWithGoogle}
         disabled={loading}
-        style={{
-          padding: "12px 18px",
-          borderRadius: 12,
-          border: "1px solid #ddd",
-          fontWeight: 900,
-          cursor: "pointer",
-          fontSize: 14,
-        }}
+        style={{ width: "100%", justifyContent: "center", padding: "12px 18px", fontSize: 14 }}
       >
         {loading ? "Redirecting…" : "Sign in with Google"}
       </button>

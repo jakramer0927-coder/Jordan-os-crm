@@ -84,9 +84,10 @@ export default function HotListPage() {
       <div className="card cardPad">
         <div className="rowBetween" style={{ flexWrap: "wrap", gap: 8 }}>
           <div>
-            <h1 className="h1" style={{ margin: 0 }}>Hot List</h1>
+            <div className="eyebrow">Highest intent</div>
+            <h1 className="h1" style={{ margin: 0 }}>Hot list</h1>
             {!loading && (
-              <div className="subtle" style={{ marginTop: 4, fontSize: 13 }}>
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
                 {contacts.length} contact{contacts.length !== 1 ? "s" : ""} scoring 70+
               </div>
             )}

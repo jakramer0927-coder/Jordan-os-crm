@@ -128,9 +128,10 @@ export default function ReferralPipelinePage() {
       <div className="card cardPad">
         <div className="rowBetween" style={{ flexWrap: "wrap", gap: 8 }}>
           <div>
-            <h1 className="h1" style={{ margin: 0 }}>Referral Pipeline</h1>
+            <div className="eyebrow">Referrals</div>
+            <h1 className="h1" style={{ margin: 0 }}>Referral pipeline</h1>
             {!loading && (
-              <div className="subtle" style={{ marginTop: 4, fontSize: 13 }}>
+              <div className="subtle" style={{ marginTop: 6, fontSize: 13 }}>
                 {filtered.length} contact{filtered.length !== 1 ? "s" : ""} due for referral ask
               </div>
             )}

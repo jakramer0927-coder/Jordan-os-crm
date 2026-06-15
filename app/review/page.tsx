@@ -505,7 +505,10 @@ export default function ReviewPage() {
 
   return (
     <div className="stack">
-      <h1 className="h1">Review</h1>
+      <div>
+        <div className="eyebrow">Inbox &amp; triage</div>
+        <h1 className="h1">Review</h1>
+      </div>
 
       <TabBar tabs={tabs} active={tab} onChange={setTab} />
 

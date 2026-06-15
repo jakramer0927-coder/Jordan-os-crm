@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { SkeletonCard } from "@/components/ui";
 const supabase = createSupabaseBrowserClient();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -884,7 +885,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!ready) return <div className="card cardPad">Loading…</div>;
+  if (!ready) return <div className="stack"><SkeletonCard lines={2} /><SkeletonCard lines={4} /></div>;
 
   const today = localDateStr(new Date());
   const todayDone = todayCount >= dailyGoal;
@@ -937,10 +938,8 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="rowBetween">
         <div>
-          <h1 className="h1">Business Intelligence</h1>
-          <div className="subtle" style={{ marginTop: 6 }}>
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </div>
+          <div className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+          <h1 className="h1">Business intelligence</h1>
         </div>
         <div className="row">
           {(["quarter", "ytd", "trailing12", "trailing24", "all"] as Timeframe[]).map(tf => (
