@@ -74,6 +74,31 @@ export function EmptyState({
   );
 }
 
+/** Editorial metric card — big serif value over an uppercase label. */
+export function Stat({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: "default" | "danger" | "ok" | "warn";
+}) {
+  const color =
+    tone === "danger" ? "var(--red)" : tone === "ok" ? "var(--green)" : tone === "warn" ? "var(--amber)" : "var(--ink)";
+  return (
+    <div className="statCard">
+      <div className="statLabel">{label}</div>
+      <div className="statValue" style={{ color }}>
+        {value}
+        {sub != null && <span className="statValueSub"> {sub}</span>}
+      </div>
+    </div>
+  );
+}
+
 const CATEGORY_BADGE: Record<string, string> = {
   agent: "badgeAgent",
   client: "badgeClient",

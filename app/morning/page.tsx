@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { SkeletonList, EmptyState } from "@/components/ui";
+import { SkeletonList, EmptyState, Stat } from "@/components/ui";
 const supabase = createSupabaseBrowserClient();
 
 type TouchIntent =
@@ -1084,23 +1084,23 @@ export default function MorningPage() {
     return hour >= 15; // 3pm+
   })();
 
+  const headerDate = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning, Jordan";
+    if (h < 17) return "Good afternoon, Jordan";
+    return "Good evening, Jordan";
+  })();
+
   return (
     <div>
       <div className="pageHeader">
         <div>
-          <h1 className="h1">Morning</h1>
-          <div className="muted" style={{ marginTop: 8 }}>
-            {weekday ? (
-              <>
-                <span className="badge">{stats.total} contacts</span>{" "}
-                <span className="badge">{stats.overdue} overdue</span>{" "}
-                <span className="badge">{stats.overdueA} A-clients overdue</span>{" "}
-                <span className="badge">{stats.agents} agents</span>
-              </>
-            ) : (
-              <span className="badge">Weekend — pipeline view only</span>
-            )}
-          </div>
+          <div className="eyebrow">{headerDate}</div>
+          <h1 className="h1">{greeting}</h1>
+          {!weekday && (
+            <div className="muted small" style={{ marginTop: 8 }}>Weekend — pipeline view only</div>
+          )}
 
           {weekday && (
             <div style={{ marginTop: 8 }}>
@@ -1155,6 +1155,15 @@ export default function MorningPage() {
           </button>
         </div>
       </div>
+
+      {weekday && (
+        <div className="statGrid" style={{ marginBottom: 8 }}>
+          <Stat label="Today" value={todayCount} sub={`/ ${rules.totalRecs}`} tone={todayCount >= rules.totalRecs ? "ok" : "default"} />
+          <Stat label="This week" value={wtdCount} />
+          <Stat label="A-clients overdue" value={stats.overdueA} tone={stats.overdueA > 0 ? "danger" : "ok"} />
+          <Stat label="Overdue" value={stats.overdue} tone={stats.overdue > 0 ? "warn" : "ok"} />
+        </div>
+      )}
 
       {showTriageBanner && (
         <div className="card cardPad" style={{ borderColor: "rgba(180,120,0,0.3)", background: "rgba(255,180,0,0.06)", marginBottom: 8 }}>
@@ -1559,11 +1568,11 @@ export default function MorningPage() {
                       className="row"
                       style={{ justifyContent: "space-between", alignItems: "baseline" }}
                     >
-                      <div style={{ fontWeight: 900, fontSize: 16, wordBreak: "break-word" }}>
-                        <span className="badge" style={{ marginRight: 10 }}>
-                          #{idx + 1}
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10, wordBreak: "break-word" }}>
+                        <span className="muted" style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500 }}>
+                          {idx + 1}
                         </span>
-                        <a href={`/contacts/${c.id}`}>{c.display_name}</a>
+                        <a href={`/contacts/${c.id}`} style={{ fontFamily: "var(--font-display)", fontSize: 19, fontWeight: 600, textDecoration: "none" }}>{c.display_name}</a>
                       </div>
 
                       <div className="muted small">
