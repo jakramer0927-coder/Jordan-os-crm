@@ -5,6 +5,7 @@ import AddressAutocomplete from "@/components/AddressAutocomplete";
 import ContactSearchInput from "@/components/ContactSearchInput";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { SkeletonCard } from "@/components/ui";
 const supabase = createSupabaseBrowserClient();
 import VoiceDraftPanel from "./VoiceDraftPanel";
 
@@ -1053,7 +1054,7 @@ export default function ContactDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (!ready) return <div className="card cardPad">Loading…</div>;
+  if (!ready) return <div className="stack"><SkeletonCard lines={4} /><SkeletonCard lines={3} /></div>;
 
   if (!contact) {
     return (
@@ -1133,7 +1134,10 @@ export default function ContactDetailPage() {
 
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h1 className="h1" style={{ margin: 0, lineHeight: 1.1 }}>{contact.display_name}</h1>
+            <div className="eyebrow">
+              {prettyCategory(contact.category)}{contact.tier ? ` · Tier ${contact.tier}` : ""}
+            </div>
+            <h1 className="h1" style={{ margin: 0, lineHeight: 1.05 }}>{contact.display_name}</h1>
 
             {/* Badges row */}
             <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
@@ -1242,18 +1246,18 @@ export default function ContactDetailPage() {
         )}
 
         {/* Snapshot strip */}
-        <div className="row" style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,.07)", flexWrap: "wrap", gap: 16 }}>
+        <div className="row" style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--line2)", flexWrap: "wrap", gap: 22 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1 }}>{touches.length}</div>
-            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>touches</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 500, lineHeight: 1 }}>{touches.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>touches</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: activeDeals.length > 0 ? "#1a3f8a" : undefined }}>{activeDeals.length}</div>
-            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>active deals</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 500, lineHeight: 1, color: activeDeals.length > 0 ? "#1a3f8a" : undefined }}>{activeDeals.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>active deals</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: overdueFollowUps.length > 0 ? "#8a0000" : undefined }}>{followUps.length}</div>
-            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>{overdueFollowUps.length > 0 ? `${overdueFollowUps.length} overdue` : "follow-ups"}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 500, lineHeight: 1, color: overdueFollowUps.length > 0 ? "var(--red)" : undefined }}>{followUps.length}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 3 }}>{overdueFollowUps.length > 0 ? `${overdueFollowUps.length} overdue` : "follow-ups"}</div>
           </div>
           {linkedContacts.length > 0 && (
             <div style={{ textAlign: "center" }}>
