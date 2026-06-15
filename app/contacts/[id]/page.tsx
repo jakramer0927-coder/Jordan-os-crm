@@ -661,14 +661,27 @@ export default function ContactDetailPage() {
     const myUid = sess.user.id;
     setUid(myUid);
 
-    // Contact (scoped to user_id if your table has it)
-    const { data: cData, error: cErr } = await supabase
-      .from("contacts")
-      .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived, transaction_score, transaction_score_rationale, score_updated_at")
-      .eq("id", id)
-      .eq("user_id", myUid)
-      .single();
+    // These five loads only depend on `id`/`myUid`, not on each other — fire
+    // them concurrently so the page waits for one round trip, not six.
+    const [contactQ, touchesQ, linksRes, fuRes, dealsRes] = await Promise.all([
+      supabase
+        .from("contacts")
+        .select("id, display_name, category, tier, client_type, email, phone, notes, created_at, user_id, buyer_budget_min, buyer_budget_max, buyer_target_areas, ai_context, ai_context_updated_at, birthday, close_anniversary, move_in_date, home_address, archived, transaction_score, transaction_score_rationale, score_updated_at")
+        .eq("id", id)
+        .eq("user_id", myUid)
+        .single(),
+      supabase
+        .from("touches")
+        .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
+        .eq("contact_id", id)
+        .order("occurred_at", { ascending: false })
+        .limit(200),
+      fetch(`/api/contacts/links?contact_id=${id}`),
+      fetch(`/api/follow-ups?contact_id=${id}`),
+      fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`),
+    ]);
 
+    const { data: cData, error: cErr } = contactQ;
     if (cErr) {
       setError(`Contact fetch error: ${cErr.message}`);
       setContact(null);
@@ -699,36 +712,27 @@ export default function ContactDetailPage() {
     setTxRationale(c.transaction_score_rationale ?? null);
     setTxScoreUpdatedAt(c.score_updated_at ?? null);
 
-    const { data: tData, error: tErr } = await supabase
-      .from("touches")
-      .select("id, contact_id, channel, direction, occurred_at, intent, summary, source, source_link")
-      .eq("contact_id", id)
-      .order("occurred_at", { ascending: false })
-      .limit(200);
-
-    if (tErr) {
-      setError((prev) => prev ?? `Touches fetch error: ${tErr.message}`);
+    // Touches
+    if (touchesQ.error) {
+      setError((prev) => prev ?? `Touches fetch error: ${touchesQ.error.message}`);
       setTouches([]);
-      return;
+    } else {
+      setTouches((touchesQ.data ?? []) as Touch[]);
     }
 
-    setTouches((tData ?? []) as Touch[]);
-
-    // Load linked contacts
-    const linksRes = await fetch(`/api/contacts/links?contact_id=${id}`);
+    // Linked contacts
     if (linksRes.ok) {
       const lj = await linksRes.json().catch(() => ({}));
       setLinkedContacts(lj.links ?? []);
     }
 
-    // Load deals
-    const fuRes = await fetch(`/api/follow-ups?contact_id=${id}`);
+    // Follow-ups
     if (fuRes.ok) {
       const fj = await fuRes.json().catch(() => ({}));
       setFollowUps((fj.follow_ups ?? []) as FollowUpLocal[]);
     }
 
-    const dealsRes = await fetch(`/api/contacts/deals?contact_id=${id}&uid=${myUid}`);
+    // Deals
     if (dealsRes.ok) {
       const dj = await dealsRes.json().catch(() => ({}));
       const rawDeals = (dj.deals ?? []) as any[];
