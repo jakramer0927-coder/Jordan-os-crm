@@ -1036,8 +1036,14 @@ export default function ContactDetailPage() {
         return;
       }
 
-      setReady(true);
-      await fetchAll();
+      // Keep the skeleton up until the contact fetch actually resolves —
+      // otherwise the "Contact not found" branch flashes during the load
+      // window (most visible on contacts with lots of history).
+      try {
+        await fetchAll();
+      } finally {
+        if (alive) setReady(true);
+      }
     };
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
