@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import ContactSearchInput from "@/components/ContactSearchInput";
+import { emitTouchLogged } from "@/lib/touchEvents";
 
 function NavLink({ href, label, onClick }: { href: string; label: string; onClick?: () => void }) {
   const pathname = usePathname();
@@ -92,6 +93,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setQlError(j?.error || "Save failed"); return; }
       setQlSuccess(`Logged for ${qlContactName}`);
+      emitTouchLogged(qlContactId);
     } catch (e: any) {
       setQlError(e?.message || "Save failed");
     } finally {

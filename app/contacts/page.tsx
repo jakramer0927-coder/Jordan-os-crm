@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { SkeletonList, EmptyState, CategoryBadge } from "@/components/ui";
+import { emitTouchLogged, onTouchLogged } from "@/lib/touchEvents";
 const supabase = createSupabaseBrowserClient();
 
 type ContactLite = {
@@ -183,6 +184,7 @@ export default function ContactsPage() {
       });
       setLogNlInput("");
       setLogMsg("Logged ✓");
+      emitTouchLogged(contactId);
       setTimeout(() => setLogMsg(null), 2000);
     } catch (e: any) {
       setLogMsg(`Error: ${e?.message || "Save failed"}`);
@@ -274,6 +276,22 @@ export default function ContactsPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, uid]);
+
+  // Reflect touches logged elsewhere (e.g. the global quick-log) in the day counter
+  useEffect(() => onTouchLogged((contactId) => {
+    if (!contactId) return;
+    setLastTouchMap((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(contactId);
+      next.set(contactId, {
+        occurred_at: new Date().toISOString(),
+        channel: existing?.channel ?? "other",
+        summary: existing?.summary ?? null,
+        days: 0,
+      });
+      return next;
+    });
+  }), []);
 
   const triageRows = useMemo(() => {
     let filtered = [...rows];

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { SkeletonCard } from "@/components/ui";
+import { emitTouchLogged } from "@/lib/touchEvents";
 const supabase = createSupabaseBrowserClient();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -837,6 +838,7 @@ A-client cadence: ${aClientsDueOrOverdue}/${aClientsTotal} due or overdue`;
     setLoggedAskIds((prev) => new Set([...prev, contactId]));
     setLoggingAsk(null);
     setRefAsks30((n) => n + 1);
+    emitTouchLogged(contactId);
   }
 
   async function loadReports() {

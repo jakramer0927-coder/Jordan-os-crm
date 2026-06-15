@@ -6,6 +6,7 @@ import ContactSearchInput from "@/components/ContactSearchInput";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { SkeletonCard } from "@/components/ui";
+import { emitTouchLogged, onTouchLogged } from "@/lib/touchEvents";
 const supabase = createSupabaseBrowserClient();
 import VoiceDraftPanel from "./VoiceDraftPanel";
 
@@ -201,6 +202,7 @@ function TextThreadUploadPanel({ contactId }: { contactId: string }) {
         setMsg(`Imported ✅ Touch logged.`);
         setTitle("");
         setRaw("");
+        emitTouchLogged(contactId);
       }
     } catch (e: any) {
       setErr(e?.message || "Import failed");
@@ -1067,6 +1069,13 @@ export default function ContactDetailPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Refresh when a touch is logged for this contact from anywhere (global
+  // quick-log, text-import panel, etc.) so recency stays in sync.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onTouchLogged((contactId) => {
+    if (!contactId || contactId === id) fetchAll();
+  }), [id]);
 
   if (!ready) return <div className="stack"><SkeletonCard lines={4} /><SkeletonCard lines={3} /></div>;
 

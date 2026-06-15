@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { SkeletonList, EmptyState, Stat } from "@/components/ui";
+import { emitTouchLogged, onTouchLogged } from "@/lib/touchEvents";
 const supabase = createSupabaseBrowserClient();
 
 type TouchIntent =
@@ -695,12 +696,17 @@ export default function MorningPage() {
     }
 
     setSavingTouch(false);
-    // Mark as completed — do NOT reload (this is what caused reshuffling)
+    // Mark as completed + refresh recency in place. The list order is pinned to
+    // lockedIds, so updating last_outbound_at won't reshuffle the cards.
     setCompletedIds((prev) => new Set([...prev, contactId]));
+    setContacts((prev) => prev.map((c) => c.id === contactId
+      ? { ...c, last_outbound_at: new Date().toISOString(), days_since_outbound: 0 }
+      : c));
     setTodayCount((n) => n + 1);
     setWtdCount((n) => n + 1);
     setMsg("Touch logged ✓");
     setLoggingFor(null);
+    emitTouchLogged(contactId);
   }
 
   async function loadReferralFollowUps() {
@@ -798,13 +804,28 @@ export default function MorningPage() {
     if (error) { setBulkMsg(`Error: ${error.message}`); return; }
 
     const ids = displayRecs.map((c) => c.id);
+    const idSet = new Set(ids);
     setCompletedIds((prev) => new Set([...prev, ...ids]));
+    setContacts((prev) => prev.map((c) => idSet.has(c.id)
+      ? { ...c, last_outbound_at: now, days_since_outbound: 0 }
+      : c));
     setTodayCount((n) => n + ids.length);
     setWtdCount((n) => n + ids.length);
     setBulkMsg(`${ids.length} touches logged ✓`);
     setBulkOpen(false);
     setBulkNlInput("");
+    emitTouchLogged();
   }
+
+  // Reflect touches logged elsewhere (e.g. the global quick-log) without a
+  // reload — pin to lockedIds order, just refresh the touched card's recency.
+  useEffect(() => onTouchLogged((contactId) => {
+    if (!contactId) return;
+    setCompletedIds((prev) => new Set([...prev, contactId]));
+    setContacts((prev) => prev.map((c) => c.id === contactId
+      ? { ...c, last_outbound_at: new Date().toISOString(), days_since_outbound: 0 }
+      : c));
+  }), []);
 
   useEffect(() => {
     let alive = true;
