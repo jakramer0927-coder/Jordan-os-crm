@@ -247,7 +247,18 @@ export default function SettingsPage() {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Voice sync failed"); return; }
-    setMsg(`Voice sync done — ${j.inserted} added, ${j.skipped} skipped (${j.scanned} scanned)`);
+    {
+      const parts: string[] = [];
+      if (j.skippedAlreadySynced) parts.push(`${j.skippedAlreadySynced} already in library`);
+      if (j.skippedTooShort) parts.push(`${j.skippedTooShort} too short`);
+      if (j.skippedError) parts.push(`${j.skippedError} failed`);
+      const breakdown = parts.length ? ` — skipped: ${parts.join(", ")}` : "";
+      setMsg(
+        j.inserted > 0
+          ? `Voice sync done — ${j.inserted} new email${j.inserted !== 1 ? "s" : ""} added from ${j.scanned} scanned${breakdown}.`
+          : `Voice sync done — no new emails (your library is already up to date with the last ${j.days} days)${breakdown}.`
+      );
+    }
   }
 
   async function importSheet() {

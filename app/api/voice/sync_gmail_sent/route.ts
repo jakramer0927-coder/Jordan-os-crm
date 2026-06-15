@@ -135,6 +135,9 @@ export async function POST(req: Request) {
     let scanned = 0;
     let inserted = 0;
     let skipped = 0;
+    let skippedAlreadySynced = 0;
+    let skippedTooShort = 0;
+    let skippedError = 0;
     let pageToken: string | undefined = undefined;
 
     while (scanned < maxMessages) {
@@ -177,6 +180,7 @@ export async function POST(req: Request) {
 
         if (!text || text.length < 40) {
           skipped += 1;
+          skippedTooShort += 1;
           continue;
         }
 
@@ -184,7 +188,7 @@ export async function POST(req: Request) {
         const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
 
         // Skip duplicates (checked against upfront-loaded set)
-        if (existingIds.has(m.id)) { skipped += 1; continue; }
+        if (existingIds.has(m.id)) { skipped += 1; skippedAlreadySynced += 1; continue; }
 
         const { error: insErr } = await supabaseAdmin.from("user_voice_examples").insert({
           user_id: uid,
@@ -197,7 +201,7 @@ export async function POST(req: Request) {
           source_link: link,
         });
 
-        if (insErr) skipped += 1;
+        if (insErr) { skipped += 1; skippedError += 1; }
         else inserted += 1;
       }
 
@@ -209,6 +213,9 @@ export async function POST(req: Request) {
       scanned,
       inserted,
       skipped,
+      skippedAlreadySynced,
+      skippedTooShort,
+      skippedError,
       days,
       maxMessages,
       usedQuery: q,
