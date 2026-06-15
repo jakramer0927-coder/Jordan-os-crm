@@ -639,6 +639,71 @@ main a {
   letter-spacing: 0.05em;
 }
 
+/* ===== Skeleton loading ===== */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--radiusSm);
+  background: linear-gradient(
+    90deg,
+    rgba(20,20,20,.05) 25%,
+    rgba(20,20,20,.09) 37%,
+    rgba(20,20,20,.05) 63%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonText {
+  height: 12px;
+  margin: 6px 0;
+}
+
+.skeletonTitle {
+  height: 18px;
+  width: 40%;
+  margin-bottom: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* ===== Empty state ===== */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 24px;
+  color: var(--muted);
+}
+
+.emptyStateIcon {
+  font-size: 30px;
+  line-height: 1;
+  opacity: 0.5;
+  margin-bottom: 2px;
+}
+
+.emptyStateTitle {
+  font-weight: 900;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.emptyStateBody {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
 /* ===== Mobile ===== */
 .rowResponsive {
   display: flex;

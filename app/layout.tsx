@@ -2,7 +2,7 @@ import "./globals.css";
 import ClientLayout from "./ClientLayout";
 
 export const metadata = {
-  title: "Dex",
+  title: "Jordan OS",
   description: "Private CRM",
 };
 

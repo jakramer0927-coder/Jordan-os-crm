@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { SkeletonList, EmptyState } from "@/components/ui";
 const supabase = createSupabaseBrowserClient();
 
 type TouchIntent =
@@ -1530,6 +1531,7 @@ export default function MorningPage() {
         </div>
 
         <div className="stack">
+          {loading && displayRecs.length === 0 && <SkeletonList count={rules.totalRecs > 6 ? 6 : rules.totalRecs} lines={2} />}
           {displayRecs.map((c, idx) => {
             const completed = completedIds.has(c.id);
             const agent = (c.category || "").toLowerCase() === "agent";
@@ -1755,9 +1757,14 @@ export default function MorningPage() {
             );
           })}
 
-          {displayRecs.length === 0 ? (
+          {!loading && displayRecs.length === 0 ? (
             <div className="card cardPad">
-              <div className="muted">No contacts found yet — add a few on Contacts first.</div>
+              <EmptyState
+                icon="☀️"
+                title="You're all caught up"
+                body="No contacts are due for a touch right now. Add people on the Contacts page, or hit Refresh to recompute today's list."
+                action={<a href="/contacts" className="btn btnPrimary">Go to Contacts</a>}
+              />
             </div>
           ) : null}
         </div>
