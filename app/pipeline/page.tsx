@@ -2210,8 +2210,9 @@ export default function PipelinePage() {
       <div className="card cardPad">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
           <div>
+            <div className="eyebrow">Deal flow</div>
             <h1 className="h1" style={{ margin: 0 }}>Pipeline</h1>
-            <div className="subtle" style={{ fontSize: 12, marginTop: 4 }}>
+            <div className="subtle" style={{ fontSize: 12, marginTop: 6 }}>
               {buyers.length + sellers.length + investors.length} active · {pastClients.length} past clients
             </div>
           </div>
@@ -2226,20 +2227,20 @@ export default function PipelinePage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 16 }}>
           <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,107,42,.06)", border: "1px solid rgba(11,107,42,.15)" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(11,107,42,.7)", marginBottom: 3 }}>ACTIVE GCI</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: "#0b6b2a" }}>{fmt(activeGci)}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 25, fontWeight: 500, color: "#0b6b2a" }}>{fmt(activeGci)}</div>
             {activeDealValue > 0 && <div style={{ fontSize: 11, color: "#0b6b2a", opacity: 0.6, marginTop: 1 }}>{fmt(activeDealValue)} deal value</div>}
             <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>Searching · Offer · Under contract</div>
           </div>
           <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(11,60,140,.05)", border: "1px solid rgba(11,60,140,.15)" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(11,60,140,.7)", marginBottom: 3 }}>TOTAL PIPELINE</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: "#1a3f8a" }}>{fmt(totalPipelineGci)}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 25, fontWeight: 500, color: "#1a3f8a" }}>{fmt(totalPipelineGci)}</div>
             {totalPipelineValue > 0 && <div style={{ fontSize: 11, color: "#1a3f8a", opacity: 0.6, marginTop: 1 }}>{fmt(totalPipelineValue)} deal value</div>}
             <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>All active opportunities</div>
           </div>
           {closedGciYtd > 0 && (
             <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(0,0,0,.02)", border: "1px solid rgba(0,0,0,.08)" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(18,18,18,.5)", marginBottom: 3 }}>CLOSED YTD</div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>{fmt(closedGciYtd)}</div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 25, fontWeight: 500 }}>{fmt(closedGciYtd)}</div>
               <div style={{ fontSize: 11, color: "rgba(18,18,18,.45)", marginTop: 2 }}>Net GCI this year</div>
             </div>
           )}
