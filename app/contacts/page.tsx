@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { SkeletonList, EmptyState, CategoryBadge } from "@/components/ui";
 const supabase = createSupabaseBrowserClient();
 
 type ContactLite = {
@@ -299,16 +300,27 @@ export default function ContactsPage() {
     return `${rows.length} result(s)`;
   }, [q, busy, rows.length]);
 
-  if (!ready) return <div className="page">Loading…</div>;
+  if (!ready) {
+    return (
+      <div className="page">
+        <div className="pageHeader">
+          <div>
+            <div className="eyebrow">Your database</div>
+            <h1 className="h1">Contacts</h1>
+          </div>
+        </div>
+        <SkeletonList count={6} lines={2} />
+      </div>
+    );
+  }
 
   return (
     <div className="page">
       <div className="pageHeader">
         <div>
+          <div className="eyebrow">Your database</div>
           <h1 className="h1">Contacts</h1>
-          <div className="muted" style={{ marginTop: 6 }}>
-            <span className="badge">{hint}</span>
-          </div>
+          <div className="muted small" style={{ marginTop: 6 }}>{hint}</div>
         </div>
         <div className="row">
           <a className="btn" href="/morning">Morning</a>
@@ -477,35 +489,34 @@ export default function ContactsPage() {
                 )}
                 {/* Days counter */}
                 <div style={{ textAlign: "center", minWidth: 52, flexShrink: 0 }}>
-                  <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1, color: overdue ? "#b91c1c" : "#15803d" }}>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 25, fontWeight: 500, lineHeight: 1, color: overdue ? "var(--red)" : "var(--green)" }}>
                     {last == null ? "∞" : last.days}
                   </div>
-                  <div style={{ fontSize: 10, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  <div style={{ fontSize: 10, color: "var(--muted2)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
                     {last == null ? "never" : "days"}
                   </div>
                 </div>
 
                 {/* Identity + meta */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, fontSize: 15 }}>{c.display_name}</div>
-                  <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
-                    <span className="badge" style={{ fontSize: 11 }}>
-                      {c.category}{c.tier ? ` · ${c.tier}` : ""}
-                    </span>
+                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 18 }}>{c.display_name}</div>
+                  <div className="row" style={{ marginTop: 5, flexWrap: "wrap", gap: 4 }}>
+                    <CategoryBadge category={c.category} />
+                    {c.tier && <span className="badge" style={{ fontSize: 11 }}>Tier {c.tier}</span>}
                     {c.company && <span className="badge" style={{ fontSize: 11 }}>{c.company}</span>}
                     {c.client_type && <span className="badge" style={{ fontSize: 11 }}>{c.client_type}</span>}
                   </div>
                   {last?.summary && (
-                    <div style={{ marginTop: 5, fontSize: 12, color: "#666", lineHeight: 1.4,
+                    <div style={{ marginTop: 6, fontSize: 12, color: "var(--muted)", lineHeight: 1.4,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                      <span style={{ color: "#aaa", marginRight: 4 }}>Last note:</span>{last.summary}
+                      <span style={{ color: "var(--muted2)", marginRight: 4 }}>Last note:</span>{last.summary}
                     </div>
                   )}
                 </div>
 
                 {/* Overdue chip + action */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                  <span className="badge" style={{ fontSize: 11, color: overdue ? "#b91c1c" : "#15803d", borderColor: overdue ? "#fca5a5" : "#86efac" }}>
+                  <span className={`badge ${overdue ? "badgeDanger" : "badgeOk"}`} style={{ fontSize: 11 }}>
                     {overdue ? "Overdue" : "On track"}
                   </span>
                   {triageMode ? (
@@ -574,7 +585,20 @@ export default function ContactsPage() {
           );
         })}
 
-        {!busy && rows.length === 0 && <div className="muted">No matches.</div>}
+        {busy && rows.length === 0 && <SkeletonList count={5} lines={2} />}
+
+        {!busy && rows.length === 0 && (
+          q.trim() ? (
+            <EmptyState icon="⌕" title="No matches" body={`Nothing found for "${q.trim()}". Try a different name, email, or company.`} />
+          ) : (
+            <EmptyState
+              icon="✦"
+              title="No contacts yet"
+              body="Add your first contact to start building your database."
+              action={<button className="btn btnPrimary" onClick={() => setAddOpen(true)}>Add contact</button>}
+            />
+          )
+        )}
       </div>
     </div>
   );
