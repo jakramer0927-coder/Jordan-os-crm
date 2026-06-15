@@ -632,6 +632,10 @@ export default function ContactDetailPage() {
       if (!res.ok) { setIntError(j?.error || "Failed to extract"); return; }
       setIntResult(j.extracted);
       setIntRaw("");
+      // Refresh touches/deals so the health label, last-contact time, and
+      // timeline reflect the touch we just logged (the DB trigger already
+      // updated last_contact_at; the page just needs to re-read it).
+      await fetchAll();
     } catch (e: any) {
       setIntError(e?.message || "Failed to extract");
     } finally {
