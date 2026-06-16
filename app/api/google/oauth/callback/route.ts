@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getGoogleOAuthClient } from "@/lib/google";
+import { profileEmail } from "@/lib/googleMailboxes";
 import { encryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
@@ -18,7 +19,7 @@ export async function GET(req: Request) {
 
   const { data: st, error: stErr } = await supabaseAdmin
     .from("google_oauth_states")
-    .select("user_id, expires_at")
+    .select("user_id, expires_at, purpose")
     .eq("state", state)
     .single();
 
@@ -39,19 +40,50 @@ export async function GET(req: Request) {
   const oauth2 = getGoogleOAuthClient();
   const { tokens } = await oauth2.getToken(code);
 
-  // Upsert tokens (encrypt sensitive values at rest)
-  const { error: upErr } = await supabaseAdmin.from("google_tokens").upsert(
-    {
-      user_id: st.user_id,
-      access_token: tokens.access_token ? encryptToken(tokens.access_token) : null,
-      refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
-      scope: tokens.scope ?? null,
-      token_type: tokens.token_type ?? null,
-      expiry_date: tokens.expiry_date ?? null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" },
-  );
+  // Identify which Gmail account was just authorized
+  oauth2.setCredentials({
+    access_token: tokens.access_token ?? undefined,
+    refresh_token: tokens.refresh_token ?? undefined,
+    expiry_date: tokens.expiry_date ?? undefined,
+  });
+  const connectedEmail = await profileEmail(oauth2);
+
+  const isExtra = st.purpose === "extra_mailbox";
+
+  let upErr: { message: string } | null = null;
+
+  if (isExtra) {
+    // Additional voice-harvesting mailbox — never touches the primary connection
+    const { error } = await supabaseAdmin.from("extra_google_mailboxes").upsert(
+      {
+        user_id: st.user_id,
+        email: connectedEmail ?? `mailbox-${Date.now()}`,
+        access_token: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+        scope: tokens.scope ?? null,
+        token_type: tokens.token_type ?? null,
+        expiry_date: tokens.expiry_date ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,email" },
+    );
+    upErr = error;
+  } else {
+    const { error } = await supabaseAdmin.from("google_tokens").upsert(
+      {
+        user_id: st.user_id,
+        email: connectedEmail,
+        access_token: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+        scope: tokens.scope ?? null,
+        token_type: tokens.token_type ?? null,
+        expiry_date: tokens.expiry_date ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+    upErr = error;
+  }
 
   // Clean up state
   await supabaseAdmin.from("google_oauth_states").delete().eq("state", state);

@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getGoogleOAuthClient } from "@/lib/google";
+import { loadVoiceMailboxes } from "@/lib/googleMailboxes";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
-import { decryptToken } from "@/lib/tokenCrypto";
 
 export const runtime = "nodejs";
 
@@ -95,30 +94,11 @@ export async function POST(req: Request) {
     const maxMessages =
       typeof body?.maxMessages === "number" ? Math.max(50, Math.min(2000, body.maxMessages)) : 600;
 
-    const { data: tok, error: tokErr } = await supabaseAdmin
-      .from("google_tokens")
-      .select("access_token, refresh_token, expiry_date")
-      .eq("user_id", uid)
-      .single();
-
-    if (tokErr || !tok)
+    // Every mailbox we harvest voice from: the primary connection + any extra
+    // mailboxes the user added (e.g. a second brokerage identity).
+    const mailboxes = await loadVoiceMailboxes(uid);
+    if (mailboxes.length === 0)
       return NextResponse.json({ error: "Google not connected" }, { status: 400 });
-
-    const tokenRow = tok as GoogleTokenRow;
-    if (!tokenRow.refresh_token)
-      return NextResponse.json(
-        { error: "Missing refresh token (reconnect Google)" },
-        { status: 400 },
-      );
-
-    const oauth2 = getGoogleOAuthClient();
-    oauth2.setCredentials({
-      access_token: tokenRow.access_token ? decryptToken(tokenRow.access_token) : undefined,
-      refresh_token: tokenRow.refresh_token ? decryptToken(tokenRow.refresh_token) : undefined,
-      expiry_date: tokenRow.expiry_date ?? undefined,
-    });
-
-    const gmail = google.gmail({ version: "v1", auth: oauth2 });
 
     // Load all already-synced message IDs upfront to avoid per-message DB calls
     const { data: existingRows } = await supabaseAdmin
@@ -126,7 +106,7 @@ export async function POST(req: Request) {
       .select("source_message_id")
       .eq("user_id", uid)
       .not("source_message_id", "is", null)
-      .limit(5000);
+      .limit(20000);
     const existingIds = new Set((existingRows ?? []).map((r: any) => r.source_message_id as string));
 
     // Search ALL sent emails — no label filter. Voice training needs the full picture.
@@ -138,74 +118,74 @@ export async function POST(req: Request) {
     let skippedAlreadySynced = 0;
     let skippedTooShort = 0;
     let skippedError = 0;
-    let pageToken: string | undefined = undefined;
+    const perMailbox: Array<{ email: string | null; source: string; scanned: number; inserted: number; error?: string }> = [];
 
-    while (scanned < maxMessages) {
-      const listCall = await gmail.users.messages.list({
-        userId: "me",
-        q,
-        maxResults: Math.min(100, maxMessages - scanned),
-        pageToken,
-      });
+    for (const mb of mailboxes) {
+      const gmail = google.gmail({ version: "v1", auth: mb.oauth2 });
+      let mbScanned = 0;
+      let mbInserted = 0;
+      let pageToken: string | undefined = undefined;
 
-      const listData: gmail_v1.Schema$ListMessagesResponse = listCall.data;
+      try {
+        while (mbScanned < maxMessages) {
+          const listCall = await gmail.users.messages.list({
+            userId: "me",
+            q,
+            maxResults: Math.min(100, maxMessages - mbScanned),
+            pageToken,
+          });
 
-      const msgs = listData.messages ?? [];
-      pageToken = listData.nextPageToken ?? undefined;
-      if (msgs.length === 0) break;
+          const listData: gmail_v1.Schema$ListMessagesResponse = listCall.data;
+          const msgs = listData.messages ?? [];
+          pageToken = listData.nextPageToken ?? undefined;
+          if (msgs.length === 0) break;
 
-      for (const m of msgs) {
-        if (!m.id) continue;
-        scanned += 1;
+          for (const m of msgs) {
+            if (!m.id) continue;
+            scanned += 1;
+            mbScanned += 1;
 
-        const fullCall = await gmail.users.messages.get({
-          userId: "me",
-          id: m.id,
-          format: "full",
-        });
+            // Same Gmail message id across mailboxes (forwards) — skip the duplicate
+            if (existingIds.has(m.id)) { skipped += 1; skippedAlreadySynced += 1; continue; }
 
-        const fullData: gmail_v1.Schema$Message = fullCall.data;
+            const fullCall = await gmail.users.messages.get({ userId: "me", id: m.id, format: "full" });
+            const fullData: gmail_v1.Schema$Message = fullCall.data;
 
-        const headers = fullData.payload?.headers ?? [];
-        const subject = headerValue(headers, "Subject") || "";
-        const snippet = (fullData.snippet || "").trim();
-        const bodyText = extractTextFromPayload(fullData.payload);
+            const headers = fullData.payload?.headers ?? [];
+            const subject = headerValue(headers, "Subject") || "";
+            const snippet = (fullData.snippet || "").trim();
+            const bodyText = extractTextFromPayload(fullData.payload);
 
-        const raw = (bodyText || snippet || subject).trim();
-        const text = raw
-          .replace(/\r/g, "")
-          .replace(/\n{3,}/g, "\n\n")
-          .trim()
-          .slice(0, 4000);
+            const raw = (bodyText || snippet || subject).trim();
+            const text = raw.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 4000);
 
-        if (!text || text.length < 40) {
-          skipped += 1;
-          skippedTooShort += 1;
-          continue;
+            if (!text || text.length < 40) { skipped += 1; skippedTooShort += 1; continue; }
+
+            const threadId = fullData.threadId || "";
+            const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
+
+            const { error: insErr } = await supabaseAdmin.from("user_voice_examples").insert({
+              user_id: uid,
+              channel: "email",
+              intent: null,
+              contact_category: null,
+              text,
+              source: "gmail",
+              source_message_id: m.id,
+              source_link: link,
+            });
+
+            if (insErr) { skipped += 1; skippedError += 1; }
+            else { inserted += 1; mbInserted += 1; existingIds.add(m.id); }
+          }
+
+          if (!pageToken) break;
         }
-
-        const threadId = fullData.threadId || "";
-        const link = threadId ? `https://mail.google.com/mail/u/0/#all/${threadId}` : null;
-
-        // Skip duplicates (checked against upfront-loaded set)
-        if (existingIds.has(m.id)) { skipped += 1; skippedAlreadySynced += 1; continue; }
-
-        const { error: insErr } = await supabaseAdmin.from("user_voice_examples").insert({
-          user_id: uid,
-          channel: "email",
-          intent: null,
-          contact_category: null,
-          text,
-          source: "gmail",
-          source_message_id: m.id,
-          source_link: link,
-        });
-
-        if (insErr) { skipped += 1; skippedError += 1; }
-        else inserted += 1;
+        perMailbox.push({ email: mb.email, source: mb.source, scanned: mbScanned, inserted: mbInserted });
+      } catch (mbErr: any) {
+        // One mailbox failing (e.g. revoked token) shouldn't abort the others
+        perMailbox.push({ email: mb.email, source: mb.source, scanned: mbScanned, inserted: mbInserted, error: mbErr?.message ?? "mailbox sync failed" });
       }
-
-      if (!pageToken) break;
     }
 
     return NextResponse.json({
@@ -216,10 +196,11 @@ export async function POST(req: Request) {
       skippedAlreadySynced,
       skippedTooShort,
       skippedError,
+      mailboxes: perMailbox,
       days,
       maxMessages,
       usedQuery: q,
-      note: "Inserted email voice examples from Gmail Sent.",
+      note: "Inserted email voice examples from all connected Gmail mailboxes.",
     });
   } catch (e) {
     return serverError("VOICE_SYNC_GMAIL_CRASH", e);

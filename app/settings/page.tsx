@@ -9,6 +9,8 @@ const supabase = createSupabaseBrowserClient();
 
 type SettingsTab = "integrations" | "linkedin";
 
+type ExtraMailbox = { id: string; email: string; created_at: string };
+
 type LinkedInRow = {
   first_name: string;
   last_name: string;
@@ -158,6 +160,7 @@ export default function SettingsPage() {
   const [coaching, setCoaching] = useState<CoachingResult | null>(null);
   const [coachedAt, setCoachedAt] = useState<string | null>(null);
   const [coachRunning, setCoachRunning] = useState(false);
+  const [extraMailboxes, setExtraMailboxes] = useState<ExtraMailbox[]>([]);
 
   // ── LinkedIn state ──
   const [liRows, setLiRows] = useState<LinkedInRow[]>([]);
@@ -181,6 +184,7 @@ export default function SettingsPage() {
       setUid(user.id);
       const { data: tData } = await supabase.from("google_tokens").select("user_id").eq("user_id", user.id).maybeSingle();
       setConnected(!!tData?.user_id);
+      loadMailboxes();
       const { data: sData } = await supabase
         .from("user_settings")
         .select("gmail_label_names, sheet_url, voice_coaching_result, voice_coached_at")
@@ -197,15 +201,29 @@ export default function SettingsPage() {
 
   // ── Integrations actions ──────────────────────────────────────────────────
 
-  async function connectGoogle() {
+  async function connectGoogle(purpose: "primary" | "extra_mailbox" = "primary") {
     if (!uid) return;
     setBusy(true);
     setErr(null);
-    const res = await fetch(`/api/google/oauth/start?uid=${uid}`);
+    const qs = purpose === "extra_mailbox" ? "?purpose=extra_mailbox" : "";
+    const res = await fetch(`/api/google/oauth/start${qs}`);
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setErr(j?.error || "Failed to start OAuth"); return; }
     window.location.href = j.url;
+  }
+
+  async function loadMailboxes() {
+    const { data } = await supabase
+      .from("extra_google_mailboxes")
+      .select("id, email, created_at")
+      .order("created_at", { ascending: true });
+    setExtraMailboxes((data ?? []) as ExtraMailbox[]);
+  }
+
+  async function removeMailbox(id: string) {
+    await supabase.from("extra_google_mailboxes").delete().eq("id", id);
+    await loadMailboxes();
   }
 
   async function saveSettings() {
@@ -253,10 +271,14 @@ export default function SettingsPage() {
       if (j.skippedTooShort) parts.push(`${j.skippedTooShort} too short`);
       if (j.skippedError) parts.push(`${j.skippedError} failed`);
       const breakdown = parts.length ? ` — skipped: ${parts.join(", ")}` : "";
+      const mbList: Array<{ email: string | null; inserted: number; error?: string }> = j.mailboxes ?? [];
+      const mbSummary = mbList.length > 1
+        ? " Per mailbox: " + mbList.map((m) => `${m.email ?? "primary"} +${m.inserted}${m.error ? " (error)" : ""}`).join(", ") + "."
+        : "";
       setMsg(
         j.inserted > 0
-          ? `Voice sync done — ${j.inserted} new email${j.inserted !== 1 ? "s" : ""} added from ${j.scanned} scanned${breakdown}.`
-          : `Voice sync done — no new emails (your library is already up to date with the last ${j.days} days)${breakdown}.`
+          ? `Voice sync done — ${j.inserted} new email${j.inserted !== 1 ? "s" : ""} added from ${j.scanned} scanned${breakdown}.${mbSummary}`
+          : `Voice sync done — no new emails (library already up to date for the last ${j.days} days)${breakdown}.${mbSummary}`
       );
     }
   }
@@ -428,10 +450,46 @@ export default function SettingsPage() {
               Google {connected ? "connected" : "not connected"}
             </span>
             {!connected && (
-              <button className="btn btnPrimary" style={{ fontSize: 13 }} onClick={connectGoogle} disabled={busy}>
+              <button className="btn btnPrimary" style={{ fontSize: 13 }} onClick={() => connectGoogle()} disabled={busy}>
                 Connect
               </button>
             )}
+          </div>
+
+          {/* Sending mailboxes — harvest voice from more than one Gmail (e.g. a
+              second brokerage identity whose Sent folder lives separately). */}
+          <div className="card cardPad">
+            <div className="sectionTitle" style={{ fontSize: 18 }}>Sending mailboxes</div>
+            <div className="muted small" style={{ marginTop: 4, marginBottom: 12 }}>
+              Dex learns your writing voice from your Sent mail. Add every Gmail you send client email from so your drafts sound like you across all of them.
+            </div>
+
+            <div className="stack" style={{ gap: 8 }}>
+              <div className="rowBetween" style={{ alignItems: "center" }}>
+                <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <span className="badge badgeOk">Primary</span>
+                  <span style={{ fontWeight: 700 }}>{connected ? "Connected" : "Not connected"}</span>
+                </div>
+              </div>
+
+              {extraMailboxes.map((mb) => (
+                <div key={mb.id} className="rowBetween" style={{ alignItems: "center", borderTop: "1px solid var(--line2)", paddingTop: 8 }}>
+                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <span className="badge">Added</span>
+                    <span style={{ fontWeight: 700 }}>{mb.email}</span>
+                  </div>
+                  <button className="btn btnGhost" style={{ fontSize: 12, color: "var(--red)" }} onClick={() => removeMailbox(mb.id)} disabled={busy}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="row" style={{ marginTop: 14 }}>
+              <button className="btn btnPrimary" onClick={() => connectGoogle("extra_mailbox")} disabled={busy || !uid}>
+                + Add a sending mailbox
+              </button>
+            </div>
           </div>
 
           {err && <div className="alert alertError">{err}</div>}
