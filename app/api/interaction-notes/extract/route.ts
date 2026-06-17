@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getVerifiedUid, unauthorized, serverError } from "@/lib/supabase/server";
+import { syncFollowUpEvent } from "@/lib/followUpCalendar";
 
 export const runtime = "nodejs";
 
@@ -128,15 +129,24 @@ Return this exact JSON structure:
     if (actionItems.length > 0) {
       // Default due tomorrow; timeline_mentioned stays on the note for context
       const due = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-      const { error: fuErr } = await supabaseAdmin.from("follow_ups").insert(
+      const { data: createdFus, error: fuErr } = await supabaseAdmin.from("follow_ups").insert(
         actionItems.map((item) => ({
           user_id: uid,
           contact_id,
           due_date: due,
           note: item.trim().slice(0, 500),
         }))
-      );
-      if (!fuErr) followUpsCreated = actionItems.length;
+      ).select("id, note");
+      if (!fuErr) {
+        followUpsCreated = actionItems.length;
+        // Mirror each to-do onto Google Calendar (best-effort)
+        for (const fu of createdFus ?? []) {
+          const eventId = await syncFollowUpEvent({
+            uid, followUpId: (fu as any).id, contactId: contact_id, dueDate: due, note: (fu as any).note,
+          });
+          if (eventId) await supabaseAdmin.from("follow_ups").update({ gcal_event_id: eventId }).eq("id", (fu as any).id);
+        }
+      }
     }
 
     // Update contacts: last_interaction_at, life_event_flags (append unique), referral_signal_active

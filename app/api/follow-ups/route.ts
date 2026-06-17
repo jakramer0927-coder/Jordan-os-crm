@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServerClient, unauthorized, serverError } from "@/lib/supabase/server";
+import { syncFollowUpEvent, deleteFollowUpEvent } from "@/lib/followUpCalendar";
 
 export const runtime = "nodejs";
 
@@ -69,6 +70,13 @@ export async function POST(req: Request) {
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // Push to Google Calendar (best-effort) and store the event id
+    const eventId = await syncFollowUpEvent({
+      uid, followUpId: (data as any).id, contactId: contact_id, dueDate: due_date, note: note?.trim() || null,
+    });
+    if (eventId) await supabaseAdmin.from("follow_ups").update({ gcal_event_id: eventId }).eq("id", (data as any).id);
+
     return NextResponse.json({ ok: true, id: (data as any).id });
   } catch (e) {
     return serverError("FOLLOW_UPS_POST_CRASH", e);
@@ -87,13 +95,21 @@ export async function PATCH(req: Request) {
     const { id } = body;
     if (!isUuid(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
+    // Grab the calendar event id before updating, so we can clear it from the calendar
+    const { data: existing } = await supabaseAdmin
+      .from("follow_ups").select("gcal_event_id").eq("id", id).eq("user_id", uid).maybeSingle();
+
     const { error } = await supabaseAdmin
       .from("follow_ups")
-      .update({ completed_at: new Date().toISOString() })
+      .update({ completed_at: new Date().toISOString(), gcal_event_id: null })
       .eq("id", id)
       .eq("user_id", uid);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // A completed to-do shouldn't linger on the calendar
+    await deleteFollowUpEvent(uid, (existing as any)?.gcal_event_id);
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     return serverError("FOLLOW_UPS_PATCH_CRASH", e);
@@ -112,10 +128,16 @@ export async function DELETE(req: Request) {
     const { id } = body;
     if (!isUuid(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
+    const { data: existing } = await supabaseAdmin
+      .from("follow_ups").select("gcal_event_id").eq("id", id).eq("user_id", uid).maybeSingle();
+
     const { error } = await supabaseAdmin
       .from("follow_ups").delete().eq("id", id).eq("user_id", uid);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await deleteFollowUpEvent(uid, (existing as any)?.gcal_event_id);
+
     return NextResponse.json({ ok: true });
   } catch (e) {
     return serverError("FOLLOW_UPS_DELETE_CRASH", e);
