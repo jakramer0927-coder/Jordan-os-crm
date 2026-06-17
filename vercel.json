@@ -1,12 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/gmail-sync",
-      "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/cron/daily-accountability",
-      "schedule": "0 16 * * *"
-    }
-  ]
+  "$comment": "Scheduled jobs run via GitHub Actions (.github/workflows/scheduled-jobs.yml), not Vercel cron — Hobby-plan cron was unreliable. Endpoints: /api/cron/gmail-sync, /api/cron/daily-accountability."
 }

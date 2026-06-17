@@ -1,0 +1,30 @@
+name: Dex scheduled jobs
+
+# Reliable external trigger for Dex's daily jobs. Vercel Hobby cron is
+# unreliable, so GitHub Actions calls the endpoints instead. Each run:
+#   1. syncs Gmail (so the accountability email reflects fresh activity)
+#   2. runs the daily accountability + nightly daily_stats rollup (+ Friday CEO review)
+#
+# Requires a repo secret CRON_SECRET that matches the CRON_SECRET env var in
+# Vercel. Set it at: GitHub repo → Settings → Secrets and variables → Actions.
+
+on:
+  schedule:
+    - cron: "0 16 * * *" # 16:00 UTC daily (~9am PT)
+  workflow_dispatch: {} # lets you (or Claude) run it on demand from the Actions tab
+
+jobs:
+  run-daily-jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gmail sync
+        run: |
+          curl -fsS -X GET "https://jordan-os-crm.vercel.app/api/cron/gmail-sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          echo "" && echo "gmail-sync ok"
+
+      - name: Daily accountability + rollup
+        run: |
+          curl -fsS -X GET "https://jordan-os-crm.vercel.app/api/cron/daily-accountability" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          echo "" && echo "daily-accountability ok"
