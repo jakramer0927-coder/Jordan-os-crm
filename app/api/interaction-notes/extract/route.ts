@@ -56,12 +56,17 @@ Return this exact JSON structure:
   "topics_discussed": ["array of topics discussed"],
   "sentiment": "positive | neutral | negative | mixed",
   "life_event_flags": ["any life events mentioned — job change, new baby, divorce, death, relocation, marriage, retirement, inheritance — or empty array"],
-  "action_items": ["specific follow-up tasks mentioned or implied — or empty array"],
+  "action_items": ["ONLY explicit, concrete follow-up commitments — see rules — or empty array"],
   "referral_signal": true or false,
   "referral_signal_note": "why this is a referral signal, or null",
   "transaction_intent": "buying | selling | leasing | none | unclear",
   "timeline_mentioned": "any timeline or urgency mentioned, or null"
-}`;
+}
+
+Rules for action_items (important):
+- Include an item ONLY when the note states an explicit, concrete next step that Jordan (or the contact) actually committed to — e.g. "send the Mar Vista comps", "email the disclosures Friday", "call back after the inspection".
+- Do NOT infer or invent tasks. Do NOT add generic relationship maintenance like "stay in touch", "follow up later", "keep nurturing", or "check in sometime".
+- If there is no explicit follow-up commitment in the note, return an empty array. Most routine check-ins have NO action items — an empty array is the correct, expected answer.`;
 
     const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
