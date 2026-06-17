@@ -1,3 +1,1 @@
-{
-  "$comment": "Scheduled jobs run via GitHub Actions (.github/workflows/scheduled-jobs.yml), not Vercel cron — Hobby-plan cron was unreliable. Endpoints: /api/cron/gmail-sync, /api/cron/daily-accountability."
-}
+{}
