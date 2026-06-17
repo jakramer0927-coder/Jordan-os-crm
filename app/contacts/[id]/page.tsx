@@ -547,8 +547,11 @@ export default function ContactDetailPage() {
   const [savingBuyer, setSavingBuyer] = useState(false);
   const [buyerMsg, setBuyerMsg] = useState<string | null>(null);
 
-  const lastOutbound = useMemo(() => {
-    const t = touches.find((x) => x.direction === "outbound");
+  // Recency pill reflects the most recent touch of ANY direction (touches are
+  // ordered occurred_at desc), so logging any interaction — inbound or outbound —
+  // resets the clock, matching the cadence/next_touch_due_at logic.
+  const lastTouch = useMemo(() => {
+    const t = touches[0];
     return t ? new Date(t.occurred_at) : null;
   }, [touches]);
 
@@ -1096,20 +1099,20 @@ export default function ContactDetailPage() {
   }
 
   // Relationship health helpers
-  const daysSinceOutbound = lastOutbound
-    ? Math.floor((Date.now() - lastOutbound.getTime()) / 86400000)
+  const daysSinceTouch = lastTouch
+    ? Math.floor((Date.now() - lastTouch.getTime()) / 86400000)
     : null;
-  const healthColor = daysSinceOutbound === null
+  const healthColor = daysSinceTouch === null
     ? "#8a0000"
-    : daysSinceOutbound <= 7 ? "#0b6b2a"
-    : daysSinceOutbound <= 21 ? "#92610a"
-    : daysSinceOutbound <= 45 ? "#c25a00"
+    : daysSinceTouch <= 7 ? "#0b6b2a"
+    : daysSinceTouch <= 21 ? "#92610a"
+    : daysSinceTouch <= 45 ? "#c25a00"
     : "#8a0000";
-  const healthLabel = daysSinceOutbound === null
+  const healthLabel = daysSinceTouch === null
     ? "Never reached out"
-    : daysSinceOutbound === 0 ? "Touched today"
-    : daysSinceOutbound === 1 ? "1 day ago"
-    : `${daysSinceOutbound} days ago`;
+    : daysSinceTouch === 0 ? "Touched today"
+    : daysSinceTouch === 1 ? "1 day ago"
+    : `${daysSinceTouch} days ago`;
 
   const activeDeals = deals.filter((d) => d.status !== "closed_won" && d.status !== "closed_lost");
   const closedDeals = deals.filter((d) => d.status === "closed_won" || d.status === "closed_lost");
@@ -1170,7 +1173,7 @@ export default function ContactDetailPage() {
               {/* Last touch with channel */}
               <span className="badge" style={{ color: healthColor, borderColor: `${healthColor}44`, fontWeight: 700, fontSize: 12 }}>
                 <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: healthColor, marginRight: 5, verticalAlign: "middle" }} />
-                {healthLabel}{lastOutbound && touches.find(t => t.direction === "outbound") ? ` · ${channelLabel(touches.find(t => t.direction === "outbound")!.channel)}` : ""}
+                {healthLabel}{lastTouch && touches[0] ? ` · ${channelLabel(touches[0].channel)}` : ""}
               </span>
               {/* Active deal stage chips */}
               {activeDeals.map(d => (
