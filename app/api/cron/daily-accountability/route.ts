@@ -115,8 +115,6 @@ export async function GET(req: Request) {
 
     for (const tok of tokens as any[]) {
       const uid = tok.user_id as string;
-      const userEmail = (tok.email || "") as string;
-      if (!userEmail) { results.push({ uid, skipped: "no email" }); continue; }
       if (!tok.refresh_token) { results.push({ uid, skipped: "no refresh token" }); continue; }
 
       // --- Compute stats ---
@@ -136,6 +134,16 @@ export async function GET(req: Request) {
         .limit(20000);
 
       const ownIds = new Set(((contacts ?? []) as any[]).map((c) => c.id));
+
+      // Skip accounts with no contacts (e.g. a secondary login) — nothing to report
+      if (ownIds.size === 0) { results.push({ uid, skipped: "no contacts" }); continue; }
+
+      // Recipient: stored token email, falling back to the account's auth email
+      let userEmail = (tok.email || "") as string;
+      if (!userEmail) {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(uid);
+        userEmail = (au?.user?.email || "") as string;
+      }
 
       // Yesterday's outbound touches
       const yStart = new Date(`${laYesterday}T00:00:00-07:00`).toISOString();
