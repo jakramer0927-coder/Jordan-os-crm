@@ -30,7 +30,7 @@ export async function GET() {
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
 
     // Attach active deal count, milestones, closed deal dates, referral GCI, reply rates, and tx scores in parallel
-    const [dealRows, milestoneRows, closedDealRows, referralRows, replyRateRows, txScoreRows] = await Promise.all([
+    const [dealRows, milestoneRows, closedDealRows, referralRows, replyRateRows, txScoreRows, referralScoreRows] = await Promise.all([
       contactIds.length > 0
         ? supabaseAdmin.from("deals").select("contact_id").eq("user_id", uid)
             .not("status", "in", '("closed_won","closed_lost")').in("contact_id", contactIds)
@@ -61,6 +61,11 @@ export async function GET() {
       contactIds.length > 0
         ? supabaseAdmin.from("contacts")
             .select("id, transaction_score")
+            .in("id", contactIds)
+        : Promise.resolve({ data: [] }),
+      contactIds.length > 0
+        ? supabaseAdmin.from("v_referral_score")
+            .select("id, score_b, f_prior_giver, f_profession, f_centrality, f_warmth, f_reciprocity")
             .in("id", contactIds)
         : Promise.resolve({ data: [] }),
     ]);
@@ -131,74 +136,33 @@ export async function GET() {
       };
     });
 
-    // ── Referral potential scoring ────────────────────────────────────────────
-    // Build a profile from contacts who have already sent referrals, then score
-    // every unactivated contact by similarity. Requires ≥3 known sources to be
-    // meaningful — below that threshold we skip to avoid misleading signals.
-    const sources = contactsWithDeals.filter((c: any) => (c.referral_gci ?? 0) > 0);
-
-    let contactsWithPotential = contactsWithDeals;
-
-    if (sources.length >= 3) {
-      // Compute profile
-      const catCounts: Record<string, number> = {};
-      const tierCounts: Record<string, number> = {};
-      let linkedinCount = 0;
-      let totalReplyRate = 0;
-      let replyRateN = 0;
-
-      for (const s of sources) {
-        const cat = (s.category || "other").toLowerCase();
-        catCounts[cat] = (catCounts[cat] ?? 0) + 1;
-        const tier = (s.tier || "none").toUpperCase();
-        tierCounts[tier] = (tierCounts[tier] ?? 0) + 1;
-        if (s.linkedin_connected_at) linkedinCount++;
-        const best = Math.max(s.gmail_reply_rate ?? 0, s.text_reply_rate ?? 0);
-        if (best > 0) { totalReplyRate += best; replyRateN++; }
-      }
-
-      const n = sources.length;
-      const catWeights: Record<string, number> = Object.fromEntries(
-        Object.entries(catCounts).map(([k, v]) => [k, (v as number) / n])
-      );
-      const tierWeights: Record<string, number> = Object.fromEntries(
-        Object.entries(tierCounts).map(([k, v]) => [k, (v as number) / n])
-      );
-      const linkedinRate = linkedinCount / n;
-      const avgReplyRate = replyRateN > 0 ? totalReplyRate / replyRateN : 0;
-
-      contactsWithPotential = contactsWithDeals.map((c: any) => {
-        // Already a referral source — no need to score
-        if ((c.referral_gci ?? 0) > 0) return { ...c, referral_potential: 0 };
-
-        let score = 0;
-        const cat = (c.category || "other").toLowerCase();
-        const tier = (c.tier || "none").toUpperCase();
-        const bestReplyRate = Math.max(c.gmail_reply_rate ?? 0, c.text_reply_rate ?? 0);
-
-        // Category match (0–30): strongest predictor
-        score += Math.round((catWeights[cat] ?? 0) * 30);
-
-        // Tier match (0–20)
-        score += Math.round((tierWeights[tier] ?? 0) * 20);
-
-        // LinkedIn match (0–10): if most sources are LinkedIn connections
-        if (c.linkedin_connected_at && linkedinRate >= 0.3) score += 10;
-
-        // Reply engagement (0–15)
-        if (bestReplyRate >= avgReplyRate && bestReplyRate > 0) score += 15;
-        else if (bestReplyRate > 0) score += 7;
-
-        // Tier A/B absolute bonus — high-value relationships are better bets
-        if (tier === "A") score += 10;
-        else if (tier === "B") score += 5;
-
-        return { ...c, referral_potential: Math.min(100, score) };
-      });
-    } else {
-      // Not enough source data — set 0 for all
-      contactsWithPotential = contactsWithDeals.map((c: any) => ({ ...c, referral_potential: 0 }));
+    // ── Referral propensity (Score B) ─────────────────────────────────────────
+    // Sourced from the validated v_referral_score scorecard (prior-giver +
+    // profession + connector centrality + warmth + reciprocity), replacing the
+    // earlier in-route similarity heuristic. referral_score_history holds the
+    // weekly snapshot used by the forward backtest.
+    const FACTOR_LABELS: [string, string][] = [
+      ["f_prior_giver", "prior referrer"],
+      ["f_profession", "high-yield profession"],
+      ["f_warmth", "recent contact"],
+      ["f_centrality", "connector"],
+      ["f_reciprocity", "you delivered value"],
+    ];
+    const referralMap: Record<string, { score: number; factors: string }> = {};
+    for (const row of (referralScoreRows as any).data ?? []) {
+      const top = FACTOR_LABELS
+        .map(([k, label]) => ({ label, v: (row as any)[k] ?? 0 }))
+        .filter((f) => f.v > 0)
+        .sort((a, b) => b.v - a.v)
+        .slice(0, 2)
+        .map((f) => f.label);
+      referralMap[row.id] = { score: row.score_b ?? 0, factors: top.join(" + ") };
     }
+    const contactsWithPotential = contactsWithDeals.map((c: any) => ({
+      ...c,
+      referral_potential: referralMap[c.id]?.score ?? 0,
+      referral_factors: referralMap[c.id]?.factors ?? "",
+    }));
 
     return NextResponse.json({
       contacts: contactsWithPotential,
