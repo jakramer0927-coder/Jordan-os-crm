@@ -17,7 +17,8 @@ export async function POST(req: Request) {
   if (source_id === target_id)
     return NextResponse.json({ error: "source and target must be different" }, { status: 400 });
 
-  // Verify both contacts belong to this user
+  // Verify both contacts belong to this user (gives clean 404s before the merge).
+  // The RPC re-checks ownership inside the transaction as a safety net.
   const { data: contacts, error: cErr } = await supabaseAdmin
     .from("contacts")
     .select("id, display_name")
@@ -34,28 +35,26 @@ export async function POST(req: Request) {
   if (!target)
     return NextResponse.json({ error: "Target contact not found" }, { status: 404 });
 
-  // Move all touches from source → target
-  const { data: movedTouches, error: tErr } = await supabaseAdmin
-    .from("touches")
-    .update({ contact_id: target_id })
-    .eq("contact_id", source_id)
-    .select("id");
-  const touchesMoved = movedTouches?.length ?? 0;
+  // Re-point every table that references the source contact onto the target,
+  // copy over missing scalar fields, and archive the source — all in one
+  // transaction so a partial failure cannot orphan data under the archived record.
+  const { data: result, error: mErr } = await supabaseAdmin.rpc("merge_contacts", {
+    p_source: source_id,
+    p_target: target_id,
+    p_uid: uid,
+  });
 
-  if (tErr) return NextResponse.json({ error: `Touch reassign failed: ${tErr.message}` }, { status: 500 });
+  if (mErr) return NextResponse.json({ error: `Merge failed: ${mErr.message}` }, { status: 500 });
 
-  // Archive source contact
-  const { error: aErr } = await supabaseAdmin
-    .from("contacts")
-    .update({ archived: true })
-    .eq("id", source_id);
-
-  if (aErr) return NextResponse.json({ error: `Archive failed: ${aErr.message}` }, { status: 500 });
+  const moved = (result?.moved ?? {}) as Record<string, number>;
 
   return NextResponse.json({
     ok: true,
-    touchesMoved: touchesMoved ?? 0,
-    sourceName: source.display_name,
-    targetName: target.display_name,
+    sourceName: result?.source_name ?? source.display_name,
+    targetName: result?.target_name ?? target.display_name,
+    // Per-table row counts that were re-pointed from source → target.
+    moved,
+    // Back-compat with the previous response shape.
+    touchesMoved: moved["touches.contact_id"] ?? 0,
   });
 }
