@@ -6,14 +6,24 @@
 // ANTHROPIC_MODEL, JORDAN_OS_USER_ID.
 
 import { createClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-for (const line of readFileSync(join(root, ".env.local"), "utf8").split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+// Local runs read .env.local; CI (GitHub Actions) supplies env vars directly.
+const envFile = join(dirname(fileURLToPath(import.meta.url)), "..", ".env.local");
+if (existsSync(envFile)) {
+  for (const line of readFileSync(envFile, "utf8").split("\n")) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+}
+
+for (const required of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ANTHROPIC_API_KEY", "JORDAN_OS_USER_ID"]) {
+  if (!process.env[required]) {
+    console.error(`Missing required env var: ${required}`);
+    process.exit(1);
+  }
 }
 
 const DRY = process.argv.includes("--dry-run");

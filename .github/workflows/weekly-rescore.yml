@@ -1,0 +1,40 @@
+name: Dex weekly rescore
+
+# Keeps transaction scores + AI relationship context fresh across the whole
+# book. Runs scripts/batch_score.mjs, which is idempotent: it only touches
+# contacts whose score/context is older than 14 days, so a weekly run
+# re-scores each contact roughly every 2 weeks as new interactions accrue.
+#
+# Runs on the Actions runner (no serverless timeout) — a full-book pass takes
+# ~20-30 min at concurrency 2.
+#
+# Required repo secrets (GitHub → Settings → Secrets and variables → Actions):
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY, JORDAN_OS_USER_ID
+# All four values are in the local .env.local.
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Mondays 12:00 UTC (~5am PT), done before the morning session
+  workflow_dispatch: {}
+
+jobs:
+  rescore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Batch rescore + context refresh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JORDAN_OS_USER_ID: ${{ secrets.JORDAN_OS_USER_ID }}
+        run: node scripts/batch_score.mjs
