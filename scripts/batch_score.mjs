@@ -269,6 +269,15 @@ const { data: contacts, error } = await supabase
   .eq("archived", false);
 if (error) throw new Error(error.message);
 
+if (contacts.length === 0) {
+  console.error(
+    `No active contacts found for JORDAN_OS_USER_ID=${uid}. ` +
+    `This almost always means the user id is wrong (it must be the auth user id that owns the contacts). ` +
+    `Failing instead of reporting a misleading success.`
+  );
+  process.exit(1);
+}
+
 const toExtract = contacts
   .filter((c) => !c.ai_context_updated_at || c.ai_context_updated_at < staleCutoff)
   .slice(0, LIMIT);
