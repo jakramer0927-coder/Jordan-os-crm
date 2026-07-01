@@ -239,6 +239,7 @@ Return:
 
 async function runPool(items, worker, label) {
   let done = 0, ok = 0, skipped = 0, failed = 0;
+  let firstError = null;
   const queue = [...items];
   async function next() {
     const item = queue.shift();
@@ -252,12 +253,14 @@ async function runPool(items, worker, label) {
     } catch (e) {
       failed++;
       done++;
+      if (!firstError) firstError = e.message;
       console.error(`  [${label}] FAIL ${item.display_name}: ${e.message}`);
     }
     await next();
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, next));
   console.log(`[${label}] done: ${ok} ok, ${skipped} skipped, ${failed} failed`);
+  return { ok, skipped, failed, firstError };
 }
 
 const staleCutoff = new Date(Date.now() - STALE_DAYS * 86400000).toISOString();
@@ -287,11 +290,23 @@ const toScore = contacts
 
 console.log(`Active contacts: ${contacts.length} | extract: ${toExtract.length} | score: ${toScore.length} | model: ${MODEL}${DRY ? " | DRY RUN" : ""}`);
 
-await runPool(toExtract, extractContext, "extract");
-await runPool(toScore, scoreContact, "score");
+const extractRes = await runPool(toExtract, extractContext, "extract");
+const scoreRes = await runPool(toScore, scoreContact, "score");
 
 const { data: after } = await supabase
   .from("contacts")
   .select("transaction_score")
   .eq("user_id", uid).eq("archived", false).not("transaction_score", "is", null);
 console.log(`Contacts with score after run: ${after?.length ?? "?"}/${contacts.length}`);
+
+// A run where every attempted item failed is a config problem (usually a bad
+// ANTHROPIC_API_KEY) — exit red instead of reporting a hollow success.
+const attempted = extractRes.ok + extractRes.failed + scoreRes.ok + scoreRes.failed;
+const succeeded = extractRes.ok + scoreRes.ok;
+if (attempted > 0 && succeeded === 0) {
+  console.error(
+    `Every attempted item failed (${attempted} attempts, 0 successes). ` +
+    `First error: ${extractRes.firstError ?? scoreRes.firstError ?? "unknown"}`
+  );
+  process.exit(1);
+}
